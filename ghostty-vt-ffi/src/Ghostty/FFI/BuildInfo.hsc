@@ -25,13 +25,15 @@ import Ghostty.FFI.Types (GhosttyResult (..))
 newtype GhosttyBuildInfo = GhosttyBuildInfo CInt
   deriving stock (Eq, Show)
 
--- | @GHOSTTY_BUILD_INFO_VERSION_STRING@: the Ghostty application version, e.g.
--- @1.4.1-dev+c7f68a7f@. Out type: @GhosttyString *@.
+-- | @GHOSTTY_BUILD_INFO_VERSION_STRING@: the library's version, e.g.
+-- @0.1.0-dev+\<commit\>@ as scripts/build-libghostty.sh stamps it. Out type:
+-- @GhosttyString *@.
 pattern GhosttyBuildInfoVersionString :: GhosttyBuildInfo
 pattern GhosttyBuildInfoVersionString = GhosttyBuildInfo (#const GHOSTTY_BUILD_INFO_VERSION_STRING)
 
--- | @GHOSTTY_BUILD_INFO_VERSION_BUILD@: the build metadata, a commit hash.
--- Out type: @GhosttyString *@.
+-- | @GHOSTTY_BUILD_INFO_VERSION_BUILD@: the version's build metadata, empty
+-- unless the build was given one; the pinned commit, as built here. Out type:
+-- @GhosttyString *@.
 pattern GhosttyBuildInfoVersionBuild :: GhosttyBuildInfo
 pattern GhosttyBuildInfoVersionBuild = GhosttyBuildInfo (#const GHOSTTY_BUILD_INFO_VERSION_BUILD)
 

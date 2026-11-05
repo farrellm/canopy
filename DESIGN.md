@@ -339,8 +339,8 @@ Distribution packages do not exist yet, so:
 - **`scripts/build-libghostty.sh`** fetches that commit and builds into `_deps/ghostty/<commit>/`,
   printing the `PKG_CONFIG_PATH` to export. A `cabal.project.local` is never required.
 - **The package declares `pkgconfig-depends: libghostty-vt >=0.1 && <0.2`.** The pinned commit's
-  `libghostty-vt.pc` reports `Version: 0.1.0-dev` (`build.zig`'s `lib_version`), which that range
-  admits; cabal resolves the constraint against the pkg-config database, so a missing or wrong library
+  `libghostty-vt.pc` reports `Version: 0.1.0-dev+<commit>` (`build.zig`'s `lib_version`, stamped
+  with the commit, §3.4), which that range admits; cabal resolves the constraint against the pkg-config database, so a missing or wrong library
   fails at *configure* time, not link time and never at run time. (Checked with cabal 3.16.1.0: a
   range below the installed version is rejected at planning, and the wildcard form `==0.1.*` is *not*
   accepted in `pkgconfig-depends` — it is a parse error.)
@@ -406,9 +406,12 @@ from different places — the headers the binding was compiled against, and the 
 linked — so the test catches a header/library mismatch (a stale `_deps`, a distro `.so` at a
 different commit) that would otherwise be silent memory corruption. It also checks that
 `ghostty_build_info` reports the pinned build, and that every enum value the binding names exists.
-Note that build info reports the *Ghostty application* version (`GHOSTTY_BUILD_INFO_VERSION_STRING`,
-e.g. `1.4.1-dev+<commit>`), not the library's `0.1.0-dev`; the check compares its build metadata
-(`VERSION_BUILD`) with `GHOSTTY_COMMIT`, which is the precise identity anyway.
+Build info reports the *library's* version (`build.zig`'s `lib_version`, `0.1.0-dev`), and its
+build metadata (`VERSION_BUILD`) is empty unless the build is given one. So `build-libghostty.sh`
+stamps the pin in: it builds with `-Dlib-version-string=<lib_version>+<commit>`, and the check
+requires `VERSION_BUILD` to equal `GHOSTTY_COMMIT` exactly, which is the precise identity anyway.
+(Checked by M0's CI at the pinned commit; an earlier reading had expected the application version,
+`1.4.1-dev+<commit>`.)
 
 At startup, `ghostty-effectful` performs the same version check once and refuses to run against a different
 library (§4.7); this is the one runtime check of the C boundary, and it runs before any handle exists.
@@ -1763,7 +1766,7 @@ reading the pinned sources. A ✗ changed the design, in the section named.
 | `SeqUnlift` refuses cross-thread use, so `Ghostty` cannot leak to another thread | ½: `SeqUnlift` does refuse (✓, exact error message observed), but effectful's `forkIO` clones the environment, so a fork inherits the effect; added the effect-row split and an owner-thread check | §4.6 |
 | `vt_write_until` can stop at each OSC 133 mark | ✓ `BOUNDARY_OSC_END`; the pre-scan fallback is gone | §4.5 |
 | `pkgconfig-depends: libghostty-vt ==0.1.*` | ✗ the wildcard does not parse there; `>=0.1 && <0.2` does and admits `0.1.0-dev`; static linking is a separate `libghostty-vt-static` package | §3.1 |
-| `ghostty_build_info` reports the library version | ✗ it reports the Ghostty app version (`1.4.1-dev+…`); the check uses build metadata vs the pinned commit | §3.4 |
+| `ghostty_build_info` identifies the pinned build | ✗ it reports the library's `0.1.0-dev` with empty build metadata (M0's CI, at the pin; first read as the app version `1.4.1-dev+…`); the build script stamps the commit in with `-Dlib-version-string`, and the check compares build metadata with the pin | §3.4 |
 | `text-rope` keeps UTF-16 metrics | ✓ `Data.Text.Mixed.Rope` | §5.3 |
 | `unicode-data` provides grapheme-break and width data | ✗ neither, in 0.9.0, and nothing else on Hackage does without ICU; tendril generates its own tables | §5.3 |
 

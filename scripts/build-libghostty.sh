@@ -86,9 +86,20 @@ export ZIG_GLOBAL_CACHE_DIR=$root/_deps/zig-cache
 # same URLs succeeded. Run the build outside such a sandbox. (Don't prefetch
 # with `zig fetch` to work around it: in Zig 0.17.1 its cache entries made the
 # build report hash mismatches for every package.)
-echo "build-libghostty: building libghostty-vt" >&2
+# Stamp the pin into the library (DESIGN.md §3.4). libghostty-vt's build info
+# reports its own version (build.zig's lib_version, e.g. 0.1.0-dev) with no
+# build metadata unless one is given, so the commit goes in as semver build
+# metadata through -Dlib-version-string. The .pc file's Version carries it too.
+lib_version=$(sed -nE 's/^const lib_version = "([^"+]+)(\+[^"]*)?";$/\1/p' "$src/build.zig")
+[[ -n $lib_version ]] || {
+  echo "build-libghostty: no lib_version in build.zig; has the build changed?" >&2
+  exit 1
+}
+
+echo "build-libghostty: building libghostty-vt $lib_version+$commit" >&2
 for attempt in 1 2 3 4 5; do
-  if (cd "$src" && "$zig" build -Demit-lib-vt -Doptimize=ReleaseFast --prefix "$prefix") >&2; then
+  if (cd "$src" && "$zig" build -Demit-lib-vt -Doptimize=ReleaseFast \
+    -Dlib-version-string="$lib_version+$commit" --prefix "$prefix") >&2; then
     break
   elif ((attempt == 5)); then
     echo "build-libghostty: zig build failed $attempt times" >&2
