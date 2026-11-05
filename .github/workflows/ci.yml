@@ -25,9 +25,8 @@ env:
   GHC_VERSION: "9.12.4"
   CABAL_VERSION: "3.16.1.0"
   DOCTEST_VERSION: "0.25.0"
-  # CI runs the property tests with a fixed seed and prints it on failure
-  # (§11.1); a nightly job will run random seeds at a larger count.
-  QUICKCHECK_SEED: "20261105"
+  # The fixed QuickCheck seed (§11.1) arrives with the first property test:
+  # tasty rejects --quickcheck-replay in a suite without tasty-quickcheck.
   # The same flags on every cabal command, so no step reconfigures the build.
   CABAL_FLAGS: --enable-tests --enable-benchmarks --ghc-options=-Werror
 
@@ -96,7 +95,6 @@ jobs:
       - name: Test
         run: >-
           cabal test $CABAL_FLAGS --test-show-details=direct
-          --test-options="--quickcheck-replay=$QUICKCHECK_SEED"
           ghostty-vt-ffi-test ghostty-effectful-test tendril-test
           tree-sitter-ffi-test tree-sitter-effectful-test canopy-test
 
