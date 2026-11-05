@@ -1,0 +1,67 @@
+cabal-version:      3.14
+name:               ghostty-effectful
+version:            0.1.0.0
+synopsis:           A safe effectful interface to libghostty-vt
+description:
+  Scoped handles, typed keys, and events instead of callbacks over
+  ghostty-vt-ffi (DESIGN.md §4).
+
+license:            BSD-3-Clause
+license-file:       LICENSE
+author:             Matthew Farrell
+maintainer:         farrellm@alum.mit.edu
+category:           Terminal
+build-type:         Simple
+tested-with:        GHC ==9.12.4
+
+-- DESIGN.md §2.4. CI adds -Werror from the command line. The two common stanzas
+-- are copied into every package; scripts/check-common-stanzas.sh keeps them equal.
+common warnings
+  ghc-options:
+    -Wall -Wcompat -Widentities -Wincomplete-record-updates
+    -Wincomplete-uni-patterns -Wmissing-export-lists -Wpartial-fields
+    -Wredundant-constraints -Wmissing-deriving-strategies -Wunused-type-patterns
+
+common extensions
+  default-extensions:
+    OverloadedRecordDot
+    OverloadedStrings
+    OverloadedLabels
+
+library
+  import:           warnings, extensions
+  exposed-modules:  Ghostty.Effectful
+  hs-source-dirs:   src
+  build-depends:
+    , base ^>=4.21.2.0
+    , bytestring ^>=0.12
+    , canopy-prelude
+    , effectful-core ^>=2.7.1
+    , ghostty-vt-ffi
+
+  mixins:
+    base hiding (Prelude),
+    canopy-prelude (Canopy.Prelude as Prelude)
+
+  default-language: GHC2024
+
+test-suite ghostty-effectful-test
+  import:           warnings, extensions
+  type:             exitcode-stdio-1.0
+  hs-source-dirs:   test
+  main-is:          Main.hs
+  other-modules:    Test.Ghostty.Effectful
+  build-depends:
+    , base ^>=4.21.2.0
+    , canopy-prelude
+    , effectful-core ^>=2.7.1
+    , ghostty-effectful
+    , tasty ^>=1.5
+    , tasty-hunit ^>=0.10.2
+    , text ^>=2.1
+
+  mixins:
+    base hiding (Prelude),
+    canopy-prelude (Canopy.Prelude as Prelude)
+
+  default-language: GHC2024

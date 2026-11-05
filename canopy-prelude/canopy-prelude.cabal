@@ -1,0 +1,39 @@
+cabal-version:      3.14
+name:               canopy-prelude
+version:            0.1.0.0
+synopsis:           The prelude every canopy package builds against
+description:
+  relude minus the names that collide with effectful (DESIGN.md §2.3).
+
+license:            BSD-3-Clause
+license-file:       LICENSE
+author:             Matthew Farrell
+maintainer:         farrellm@alum.mit.edu
+category:           Prelude
+build-type:         Simple
+tested-with:        GHC ==9.12.4
+
+-- DESIGN.md §2.4. CI adds -Werror from the command line. The two common stanzas
+-- are copied into every package; scripts/check-common-stanzas.sh keeps them equal.
+common warnings
+  ghc-options:
+    -Wall -Wcompat -Widentities -Wincomplete-record-updates
+    -Wincomplete-uni-patterns -Wmissing-export-lists -Wpartial-fields
+    -Wredundant-constraints -Wmissing-deriving-strategies -Wunused-type-patterns
+
+common extensions
+  default-extensions:
+    OverloadedRecordDot
+    OverloadedStrings
+    OverloadedLabels
+
+-- DESIGN.md §2.3: relude minus the names that collide with effectful.
+library
+  import:           warnings, extensions
+  exposed-modules:  Canopy.Prelude
+  build-depends:    relude ^>=1.2.2
+  mixins:
+    relude (Relude as Prelude),
+    relude
+
+  default-language: GHC2024

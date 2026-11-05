@@ -1,0 +1,150 @@
+# DESIGN.md §2.8. One GHC, because base ^>=4.21.2.0 admits only 9.12 (D10).
+# Steps 1–7 are M0's exit condition. Step 8, the benchmark gate (§12.3),
+# arrives with the first benchmark; the nightly canopy-e2e job (§11.5) with M3.
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# An explicit bash runs with -o pipefail, so a failing `cabal haddock` fails
+# its step even though check-haddock.py at the end of the pipe exits 0.
+defaults:
+  run:
+    shell: bash
+
+env:
+  GHC_VERSION: "9.12.4"
+  CABAL_VERSION: "3.16.1.0"
+  DOCTEST_VERSION: "0.25.0"
+  # CI runs the property tests with a fixed seed and prints it on failure
+  # (§11.1); a nightly job will run random seeds at a larger count.
+  QUICKCHECK_SEED: "20261105"
+  # The same flags on every cabal command, so no step reconfigures the build.
+  CABAL_FLAGS: --enable-tests --enable-benchmarks --ghc-options=-Werror
+
+jobs:
+  build:
+    name: Build, test, doctest, haddock
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 1: libghostty-vt at the pinned commit (§3.1), cached by commit. The
+      # script fetches its own pinned Zig.
+      - name: Read the libghostty pin
+        run: echo "GHOSTTY_COMMIT=$(tr -d '[:space:]' < ghostty-vt-ffi/GHOSTTY_COMMIT)" >> "$GITHUB_ENV"
+
+      - name: Restore libghostty-vt
+        uses: actions/cache@v4
+        with:
+          path: _deps/ghostty/${{ env.GHOSTTY_COMMIT }}
+          key: libghostty-vt-${{ runner.os }}-${{ env.GHOSTTY_COMMIT }}-${{ hashFiles('scripts/build-libghostty.sh') }}
+
+      - name: Build libghostty-vt
+        run: |
+          eval "$(scripts/build-libghostty.sh)"
+          echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" >> "$GITHUB_ENV"
+
+      - uses: haskell-actions/setup@v2
+        id: setup
+        with:
+          ghc-version: ${{ env.GHC_VERSION }}
+          cabal-version: ${{ env.CABAL_VERSION }}
+          cabal-update: true
+
+      - name: Resolve the build plan
+        run: cabal build all $CABAL_FLAGS --dry-run
+
+      - name: Restore the cabal store
+        uses: actions/cache/restore@v4
+        id: cache
+        with:
+          path: ${{ steps.setup.outputs.cabal-store }}
+          key: ${{ runner.os }}-ghc-${{ env.GHC_VERSION }}-doctest-${{ env.DOCTEST_VERSION }}-${{ hashFiles('dist-newstyle/cache/plan.json') }}
+          restore-keys: ${{ runner.os }}-ghc-${{ env.GHC_VERSION }}-doctest-${{ env.DOCTEST_VERSION }}-
+
+      - name: Build dependencies
+        run: cabal build all $CABAL_FLAGS --only-dependencies
+
+      - name: Install doctest
+        run: |
+          cabal install doctest-$DOCTEST_VERSION --overwrite-policy=always --installdir="$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Save the cabal store
+        uses: actions/cache/save@v4
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          path: ${{ steps.setup.outputs.cabal-store }}
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+
+      # 2
+      - name: Build, with -Werror
+        run: cabal build all $CABAL_FLAGS
+
+      # 3
+      - name: Test
+        run: >-
+          cabal test $CABAL_FLAGS --test-show-details=direct
+          --test-options="--quickcheck-replay=$QUICKCHECK_SEED"
+          ghostty-vt-ffi-test ghostty-effectful-test tendril-test
+          tree-sitter-ffi-test tree-sitter-effectful-test canopy-test
+
+      - name: The committed tree-sitter shims are current (§5A.2)
+        run: python3 scripts/gen-ts-shims.py --check
+
+      # 4
+      - name: Doctest
+        run: |
+          for lib in tendril ghostty-effectful tree-sitter-effectful; do
+            cabal repl $CABAL_FLAGS --with-repl=doctest --repl-options=-Wno-missing-export-lists "lib:$lib"
+          done
+
+      # 7
+      - name: Haddock, with a coverage floor
+        run: cabal haddock all $CABAL_FLAGS --haddock-quickjump 2>&1 | python3 scripts/check-haddock.py
+
+  lint:
+    name: Lint and format
+    runs-on: ubuntu-latest
+    env:
+      HLINT_VERSION: "3.10"
+      ORMOLU_VERSION: "0.8.0.2"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install hlint and ormolu
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -sSfL "https://github.com/ndmitchell/hlint/releases/download/v$HLINT_VERSION/hlint-$HLINT_VERSION-x86_64-linux.tar.gz" \
+            | tar -xz -C "$RUNNER_TEMP"
+          # hlint finds its data/ directory beside the binary, so it stays where it unpacked.
+          echo "$RUNNER_TEMP/hlint-$HLINT_VERSION" >> "$GITHUB_PATH"
+          curl -sSfL -o "$RUNNER_TEMP/ormolu.zip" "https://github.com/tweag/ormolu/releases/download/$ORMOLU_VERSION/ormolu-x86_64-linux.zip"
+          unzip -o -q "$RUNNER_TEMP/ormolu.zip" -d "$HOME/.local/bin"
+          chmod +x "$HOME/.local/bin/ormolu"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # 5
+      - name: hlint
+        run: hlint --ignore-glob='lint/fixtures/**' .
+
+      - name: Layering fixtures (§2.6)
+        run: lint/check-layering.sh
+
+      - name: Common stanzas agree across packages (§2.4)
+        run: scripts/check-common-stanzas.sh
+
+      # 6: ormolu reads default-extensions from the cabal file; never --no-cabal (§2.5)
+      - name: ormolu
+        run: ormolu --mode check $(git ls-files '*.hs')

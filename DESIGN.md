@@ -804,8 +804,9 @@ library ships a single-file amalgamation, `lib/src/lib.c`. So it is **vendored**
 tree-sitter's API passes small structs **by value**: `TSNode` (a 32-byte struct holding a context
 array, an id and a tree pointer), `TSPoint`, `TSRange`, `TSTreeCursor`, `TSParseOptions` and others,
 both as arguments and as results — `TSNode ts_node_child(TSNode self, uint32_t child_index)`.
-GHC's FFI cannot pass or return a struct by value. Every such function (46 of them in v0.27.1's
-`api.h`) gets a C shim that takes pointers instead:
+GHC's FFI cannot pass or return a struct by value. Every such function (56 of them in v0.27.1's
+`api.h`, counting every by-value `TSNode`, `TSPoint`, `TSRange`, `TSTreeCursor`, `TSInput`,
+`TSParseOptions` and `TSLogger`) gets a C shim that takes pointers instead:
 
 ```c
 void tsffi_node_child(const TSNode *self, uint32_t child_index, TSNode *out) {
@@ -816,7 +817,7 @@ void tsffi_node_child(const TSNode *self, uint32_t child_index, TSNode *out) {
 - **The shims are generated**, by `scripts/gen-ts-shims.py` from the vendored `api.h`, into
   `cbits/tsffi_shims.c` and `include/tsffi_shims.h`, and committed. CI runs the generator in
   `--check` mode (§2.8 step 3), so a bump that changes a prototype cannot leave a stale shim. Hand-
-  writing 46 near-identical wrappers is how one of them ends up dereferencing the wrong argument.
+  writing 56 near-identical wrappers is how one of them ends up dereferencing the wrong argument.
   (`hs-tree-sitter-capi` solves the same problem with `hsc2hs` `#{def}` blocks written by hand.)
 - **Every import is `capi`**, against `api.h` for the functions that take only scalars and pointers
   and against `tsffi_shims.h` for the rest, so the C compiler checks each Haskell signature against a
@@ -1752,7 +1753,7 @@ reading the pinned sources. A ✗ changed the design, in the section named.
 | relude and optics coexist under the mixins prelude | ✓ no ambiguity | §2.3 |
 | `hs-tree-sitter` has incremental edit, byte-range query cursors, and loads current grammars | ✗ the API is there, but it is ABI 14 only and current grammars are ABI 15; own packages | §5A, §5B, D3 |
 | tree-sitter node reads never write the tree, so persistent trees can have pure, shareable reads | ✓ by source, v0.27.1: `node.c` writes only stack iterators; subtree ref counts are atomic; only `ts_tree_edit` and `ts_tree_delete` write. To be backed by §5B.7's concurrency test | §5B.2 |
-| GHC can call tree-sitter directly | ✗ 46 functions in `api.h` pass structs by value; generated pointer shims | §5A.2 |
+| GHC can call tree-sitter directly | ✗ 56 functions in `api.h` pass structs by value; generated pointer shims | §5A.2 |
 | `posix_spawn` + `POSIX_SPAWN_SETSID` + open slave by path gives a controlling terminal | ✓ glibc, run; musl ≥ 1.1.17, by source only | §6.2 |
 | Packet mode reports the child's termios changes | ✗ only with `EXTPROC`, which breaks echo, cooked reads and `^C`; poll `tcgetattr` on the master instead (✓ works) | §6.2 |
 | `PYTHON_BASIC_REPL=1` gives a cooked python child | ✗ the basic REPL still runs GNU readline, raw; a `code.interact` bootstrap with readline blocked is cooked (✓) | §7.2 |

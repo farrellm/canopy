@@ -1,0 +1,104 @@
+cabal-version:      3.14
+name:               canopy
+version:            0.1.0.0
+synopsis:           A language-agnostic REPL frontend for the terminal
+description:
+  Runs an existing REPL behind a pseudo-terminal and puts a modern editing
+  and display layer over it: tree-sitter for syntax, LSP for semantics,
+  libghostty-vt as the child's terminal (DESIGN.md).
+
+license:            BSD-3-Clause
+license-file:       LICENSE
+author:             Matthew Farrell
+maintainer:         farrellm@alum.mit.edu
+category:           Development
+build-type:         Simple
+tested-with:        GHC ==9.12.4
+
+-- DESIGN.md §2.4. CI adds -Werror from the command line. The two common stanzas
+-- are copied into every package; scripts/check-common-stanzas.sh keeps them equal.
+common warnings
+  ghc-options:
+    -Wall -Wcompat -Widentities -Wincomplete-record-updates
+    -Wincomplete-uni-patterns -Wmissing-export-lists -Wpartial-fields
+    -Wredundant-constraints -Wmissing-deriving-strategies -Wunused-type-patterns
+
+common extensions
+  default-extensions:
+    OverloadedRecordDot
+    OverloadedStrings
+    OverloadedLabels
+
+library
+  import:           warnings, extensions
+  exposed-modules:  Canopy
+  other-modules:    Paths_canopy
+  autogen-modules:  Paths_canopy
+  hs-source-dirs:   src
+  build-depends:
+    , base ^>=4.21.2.0
+    , canopy-prelude
+    , effectful-core ^>=2.7.1
+    , ghostty-effectful
+    , tendril
+    , tree-sitter-effectful
+    , text ^>=2.1
+
+  mixins:
+    base hiding (Prelude),
+    canopy-prelude (Canopy.Prelude as Prelude)
+
+  default-language: GHC2024
+
+executable canopy
+  import:           warnings, extensions
+  main-is:          Main.hs
+  hs-source-dirs:   app
+  build-depends:
+    , base ^>=4.21.2.0
+    , canopy
+    , canopy-prelude
+    , effectful-core ^>=2.7.1
+
+  mixins:
+    base hiding (Prelude),
+    canopy-prelude (Canopy.Prelude as Prelude)
+
+  default-language: GHC2024
+
+test-suite canopy-test
+  import:           warnings, extensions
+  type:             exitcode-stdio-1.0
+  hs-source-dirs:   test
+  main-is:          Main.hs
+  other-modules:    Test.Canopy
+  build-depends:
+    , base ^>=4.21.2.0
+    , canopy
+    , canopy-prelude
+    , effectful-core ^>=2.7.1
+    , tasty ^>=1.5
+    , tasty-hunit ^>=0.10.2
+
+  mixins:
+    base hiding (Prelude),
+    canopy-prelude (Canopy.Prelude as Prelude)
+
+  default-language: GHC2024
+
+-- §11.5: nightly, against real REPLs and language servers. Empty until M3.
+test-suite canopy-e2e
+  import:           warnings, extensions
+  type:             exitcode-stdio-1.0
+  hs-source-dirs:   e2e
+  main-is:          Main.hs
+  build-depends:
+    , base ^>=4.21.2.0
+    , canopy-prelude
+    , tasty ^>=1.5
+
+  mixins:
+    base hiding (Prelude),
+    canopy-prelude (Canopy.Prelude as Prelude)
+
+  default-language: GHC2024
