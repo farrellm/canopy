@@ -10,7 +10,8 @@ Written as changes land, not at release (DESIGN.md §2.9).
   `canopy-prelude`, `ghostty-vt-ffi`, `ghostty-effectful`, `tendril`, `tree-sitter-ffi`,
   `tree-sitter-effectful` and `canopy`.
 - libghostty-vt pinned at `c7f68a7f`. `scripts/build-libghostty.sh` builds it, and fetches a pinned
-  Zig 0.17.1 when none is installed. The library is found through pkg-config at configure time.
+  Zig 0.17.1 when none is installed. Its Zig dependencies are fetched with curl
+  (`scripts/prefetch-zig-deps.py`), because Zig 0.17.1's fetcher fails on some machines. The library is found through pkg-config at configure time.
   `ghostty-vt-ffi-test` checks that the linked build is the pinned one.
 - The tree-sitter runtime is vendored at v0.27.1 (`scripts/vendor-tree-sitter.sh`).
   `scripts/gen-ts-shims.py` generates its 56 by-value shims, and CI checks them with `--check`.

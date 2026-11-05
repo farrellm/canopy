@@ -337,7 +337,13 @@ Distribution packages do not exist yet, so:
 - **The commit is pinned** in `ghostty-vt-ffi/GHOSTTY_COMMIT`. Upgrading is one deliberate commit that
   changes the pin, regenerates the layout baseline (§3.4) and says why.
 - **`scripts/build-libghostty.sh`** fetches that commit and builds into `_deps/ghostty/<commit>/`,
-  printing the `PKG_CONFIG_PATH` to export. A `cabal.project.local` is never required.
+  printing the `PKG_CONFIG_PATH` to export. A `cabal.project.local` is never required. Zig's own
+  package fetcher is not used: in Zig 0.17.1 it fails inside `zig build` with
+  `TlsInitializationFailed` against `deps.files.ghostty.org` on some machines, every time, while curl
+  succeeds. `scripts/prefetch-zig-deps.py` fills Zig's cache from ghostty's `build.zig.zon.json`
+  with curl, in the layout `zig build` writes, and `zig build` still checks every hash. (A `zig fetch`
+  entry is no substitute: it keeps the archive's top-level directory, so the build reports a hash
+  mismatch.)
 - **The package declares `pkgconfig-depends: libghostty-vt >=0.1 && <0.2`.** The pinned commit's
   `libghostty-vt.pc` reports `Version: 0.1.0-dev+<commit>` (`build.zig`'s `lib_version`, stamped
   with the commit, §3.4), which that range admits; cabal resolves the constraint against the pkg-config database, so a missing or wrong library

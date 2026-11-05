@@ -46,7 +46,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: _deps/ghostty/${{ env.GHOSTTY_COMMIT }}
-          key: libghostty-vt-${{ runner.os }}-${{ env.GHOSTTY_COMMIT }}-${{ hashFiles('scripts/build-libghostty.sh') }}
+          key: libghostty-vt-${{ runner.os }}-${{ env.GHOSTTY_COMMIT }}-${{ hashFiles('scripts/build-libghostty.sh', 'scripts/prefetch-zig-deps.py') }}
 
       - name: Build libghostty-vt
         run: |
