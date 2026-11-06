@@ -30,12 +30,20 @@ common extensions
 
 library
   import:           warnings, extensions
-  exposed-modules:  Ghostty.Effectful
+  exposed-modules:
+    Ghostty.Effectful
+    Ghostty.Effectful.Error
+    Ghostty.Effectful.Internal.Effect
+    Ghostty.Effectful.Internal.Error
+    Ghostty.Effectful.Internal.Terminal
+    Ghostty.Effectful.Terminal
+
   hs-source-dirs:   src
   build-depends:
     , base ^>=4.21.2.0
     , canopy-prelude
     , effectful-core ^>=2.7.1
+    , effectful-th ^>=1.0.0.4
     , ghostty-vt-ffi
 
   mixins:
@@ -49,7 +57,10 @@ test-suite ghostty-effectful-test
   type:             exitcode-stdio-1.0
   hs-source-dirs:   test
   main-is:          Main.hs
-  other-modules:    Test.Ghostty.Effectful
+  other-modules:
+    Test.Ghostty.Effectful
+    Test.Ghostty.Effectful.Terminal
+
   build-depends:
     , base ^>=4.21.2.0
     , canopy-prelude

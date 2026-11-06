@@ -28,6 +28,9 @@ in place. Each directive is alone on its line, as `{{kind args}}`:
     {{shim F}}             in the C shim header: a static inline pointer shim
                            for function F, which takes or returns a struct by
                            value (DESIGN.md §3.3)
+    {{pin}}                ghosttyPinnedCommit, GHOSTTY_COMMIT as a constant,
+                           which ghostty-effectful's version check compares
+                           with the linked library's (DESIGN.md §4.7)
 
     {{xenum H T}}, {{xstruct H T}}, {{xfn wrapper|dynamic H T}}, {{xmodes}},
     {{xdefines H T P}}
@@ -206,8 +209,9 @@ def paren(t: str) -> str:
 
 
 class Gen:
-    def __init__(self, headers: Headers):
+    def __init__(self, headers: Headers, commit: str):
         self.h = headers
+        self.commit = commit
         self.rows = []
 
     def parse_enum(self, header, name):
@@ -540,6 +544,14 @@ class Gen:
             return self.defines(*rest)[1]
         if kind == "shim":
             return self.shim(rest[0])
+        if kind == "pin":
+            return [
+                "-- | @GHOSTTY_COMMIT@, the libghostty-vt commit this binding was generated",
+                "-- against. The linked library's @VERSION_BUILD@ must be exactly this",
+                "-- (DESIGN.md §3.4, §4.7).",
+                "ghosttyPinnedCommit :: ByteString",
+                f'ghosttyPinnedCommit = "{self.commit}"',
+            ]
         if kind == "enumrows":
             rows = ",\n".join(self.rows)
             return ["  [ " + rows.removeprefix("    ") + "\n  ]"]
@@ -568,7 +580,7 @@ def main() -> int:
     parser.add_argument("--include", type=Path, help="the libghostty-vt include directory")
     args = parser.parse_args()
     commit = (PKG / "GHOSTTY_COMMIT").read_text().strip()
-    gen = Gen(Headers(args.include or Path("_deps/ghostty") / commit / "include"))
+    gen = Gen(Headers(args.include or Path("_deps/ghostty") / commit / "include"), commit)
 
     # Sources first, so that {{enumrows}} in the test sees every enum.
     templates = sorted(GEN.rglob("*.in"), key=lambda p: (p.parts[2] == "test", p.as_posix()))

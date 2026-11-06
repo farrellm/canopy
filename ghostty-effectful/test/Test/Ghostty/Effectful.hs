@@ -10,7 +10,7 @@ import Test.Tasty.HUnit (assertBool, testCase)
 tests :: TestTree
 tests =
   testGroup
-    "ghostty-effectful"
+    "build"
     [ testCase "the library reports its build" $ do
         b <- runEff buildMetadata
         assertBool (show b) (maybe False (not . T.null) b)
