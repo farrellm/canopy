@@ -1,17 +1,35 @@
 {-# LANGUAGE CApiFFI #-}
 {-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE ViewPatterns #-}
 
--- | @include/ghostty/vt/size_report.h@, the part the terminal's size callback
--- needs: the geometry it reports. The size-report encoder arrives with M1.3.
+-- | @include/ghostty/vt/size_report.h@: encoding a terminal's size, as an
+-- in-band size report (mode 2048) or an XTWINOPS reply (@CSI 14 t@, @16@,
+-- @18@, @19@). The terminal's size callback reports the same geometry.
 module Ghostty.FFI.SizeReport
   ( -- * Sizes
     {{xstruct size_report.h GhosttySizeReportSize}}
+
+    -- * Reports
+    {{xenum size_report.h GhosttySizeReportStyle}}
+    ghosttySizeReportEncode,
   )
 where
 
+import Foreign.C.Types (CChar, CInt (..), CSize (..))
+import Foreign.Ptr (Ptr)
 import Foreign.Storable (Storable (..))
-import Ghostty.FFI.Layout (CField (..), CStruct (..))
+import Ghostty.FFI.Layout (CEnum (..), CField (..), CStruct (..), unnamed)
+import Ghostty.FFI.Types (GhosttyResult (..))
 
 #include <gvtffi_shims.h>
 
 {{struct size_report.h GhosttySizeReportSize}}
+{{enum size_report.h GhosttySizeReportStyle}}
+-- | @ghostty_size_report_encode@: encode a size report in a style into a
+-- buffer. A null buffer, or one too small, returns @GHOSTTY_OUT_OF_SPACE@
+-- with the size needed. The C function takes the size by value, so this
+-- calls a pointer shim (@gvtffi_shims.h@, §3.3). @unsafe@: it does not call
+-- back into Haskell.
+foreign import capi unsafe "gvtffi_shims.h gvtffi_size_report_encode"
+  ghosttySizeReportEncode :: GhosttySizeReportStyle -> Ptr GhosttySizeReportSize -> Ptr CChar -> CSize -> Ptr CSize -> IO GhosttyResult

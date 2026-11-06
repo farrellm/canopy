@@ -4,23 +4,118 @@
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE ViewPatterns #-}
 
--- | @include/ghostty/vt/osc.h@, the part the terminal's callbacks need: how an
--- OSC sequence ended. The OSC parser itself arrives with M1.3.
+-- | @include/ghostty/vt/osc.h@: a standalone OSC parser, fed the bytes between
+-- @ESC ]@ and the terminator one at a time, and the command it produces.
+--
+-- A command, and any data read from it, is borrowed from its parser and
+-- valid until the parser's next call (other than reading the command's type
+-- and data).
+--
+-- Every call here is @unsafe@: none calls back into Haskell, and
+-- 'ghosttyOscNext' runs once per byte.
 module Ghostty.FFI.Osc
-  ( -- * Terminators
+  ( -- * Handles
+    GhosttyOscParser (..),
+    GhosttyOscParserImpl,
+    GhosttyOscCommand (..),
+    GhosttyOscCommandImpl,
+
+    -- * Terminators
     GhosttyOscTerminator (..),
     pattern GhosttyOscTerminatorSt,
     pattern GhosttyOscTerminatorBel,
     pattern GhosttyOscTerminatorUnknown,
     ghosttyOscTerminatorEnum,
+
+    -- * Parsers
+    GhosttyOscOption (..),
+    pattern GhosttyOscOptUnknownMaxBytes,
+    pattern GhosttyOscOptionUnknown,
+    ghosttyOscOptionEnum,
+    ghosttyOscNew,
+    ghosttyOscFree,
+    ghosttyOscReset,
+    ghosttyOscSet,
+    ghosttyOscNext,
+    ghosttyOscEnd,
+
+    -- * Commands
+    GhosttyOscCommandType (..),
+    pattern GhosttyOscCommandInvalid,
+    pattern GhosttyOscCommandChangeWindowTitle,
+    pattern GhosttyOscCommandChangeWindowIcon,
+    pattern GhosttyOscCommandSemanticPrompt,
+    pattern GhosttyOscCommandClipboardContents,
+    pattern GhosttyOscCommandReportPwd,
+    pattern GhosttyOscCommandMouseShape,
+    pattern GhosttyOscCommandColorOperation,
+    pattern GhosttyOscCommandKittyColorProtocol,
+    pattern GhosttyOscCommandShowDesktopNotification,
+    pattern GhosttyOscCommandHyperlinkStart,
+    pattern GhosttyOscCommandHyperlinkEnd,
+    pattern GhosttyOscCommandConemuSleep,
+    pattern GhosttyOscCommandConemuShowMessageBox,
+    pattern GhosttyOscCommandConemuChangeTabTitle,
+    pattern GhosttyOscCommandConemuProgressReport,
+    pattern GhosttyOscCommandConemuWaitInput,
+    pattern GhosttyOscCommandConemuGuimacro,
+    pattern GhosttyOscCommandConemuRunProcess,
+    pattern GhosttyOscCommandConemuOutputEnvironmentVariable,
+    pattern GhosttyOscCommandConemuXtermEmulation,
+    pattern GhosttyOscCommandConemuComment,
+    pattern GhosttyOscCommandKittyTextSizing,
+    pattern GhosttyOscCommandKittyClipboardProtocol,
+    pattern GhosttyOscCommandKittyDndProtocol,
+    pattern GhosttyOscCommandHierarchicalContext,
+    pattern GhosttyOscCommandKittyDesktopNotification,
+    pattern GhosttyOscCommandUnknown,
+    pattern GhosttyOscCommandProgramStatus,
+    pattern GhosttyOscCommandTypeUnknown,
+    ghosttyOscCommandTypeEnum,
+    GhosttyOscCommandData (..),
+    pattern GhosttyOscDataInvalid,
+    pattern GhosttyOscDataChangeWindowTitleStr,
+    pattern GhosttyOscDataUnknownContent,
+    pattern GhosttyOscDataUnknownTruncated,
+    pattern GhosttyOscDataUnknownTerminator,
+    pattern GhosttyOscCommandDataUnknown,
+    ghosttyOscCommandDataEnum,
+    ghosttyOscCommandType,
+    ghosttyOscCommandData,
   )
 where
 
-import Foreign.C.Types (CInt (..))
+import Foreign.C.Types (CBool (..), CInt (..))
+import Foreign.Ptr (Ptr)
 import Foreign.Storable (Storable (..))
+import Ghostty.FFI.Allocator (GhosttyAllocator)
 import Ghostty.FFI.Layout (CEnum (..), unnamed)
+import Ghostty.FFI.Types (GhosttyResult (..))
 
 #include <gvtffi_shims.h>
+
+-- * Handles
+
+-- | The C side of a 'GhosttyOscParser'. Never dereferenced.
+data GhosttyOscParserImpl
+
+-- | @GhosttyOscParser@: an OSC parser, from 'ghosttyOscNew' and released by
+-- 'ghosttyOscFree'.
+newtype GhosttyOscParser = GhosttyOscParser (Ptr GhosttyOscParserImpl)
+  deriving stock (Eq, Show)
+  deriving newtype (Storable)
+
+-- | The C side of a 'GhosttyOscCommand'. Never dereferenced.
+data GhosttyOscCommandImpl
+
+-- | @GhosttyOscCommand@: a parsed command, from 'ghosttyOscEnd', borrowed from
+-- its parser; null when the sequence was not a valid command or was
+-- cancelled.
+newtype GhosttyOscCommand = GhosttyOscCommand (Ptr GhosttyOscCommandImpl)
+  deriving stock (Eq, Show)
+  deriving newtype (Storable)
+
+-- * Terminators
 
 -- | @GhosttyOscTerminator@: How an OSC sequence was ended.
 newtype GhosttyOscTerminator = GhosttyOscTerminator CInt
@@ -60,3 +155,350 @@ ghosttyOscTerminatorEnum =
         ]
     }
 
+-- * Parsers
+
+-- | @GhosttyOscOption@: OSC parser options, set with ghostty\_osc\_set().
+newtype GhosttyOscOption = GhosttyOscOption CInt
+  deriving stock (Eq, Show)
+  deriving newtype (Storable)
+
+-- | @GHOSTTY_OSC_OPT_UNKNOWN_MAX_BYTES@: The most bytes to keep from each OSC sequence whose number the parser does not implement.
+--
+-- Input type: @size_t*@.
+pattern GhosttyOscOptUnknownMaxBytes :: GhosttyOscOption
+pattern GhosttyOscOptUnknownMaxBytes = GhosttyOscOption (#const GHOSTTY_OSC_OPT_UNKNOWN_MAX_BYTES)
+
+-- | Any value this binding does not name: a newer library's.
+pattern GhosttyOscOptionUnknown :: CInt -> GhosttyOscOption
+pattern GhosttyOscOptionUnknown n <- GhosttyOscOption (unnamed ghosttyOscOptionEnum -> Just n)
+  where
+    GhosttyOscOptionUnknown n = GhosttyOscOption n
+
+{-# COMPLETE
+  GhosttyOscOptUnknownMaxBytes,
+  GhosttyOscOptionUnknown
+  #-}
+
+-- | Every value of @GhosttyOscOption@, for the layout test (§3.4). It is also what
+-- 'GhosttyOscOptionUnknown' excludes.
+ghosttyOscOptionEnum :: CEnum
+ghosttyOscOptionEnum =
+  CEnum
+    { name = "GhosttyOscOption",
+      size = (#size GhosttyOscOption),
+      values =
+        [ ("GHOSTTY_OSC_OPT_UNKNOWN_MAX_BYTES", (#const GHOSTTY_OSC_OPT_UNKNOWN_MAX_BYTES))
+        ]
+    }
+
+-- | @ghostty_osc_new@: a parser, with the allocator (null for the default).
+-- @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_osc_new"
+  ghosttyOscNew :: Ptr GhosttyAllocator -> Ptr GhosttyOscParser -> IO GhosttyResult
+
+-- | @ghostty_osc_free@ (null is a no-op). @unsafe@: it does not call back into
+-- Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_osc_free"
+  ghosttyOscFree :: GhosttyOscParser -> IO ()
+
+-- | @ghostty_osc_reset@: forget a partly parsed sequence, before the next one.
+-- Options stay set. @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_osc_reset"
+  ghosttyOscReset :: GhosttyOscParser -> IO ()
+
+-- | @ghostty_osc_set@: set an option, the value's type depending on the option
+-- ('GhosttyOscOption' says which); null restores the default.
+-- @GHOSTTY_INVALID_VALUE@ for a null parser. @unsafe@: it does not call back
+-- into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_osc_set"
+  ghosttyOscSet :: GhosttyOscParser -> GhosttyOscOption -> Ptr () -> IO GhosttyResult
+
+-- | @ghostty_osc_next@: feed the next byte of a sequence. @unsafe@: it does
+-- not call back into Haskell, and runs once per byte.
+foreign import capi unsafe "ghostty/vt.h ghostty_osc_next"
+  ghosttyOscNext :: GhosttyOscParser -> Word8 -> IO ()
+
+-- | @ghostty_osc_end@: end the sequence with the byte that ended it (BEL
+-- @0x07@, the @0x5C@ of ST, or CAN @0x18@ / SUB @0x1A@ to cancel it) and get
+-- its command, null if it is not a valid one or was cancelled. A reply ends
+-- the way the request did. @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_osc_end"
+  ghosttyOscEnd :: GhosttyOscParser -> Word8 -> IO GhosttyOscCommand
+
+-- * Commands
+
+-- | @GhosttyOscCommandType@: OSC command types.
+newtype GhosttyOscCommandType = GhosttyOscCommandType CInt
+  deriving stock (Eq, Show)
+  deriving newtype (Storable)
+
+-- | @GHOSTTY_OSC_COMMAND_INVALID@.
+pattern GhosttyOscCommandInvalid :: GhosttyOscCommandType
+pattern GhosttyOscCommandInvalid = GhosttyOscCommandType (#const GHOSTTY_OSC_COMMAND_INVALID)
+
+-- | @GHOSTTY_OSC_COMMAND_CHANGE_WINDOW_TITLE@.
+pattern GhosttyOscCommandChangeWindowTitle :: GhosttyOscCommandType
+pattern GhosttyOscCommandChangeWindowTitle = GhosttyOscCommandType (#const GHOSTTY_OSC_COMMAND_CHANGE_WINDOW_TITLE)
+
+-- | @GHOSTTY_OSC_COMMAND_CHANGE_WINDOW_ICON@.
+pattern GhosttyOscCommandChangeWindowIcon :: GhosttyOscCommandType
+pattern GhosttyOscCommandChangeWindowIcon = GhosttyOscCommandType (#const GHOSTTY_OSC_COMMAND_CHANGE_WINDOW_ICON)
+
+-- | @GHOSTTY_OSC_COMMAND_SEMANTIC_PROMPT@.
+pattern GhosttyOscCommandSemanticPrompt :: GhosttyOscCommandType
+pattern GhosttyOscCommandSemanticPrompt = GhosttyOscCommandType (#const GHOSTTY_OSC_COMMAND_SEMANTIC_PROMPT)
+
+-- | @GHOSTTY_OSC_COMMAND_CLIPBOARD_CONTENTS@.
+pattern GhosttyOscCommandClipboardContents :: GhosttyOscCommandType
+pattern GhosttyOscCommandClipboardContents = GhosttyOscCommandType (#const GHOSTTY_OSC_COMMAND_CLIPBOARD_CONTENTS)
+
+-- | @GHOSTTY_OSC_COMMAND_REPORT_PWD@.
+pattern GhosttyOscCommandReportPwd :: GhosttyOscCommandType
+pattern GhosttyOscCommandReportPwd = GhosttyOscCommandType (#const GHOSTTY_OSC_COMMAND_REPORT_PWD)
+
+-- | @GHOSTTY_OSC_COMMAND_MOUSE_SHAPE@.
+pattern GhosttyOscCommandMouseShape :: GhosttyOscCommandType
+pattern GhosttyOscCommandMouseShape = GhosttyOscCommandType (#const GHOSTTY_OSC_COMMAND_MOUSE_SHAPE)
+
+-- | @GHOSTTY_OSC_COMMAND_COLOR_OPERATION@.
+pattern GhosttyOscCommandColorOperation :: GhosttyOscCommandType
+pattern GhosttyOscCommandColorOperation = GhosttyOscCommandType (#const GHOSTTY_OSC_COMMAND_COLOR_OPERATION)
+
+-- | @GHOSTTY_OSC_COMMAND_KITTY_COLOR_PROTOCOL@.
+pattern GhosttyOscCommandKittyColorProtocol :: GhosttyOscCommandType
+pattern GhosttyOscCommandKittyColorProtocol = GhosttyOscCommandType (#const GHOSTTY_OSC_COMMAND_KITTY_COLOR_PROTOCOL)
+
+-- | @GHOSTTY_OSC_COMMAND_SHOW_DESKTOP_NOTIFICATION@.
+pattern GhosttyOscCommandShowDesktopNotification :: GhosttyOscCommandType
+pattern GhosttyOscCommandShowDesktopNotification = GhosttyOscCommandType (#const GHOSTTY_OSC_COMMAND_SHOW_DESKTOP_NOTIFICATION)
+
+-- | @GHOSTTY_OSC_COMMAND_HYPERLINK_START@.
+pattern GhosttyOscCommandHyperlinkStart :: GhosttyOscCommandType
+pattern GhosttyOscCommandHyperlinkStart = GhosttyOscCommandType (#const GHOSTTY_OSC_COMMAND_HYPERLINK_START)
+
+-- | @GHOSTTY_OSC_COMMAND_HYPERLINK_END@.
+pattern GhosttyOscCommandHyperlinkEnd :: GhosttyOscCommandType
+pattern GhosttyOscCommandHyperlinkEnd = GhosttyOscCommandType (#const GHOSTTY_OSC_COMMAND_HYPERLINK_END)
+
+-- | @GHOSTTY_OSC_COMMAND_CONEMU_SLEEP@.
+pattern GhosttyOscCommandConemuSleep :: GhosttyOscCommandType
+pattern GhosttyOscCommandConemuSleep = GhosttyOscCommandType (#const GHOSTTY_OSC_COMMAND_CONEMU_SLEEP)
+
+-- | @GHOSTTY_OSC_COMMAND_CONEMU_SHOW_MESSAGE_BOX@.
+pattern GhosttyOscCommandConemuShowMessageBox :: GhosttyOscCommandType
+pattern GhosttyOscCommandConemuShowMessageBox = GhosttyOscCommandType (#const GHOSTTY_OSC_COMMAND_CONEMU_SHOW_MESSAGE_BOX)
+
+-- | @GHOSTTY_OSC_COMMAND_CONEMU_CHANGE_TAB_TITLE@.
+pattern GhosttyOscCommandConemuChangeTabTitle :: GhosttyOscCommandType
+pattern GhosttyOscCommandConemuChangeTabTitle = GhosttyOscCommandType (#const GHOSTTY_OSC_COMMAND_CONEMU_CHANGE_TAB_TITLE)
+
+-- | @GHOSTTY_OSC_COMMAND_CONEMU_PROGRESS_REPORT@.
+pattern GhosttyOscCommandConemuProgressReport :: GhosttyOscCommandType
+pattern GhosttyOscCommandConemuProgressReport = GhosttyOscCommandType (#const GHOSTTY_OSC_COMMAND_CONEMU_PROGRESS_REPORT)
+
+-- | @GHOSTTY_OSC_COMMAND_CONEMU_WAIT_INPUT@.
+pattern GhosttyOscCommandConemuWaitInput :: GhosttyOscCommandType
+pattern GhosttyOscCommandConemuWaitInput = GhosttyOscCommandType (#const GHOSTTY_OSC_COMMAND_CONEMU_WAIT_INPUT)
+
+-- | @GHOSTTY_OSC_COMMAND_CONEMU_GUIMACRO@.
+pattern GhosttyOscCommandConemuGuimacro :: GhosttyOscCommandType
+pattern GhosttyOscCommandConemuGuimacro = GhosttyOscCommandType (#const GHOSTTY_OSC_COMMAND_CONEMU_GUIMACRO)
+
+-- | @GHOSTTY_OSC_COMMAND_CONEMU_RUN_PROCESS@.
+pattern GhosttyOscCommandConemuRunProcess :: GhosttyOscCommandType
+pattern GhosttyOscCommandConemuRunProcess = GhosttyOscCommandType (#const GHOSTTY_OSC_COMMAND_CONEMU_RUN_PROCESS)
+
+-- | @GHOSTTY_OSC_COMMAND_CONEMU_OUTPUT_ENVIRONMENT_VARIABLE@.
+pattern GhosttyOscCommandConemuOutputEnvironmentVariable :: GhosttyOscCommandType
+pattern GhosttyOscCommandConemuOutputEnvironmentVariable = GhosttyOscCommandType (#const GHOSTTY_OSC_COMMAND_CONEMU_OUTPUT_ENVIRONMENT_VARIABLE)
+
+-- | @GHOSTTY_OSC_COMMAND_CONEMU_XTERM_EMULATION@.
+pattern GhosttyOscCommandConemuXtermEmulation :: GhosttyOscCommandType
+pattern GhosttyOscCommandConemuXtermEmulation = GhosttyOscCommandType (#const GHOSTTY_OSC_COMMAND_CONEMU_XTERM_EMULATION)
+
+-- | @GHOSTTY_OSC_COMMAND_CONEMU_COMMENT@.
+pattern GhosttyOscCommandConemuComment :: GhosttyOscCommandType
+pattern GhosttyOscCommandConemuComment = GhosttyOscCommandType (#const GHOSTTY_OSC_COMMAND_CONEMU_COMMENT)
+
+-- | @GHOSTTY_OSC_COMMAND_KITTY_TEXT_SIZING@.
+pattern GhosttyOscCommandKittyTextSizing :: GhosttyOscCommandType
+pattern GhosttyOscCommandKittyTextSizing = GhosttyOscCommandType (#const GHOSTTY_OSC_COMMAND_KITTY_TEXT_SIZING)
+
+-- | @GHOSTTY_OSC_COMMAND_KITTY_CLIPBOARD_PROTOCOL@.
+pattern GhosttyOscCommandKittyClipboardProtocol :: GhosttyOscCommandType
+pattern GhosttyOscCommandKittyClipboardProtocol = GhosttyOscCommandType (#const GHOSTTY_OSC_COMMAND_KITTY_CLIPBOARD_PROTOCOL)
+
+-- | @GHOSTTY_OSC_COMMAND_KITTY_DND_PROTOCOL@.
+pattern GhosttyOscCommandKittyDndProtocol :: GhosttyOscCommandType
+pattern GhosttyOscCommandKittyDndProtocol = GhosttyOscCommandType (#const GHOSTTY_OSC_COMMAND_KITTY_DND_PROTOCOL)
+
+-- | @GHOSTTY_OSC_COMMAND_HIERARCHICAL_CONTEXT@.
+pattern GhosttyOscCommandHierarchicalContext :: GhosttyOscCommandType
+pattern GhosttyOscCommandHierarchicalContext = GhosttyOscCommandType (#const GHOSTTY_OSC_COMMAND_HIERARCHICAL_CONTEXT)
+
+-- | @GHOSTTY_OSC_COMMAND_KITTY_DESKTOP_NOTIFICATION@.
+pattern GhosttyOscCommandKittyDesktopNotification :: GhosttyOscCommandType
+pattern GhosttyOscCommandKittyDesktopNotification = GhosttyOscCommandType (#const GHOSTTY_OSC_COMMAND_KITTY_DESKTOP_NOTIFICATION)
+
+-- | @GHOSTTY_OSC_COMMAND_UNKNOWN@: An OSC sequence whose number the parser does not implement. Read it with the GHOSTTY\_OSC\_DATA\_UNKNOWN\_\* data types.
+pattern GhosttyOscCommandUnknown :: GhosttyOscCommandType
+pattern GhosttyOscCommandUnknown = GhosttyOscCommandType (#const GHOSTTY_OSC_COMMAND_UNKNOWN)
+
+-- | @GHOSTTY_OSC_COMMAND_PROGRAM_STATUS@: A program status report or support query (OSC 7501), which a program sends to say what it is doing, such as working or waiting on the user.
+pattern GhosttyOscCommandProgramStatus :: GhosttyOscCommandType
+pattern GhosttyOscCommandProgramStatus = GhosttyOscCommandType (#const GHOSTTY_OSC_COMMAND_PROGRAM_STATUS)
+
+-- | Any value this binding does not name: a newer library's.
+pattern GhosttyOscCommandTypeUnknown :: CInt -> GhosttyOscCommandType
+pattern GhosttyOscCommandTypeUnknown n <- GhosttyOscCommandType (unnamed ghosttyOscCommandTypeEnum -> Just n)
+  where
+    GhosttyOscCommandTypeUnknown n = GhosttyOscCommandType n
+
+{-# COMPLETE
+  GhosttyOscCommandInvalid,
+  GhosttyOscCommandChangeWindowTitle,
+  GhosttyOscCommandChangeWindowIcon,
+  GhosttyOscCommandSemanticPrompt,
+  GhosttyOscCommandClipboardContents,
+  GhosttyOscCommandReportPwd,
+  GhosttyOscCommandMouseShape,
+  GhosttyOscCommandColorOperation,
+  GhosttyOscCommandKittyColorProtocol,
+  GhosttyOscCommandShowDesktopNotification,
+  GhosttyOscCommandHyperlinkStart,
+  GhosttyOscCommandHyperlinkEnd,
+  GhosttyOscCommandConemuSleep,
+  GhosttyOscCommandConemuShowMessageBox,
+  GhosttyOscCommandConemuChangeTabTitle,
+  GhosttyOscCommandConemuProgressReport,
+  GhosttyOscCommandConemuWaitInput,
+  GhosttyOscCommandConemuGuimacro,
+  GhosttyOscCommandConemuRunProcess,
+  GhosttyOscCommandConemuOutputEnvironmentVariable,
+  GhosttyOscCommandConemuXtermEmulation,
+  GhosttyOscCommandConemuComment,
+  GhosttyOscCommandKittyTextSizing,
+  GhosttyOscCommandKittyClipboardProtocol,
+  GhosttyOscCommandKittyDndProtocol,
+  GhosttyOscCommandHierarchicalContext,
+  GhosttyOscCommandKittyDesktopNotification,
+  GhosttyOscCommandUnknown,
+  GhosttyOscCommandProgramStatus,
+  GhosttyOscCommandTypeUnknown
+  #-}
+
+-- | Every value of @GhosttyOscCommandType@, for the layout test (§3.4). It is also what
+-- 'GhosttyOscCommandTypeUnknown' excludes.
+ghosttyOscCommandTypeEnum :: CEnum
+ghosttyOscCommandTypeEnum =
+  CEnum
+    { name = "GhosttyOscCommandType",
+      size = (#size GhosttyOscCommandType),
+      values =
+        [ ("GHOSTTY_OSC_COMMAND_INVALID", (#const GHOSTTY_OSC_COMMAND_INVALID)),
+          ("GHOSTTY_OSC_COMMAND_CHANGE_WINDOW_TITLE", (#const GHOSTTY_OSC_COMMAND_CHANGE_WINDOW_TITLE)),
+          ("GHOSTTY_OSC_COMMAND_CHANGE_WINDOW_ICON", (#const GHOSTTY_OSC_COMMAND_CHANGE_WINDOW_ICON)),
+          ("GHOSTTY_OSC_COMMAND_SEMANTIC_PROMPT", (#const GHOSTTY_OSC_COMMAND_SEMANTIC_PROMPT)),
+          ("GHOSTTY_OSC_COMMAND_CLIPBOARD_CONTENTS", (#const GHOSTTY_OSC_COMMAND_CLIPBOARD_CONTENTS)),
+          ("GHOSTTY_OSC_COMMAND_REPORT_PWD", (#const GHOSTTY_OSC_COMMAND_REPORT_PWD)),
+          ("GHOSTTY_OSC_COMMAND_MOUSE_SHAPE", (#const GHOSTTY_OSC_COMMAND_MOUSE_SHAPE)),
+          ("GHOSTTY_OSC_COMMAND_COLOR_OPERATION", (#const GHOSTTY_OSC_COMMAND_COLOR_OPERATION)),
+          ("GHOSTTY_OSC_COMMAND_KITTY_COLOR_PROTOCOL", (#const GHOSTTY_OSC_COMMAND_KITTY_COLOR_PROTOCOL)),
+          ("GHOSTTY_OSC_COMMAND_SHOW_DESKTOP_NOTIFICATION", (#const GHOSTTY_OSC_COMMAND_SHOW_DESKTOP_NOTIFICATION)),
+          ("GHOSTTY_OSC_COMMAND_HYPERLINK_START", (#const GHOSTTY_OSC_COMMAND_HYPERLINK_START)),
+          ("GHOSTTY_OSC_COMMAND_HYPERLINK_END", (#const GHOSTTY_OSC_COMMAND_HYPERLINK_END)),
+          ("GHOSTTY_OSC_COMMAND_CONEMU_SLEEP", (#const GHOSTTY_OSC_COMMAND_CONEMU_SLEEP)),
+          ("GHOSTTY_OSC_COMMAND_CONEMU_SHOW_MESSAGE_BOX", (#const GHOSTTY_OSC_COMMAND_CONEMU_SHOW_MESSAGE_BOX)),
+          ("GHOSTTY_OSC_COMMAND_CONEMU_CHANGE_TAB_TITLE", (#const GHOSTTY_OSC_COMMAND_CONEMU_CHANGE_TAB_TITLE)),
+          ("GHOSTTY_OSC_COMMAND_CONEMU_PROGRESS_REPORT", (#const GHOSTTY_OSC_COMMAND_CONEMU_PROGRESS_REPORT)),
+          ("GHOSTTY_OSC_COMMAND_CONEMU_WAIT_INPUT", (#const GHOSTTY_OSC_COMMAND_CONEMU_WAIT_INPUT)),
+          ("GHOSTTY_OSC_COMMAND_CONEMU_GUIMACRO", (#const GHOSTTY_OSC_COMMAND_CONEMU_GUIMACRO)),
+          ("GHOSTTY_OSC_COMMAND_CONEMU_RUN_PROCESS", (#const GHOSTTY_OSC_COMMAND_CONEMU_RUN_PROCESS)),
+          ("GHOSTTY_OSC_COMMAND_CONEMU_OUTPUT_ENVIRONMENT_VARIABLE", (#const GHOSTTY_OSC_COMMAND_CONEMU_OUTPUT_ENVIRONMENT_VARIABLE)),
+          ("GHOSTTY_OSC_COMMAND_CONEMU_XTERM_EMULATION", (#const GHOSTTY_OSC_COMMAND_CONEMU_XTERM_EMULATION)),
+          ("GHOSTTY_OSC_COMMAND_CONEMU_COMMENT", (#const GHOSTTY_OSC_COMMAND_CONEMU_COMMENT)),
+          ("GHOSTTY_OSC_COMMAND_KITTY_TEXT_SIZING", (#const GHOSTTY_OSC_COMMAND_KITTY_TEXT_SIZING)),
+          ("GHOSTTY_OSC_COMMAND_KITTY_CLIPBOARD_PROTOCOL", (#const GHOSTTY_OSC_COMMAND_KITTY_CLIPBOARD_PROTOCOL)),
+          ("GHOSTTY_OSC_COMMAND_KITTY_DND_PROTOCOL", (#const GHOSTTY_OSC_COMMAND_KITTY_DND_PROTOCOL)),
+          ("GHOSTTY_OSC_COMMAND_HIERARCHICAL_CONTEXT", (#const GHOSTTY_OSC_COMMAND_HIERARCHICAL_CONTEXT)),
+          ("GHOSTTY_OSC_COMMAND_KITTY_DESKTOP_NOTIFICATION", (#const GHOSTTY_OSC_COMMAND_KITTY_DESKTOP_NOTIFICATION)),
+          ("GHOSTTY_OSC_COMMAND_UNKNOWN", (#const GHOSTTY_OSC_COMMAND_UNKNOWN)),
+          ("GHOSTTY_OSC_COMMAND_PROGRAM_STATUS", (#const GHOSTTY_OSC_COMMAND_PROGRAM_STATUS))
+        ]
+    }
+
+-- | @GhosttyOscCommandData@: OSC command data types.
+newtype GhosttyOscCommandData = GhosttyOscCommandData CInt
+  deriving stock (Eq, Show)
+  deriving newtype (Storable)
+
+-- | @GHOSTTY_OSC_DATA_INVALID@: Invalid data type. Never results in any data extraction.
+pattern GhosttyOscDataInvalid :: GhosttyOscCommandData
+pattern GhosttyOscDataInvalid = GhosttyOscCommandData (#const GHOSTTY_OSC_DATA_INVALID)
+
+-- | @GHOSTTY_OSC_DATA_CHANGE_WINDOW_TITLE_STR@: Window title string data.
+--
+-- Output type: @const char ** (pointer to null-terminated string)@.
+pattern GhosttyOscDataChangeWindowTitleStr :: GhosttyOscCommandData
+pattern GhosttyOscDataChangeWindowTitleStr = GhosttyOscCommandData (#const GHOSTTY_OSC_DATA_CHANGE_WINDOW_TITLE_STR)
+
+-- | @GHOSTTY_OSC_DATA_UNKNOWN_CONTENT@: The raw bytes of an unknown sequence: everything that was passed to ghostty\_osc\_next(), including the number at the start. For example, the sequence @ESC ] 7400;status=busy BEL@ gives @7400;status=busy@. The bytes are not null-terminated.
+--
+-- Output type: @GhosttyString *@.
+pattern GhosttyOscDataUnknownContent :: GhosttyOscCommandData
+pattern GhosttyOscDataUnknownContent = GhosttyOscCommandData (#const GHOSTTY_OSC_DATA_UNKNOWN_CONTENT)
+
+-- | @GHOSTTY_OSC_DATA_UNKNOWN_TRUNCATED@: True if the unknown sequence was longer than GHOSTTY\_OSC\_OPT\_UNKNOWN\_MAX\_BYTES, or memory ran out while reading it. In that case the content holds only the beginning of the sequence.
+--
+-- Output type: @bool *@.
+pattern GhosttyOscDataUnknownTruncated :: GhosttyOscCommandData
+pattern GhosttyOscDataUnknownTruncated = GhosttyOscCommandData (#const GHOSTTY_OSC_DATA_UNKNOWN_TRUNCATED)
+
+-- | @GHOSTTY_OSC_DATA_UNKNOWN_TERMINATOR@: How the unknown sequence was ended, based on the terminator passed to ghostty\_osc\_end(). If you reply to the sequence, end the reply the same way.
+--
+-- Output type: @GhosttyOscTerminator *@.
+pattern GhosttyOscDataUnknownTerminator :: GhosttyOscCommandData
+pattern GhosttyOscDataUnknownTerminator = GhosttyOscCommandData (#const GHOSTTY_OSC_DATA_UNKNOWN_TERMINATOR)
+
+-- | Any value this binding does not name: a newer library's.
+pattern GhosttyOscCommandDataUnknown :: CInt -> GhosttyOscCommandData
+pattern GhosttyOscCommandDataUnknown n <- GhosttyOscCommandData (unnamed ghosttyOscCommandDataEnum -> Just n)
+  where
+    GhosttyOscCommandDataUnknown n = GhosttyOscCommandData n
+
+{-# COMPLETE
+  GhosttyOscDataInvalid,
+  GhosttyOscDataChangeWindowTitleStr,
+  GhosttyOscDataUnknownContent,
+  GhosttyOscDataUnknownTruncated,
+  GhosttyOscDataUnknownTerminator,
+  GhosttyOscCommandDataUnknown
+  #-}
+
+-- | Every value of @GhosttyOscCommandData@, for the layout test (§3.4). It is also what
+-- 'GhosttyOscCommandDataUnknown' excludes.
+ghosttyOscCommandDataEnum :: CEnum
+ghosttyOscCommandDataEnum =
+  CEnum
+    { name = "GhosttyOscCommandData",
+      size = (#size GhosttyOscCommandData),
+      values =
+        [ ("GHOSTTY_OSC_DATA_INVALID", (#const GHOSTTY_OSC_DATA_INVALID)),
+          ("GHOSTTY_OSC_DATA_CHANGE_WINDOW_TITLE_STR", (#const GHOSTTY_OSC_DATA_CHANGE_WINDOW_TITLE_STR)),
+          ("GHOSTTY_OSC_DATA_UNKNOWN_CONTENT", (#const GHOSTTY_OSC_DATA_UNKNOWN_CONTENT)),
+          ("GHOSTTY_OSC_DATA_UNKNOWN_TRUNCATED", (#const GHOSTTY_OSC_DATA_UNKNOWN_TRUNCATED)),
+          ("GHOSTTY_OSC_DATA_UNKNOWN_TERMINATOR", (#const GHOSTTY_OSC_DATA_UNKNOWN_TERMINATOR))
+        ]
+    }
+
+-- | @ghostty_osc_command_type@: what a command is; @GHOSTTY_OSC_COMMAND_INVALID@
+-- for null. @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_osc_command_type"
+  ghosttyOscCommandType :: GhosttyOscCommand -> IO GhosttyOscCommandType
+
+-- | @ghostty_osc_command_data@: read one datum of a command into the out
+-- pointer, whose type depends on the datum ('GhosttyOscCommandData' says
+-- which). False if the command has no such datum. @unsafe@: it does not call
+-- back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_osc_command_data"
+  ghosttyOscCommandData :: GhosttyOscCommand -> GhosttyOscCommandData -> Ptr () -> IO CBool

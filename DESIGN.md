@@ -420,21 +420,24 @@ from it:
   struct by pointer (and returning one through an out pointer), called through `capi` like any
   other function, so the compiler still checks both prototypes. The shims are generated from the
   header prototypes by `scripts/gen-ghostty-ffi.py`, one `{{shim}}` line each in that header's
-  template, added as each function is bound (eleven so far). M1.2 wrote its five by hand; M1.3's
-  first half more than doubled them, past the point where a hand list was the cheaper check, as
-  tree-sitter's 56 are generated (§5A.2). A function bound without its shim is a C compile error,
+  template, added as each function is bound (seventeen so far; the other two are `snapshot.h`'s,
+  M6.10's). M1.2 wrote its five by hand; M1.3's first half more than doubled them, past the point
+  where a hand list was the cheaper check, as tree-sitter's 56 are generated (§5A.2). A function bound without its shim is a C compile error,
   since `capi` checks the prototype. Two callbacks *return* a struct by value (`ENQUIRY` and
   `XTVERSION` return a `GhosttyString`), and one *receives* structs by value (`io.h`'s
   `GhosttyMimeReaderFn`, given a `GhosttyString` and a `GhosttyWriter`, which paste's MIME reader
-  uses), which a Haskell `wrapper` cannot make. Their types are bound, and a function of any of
-  them has to be written in C (§4.5).
+  uses), which a Haskell `wrapper` cannot make. Their types are bound, without a `wrapper`, and a
+  function of any of them has to be written in C (§4.5); `ghostty-vt-ffi-test`'s paste test has its
+  MIME reader in C for that reason.
 - **One module per header** (`terminal.h` → `Ghostty.FFI.Terminal`, with its callback half in
   `Ghostty.FFI.Terminal.Callbacks`). A header is bound in part where only part of it is needed yet,
   and the module says which part.
 - **The mechanical code is generated from the headers**, by `scripts/gen-ghostty-ffi.py`, and
   committed: each enum's patterns, `Unknown` view and descriptor, each plain struct's record,
   `Storable` instance and descriptor, each callback type and its `wrapper`, the named modes, the
-  by-value pointer shims, and the layout test's enum rows. The input is a template per module
+  constants a header spells as `#define`s over a scalar typedef (the `GhosttyMods` and
+  `GhosttyKittyKeyFlags` bits, the named palette colours), the by-value pointer shims, and the
+  layout test's enum rows. The input is a template per module
   (`ghostty-vt-ffi/gen/**.in`, and one for the shim header), the module as written by hand with
   directive lines where generated code goes; tagged unions, arrays, handles and imports stay
   hand-written there. Docs are the header's own. CI runs it with `--check`, so a pin
@@ -476,7 +479,11 @@ from it:
   at the next GC. `terminal_compress` can stall on a full pass, and the formatter's
   `format_buf`/`format_alloc` and selection formatting walk the whole screen including the
   scrollback. `render_state_update` stays `unsafe`: it copies the viewport, not the scrollback, and
-  is on the per-frame path.
+  is on the per-frame path. `terminal_paste` is `safe`: it pulls the data through the paste's MIME
+  reader and streams the encoding to `WRITE_PTY`. The terminal-free `paste_is_safe` and
+  `paste_encode` stay `unsafe`: they call nothing back, and each is one pass over a buffer the
+  caller hands over, not a walk of the scrollback. So do the encoders, parsers and widths, which
+  are short and, for `osc_next`, per byte.
 - **Raw types only.** `Ptr`, `FunPtr`, `CSize`, `Word8`. No `ForeignPtr`, no exceptions, no `Text`.
   Everything that makes it safe is `ghostty-effectful`'s job; this package's job is to be complete and
   exactly right. The one exception is `ghosttyStringBytes`, which copies a borrowed `GhosttyString`

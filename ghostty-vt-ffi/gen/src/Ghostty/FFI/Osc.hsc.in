@@ -3,18 +3,124 @@
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE ViewPatterns #-}
 
--- | @include/ghostty/vt/osc.h@, the part the terminal's callbacks need: how an
--- OSC sequence ended. The OSC parser itself arrives with M1.3.
+-- | @include/ghostty/vt/osc.h@: a standalone OSC parser, fed the bytes between
+-- @ESC ]@ and the terminator one at a time, and the command it produces.
+--
+-- A command, and any data read from it, is borrowed from its parser and
+-- valid until the parser's next call (other than reading the command's type
+-- and data).
+--
+-- Every call here is @unsafe@: none calls back into Haskell, and
+-- 'ghosttyOscNext' runs once per byte.
 module Ghostty.FFI.Osc
-  ( -- * Terminators
+  ( -- * Handles
+    GhosttyOscParser (..),
+    GhosttyOscParserImpl,
+    GhosttyOscCommand (..),
+    GhosttyOscCommandImpl,
+
+    -- * Terminators
     {{xenum osc.h GhosttyOscTerminator}}
+
+    -- * Parsers
+    {{xenum osc.h GhosttyOscOption}}
+    ghosttyOscNew,
+    ghosttyOscFree,
+    ghosttyOscReset,
+    ghosttyOscSet,
+    ghosttyOscNext,
+    ghosttyOscEnd,
+
+    -- * Commands
+    {{xenum osc.h GhosttyOscCommandType}}
+    {{xenum osc.h GhosttyOscCommandData}}
+    ghosttyOscCommandType,
+    ghosttyOscCommandData,
   )
 where
 
-import Foreign.C.Types (CInt (..))
+import Foreign.C.Types (CBool (..), CInt (..))
+import Foreign.Ptr (Ptr)
 import Foreign.Storable (Storable (..))
+import Ghostty.FFI.Allocator (GhosttyAllocator)
 import Ghostty.FFI.Layout (CEnum (..), unnamed)
+import Ghostty.FFI.Types (GhosttyResult (..))
 
 #include <gvtffi_shims.h>
 
+-- * Handles
+
+-- | The C side of a 'GhosttyOscParser'. Never dereferenced.
+data GhosttyOscParserImpl
+
+-- | @GhosttyOscParser@: an OSC parser, from 'ghosttyOscNew' and released by
+-- 'ghosttyOscFree'.
+newtype GhosttyOscParser = GhosttyOscParser (Ptr GhosttyOscParserImpl)
+  deriving stock (Eq, Show)
+  deriving newtype (Storable)
+
+-- | The C side of a 'GhosttyOscCommand'. Never dereferenced.
+data GhosttyOscCommandImpl
+
+-- | @GhosttyOscCommand@: a parsed command, from 'ghosttyOscEnd', borrowed from
+-- its parser; null when the sequence was not a valid command or was
+-- cancelled.
+newtype GhosttyOscCommand = GhosttyOscCommand (Ptr GhosttyOscCommandImpl)
+  deriving stock (Eq, Show)
+  deriving newtype (Storable)
+
+-- * Terminators
+
 {{enum osc.h GhosttyOscTerminator}}
+-- * Parsers
+
+{{enumT osc.h GhosttyOscOption}}
+-- | @ghostty_osc_new@: a parser, with the allocator (null for the default).
+-- @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_osc_new"
+  ghosttyOscNew :: Ptr GhosttyAllocator -> Ptr GhosttyOscParser -> IO GhosttyResult
+
+-- | @ghostty_osc_free@ (null is a no-op). @unsafe@: it does not call back into
+-- Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_osc_free"
+  ghosttyOscFree :: GhosttyOscParser -> IO ()
+
+-- | @ghostty_osc_reset@: forget a partly parsed sequence, before the next one.
+-- Options stay set. @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_osc_reset"
+  ghosttyOscReset :: GhosttyOscParser -> IO ()
+
+-- | @ghostty_osc_set@: set an option, the value's type depending on the option
+-- ('GhosttyOscOption' says which); null restores the default.
+-- @GHOSTTY_INVALID_VALUE@ for a null parser. @unsafe@: it does not call back
+-- into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_osc_set"
+  ghosttyOscSet :: GhosttyOscParser -> GhosttyOscOption -> Ptr () -> IO GhosttyResult
+
+-- | @ghostty_osc_next@: feed the next byte of a sequence. @unsafe@: it does
+-- not call back into Haskell, and runs once per byte.
+foreign import capi unsafe "ghostty/vt.h ghostty_osc_next"
+  ghosttyOscNext :: GhosttyOscParser -> Word8 -> IO ()
+
+-- | @ghostty_osc_end@: end the sequence with the byte that ended it (BEL
+-- @0x07@, the @0x5C@ of ST, or CAN @0x18@ / SUB @0x1A@ to cancel it) and get
+-- its command, null if it is not a valid one or was cancelled. A reply ends
+-- the way the request did. @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_osc_end"
+  ghosttyOscEnd :: GhosttyOscParser -> Word8 -> IO GhosttyOscCommand
+
+-- * Commands
+
+{{enum osc.h GhosttyOscCommandType}}
+{{enumT osc.h GhosttyOscCommandData}}
+-- | @ghostty_osc_command_type@: what a command is; @GHOSTTY_OSC_COMMAND_INVALID@
+-- for null. @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_osc_command_type"
+  ghosttyOscCommandType :: GhosttyOscCommand -> IO GhosttyOscCommandType
+
+-- | @ghostty_osc_command_data@: read one datum of a command into the out
+-- pointer, whose type depends on the datum ('GhosttyOscCommandData' says
+-- which). False if the command has no such datum. @unsafe@: it does not call
+-- back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_osc_command_data"
+  ghosttyOscCommandData :: GhosttyOscCommand -> GhosttyOscCommandData -> Ptr () -> IO CBool

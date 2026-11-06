@@ -1,0 +1,27 @@
+{-# LANGUAGE CApiFFI #-}
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE ViewPatterns #-}
+
+-- | @include/ghostty/vt/focus.h@: encoding focus gained and lost (@CSI I@,
+-- @CSI O@) for a program that set focus reporting (mode 1004).
+module Ghostty.FFI.Focus
+  ( -- * Focus events
+    {{xenum focus.h GhosttyFocusEvent}}
+    ghosttyFocusEncode,
+  )
+where
+
+import Foreign.C.Types (CChar, CInt (..), CSize (..))
+import Foreign.Ptr (Ptr)
+import Foreign.Storable (Storable (..))
+import Ghostty.FFI.Layout (CEnum (..), unnamed)
+import Ghostty.FFI.Types (GhosttyResult (..))
+
+#include <gvtffi_shims.h>
+
+{{enum focus.h GhosttyFocusEvent}}
+-- | @ghostty_focus_encode@: encode a focus event into a buffer. A null buffer,
+-- or one too small, returns @GHOSTTY_OUT_OF_SPACE@ with the size needed.
+-- @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_focus_encode"
+  ghosttyFocusEncode :: GhosttyFocusEvent -> Ptr CChar -> CSize -> Ptr CSize -> IO GhosttyResult

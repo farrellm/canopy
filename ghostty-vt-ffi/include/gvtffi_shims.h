@@ -122,4 +122,51 @@ static inline GhosttyResult gvtffi_terminal_selection_contains(
   return ghostty_terminal_selection_contains(terminal, selection, *point, out_contains);
 }
 
+
+/* size_report.h, mouse/event.h, sgr.h (M1.3) */
+
+/* ghostty_size_report_encode (size_report.h), taking `size` by pointer. */
+static inline GhosttyResult gvtffi_size_report_encode(
+    GhosttySizeReportStyle style,
+    const GhosttySizeReportSize *size,
+    char *buf,
+    size_t buf_len,
+    size_t *out_written) {
+  return ghostty_size_report_encode(style, *size, buf, buf_len, out_written);
+}
+
+/* ghostty_mouse_event_set_position (mouse/event.h), taking `position` by pointer. */
+static inline void gvtffi_mouse_event_set_position(
+    GhosttyMouseEvent event,
+    const GhosttyMousePosition *position) {
+  ghostty_mouse_event_set_position(event, *position);
+}
+
+/* ghostty_mouse_event_get_position (mouse/event.h), returning its GhosttyMousePosition through a pointer. */
+static inline void gvtffi_mouse_event_get_position(
+    GhosttyMouseEvent event,
+    GhosttyMousePosition *out_result) {
+  *out_result = ghostty_mouse_event_get_position(event);
+}
+
+/* ghostty_sgr_unknown_full (sgr.h), taking `unknown` by pointer. */
+static inline size_t gvtffi_sgr_unknown_full(
+    const GhosttySgrUnknown *unknown,
+    const uint16_t **ptr) {
+  return ghostty_sgr_unknown_full(*unknown, ptr);
+}
+
+/* ghostty_sgr_unknown_partial (sgr.h), taking `unknown` by pointer. */
+static inline size_t gvtffi_sgr_unknown_partial(
+    const GhosttySgrUnknown *unknown,
+    const uint16_t **ptr) {
+  return ghostty_sgr_unknown_partial(*unknown, ptr);
+}
+
+/* ghostty_sgr_attribute_tag (sgr.h), taking `attr` by pointer. */
+static inline GhosttySgrAttributeTag gvtffi_sgr_attribute_tag(
+    const GhosttySgrAttribute *attr) {
+  return ghostty_sgr_attribute_tag(*attr);
+}
+
 #endif /* GVTFFI_SHIMS_H */

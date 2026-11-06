@@ -23,16 +23,24 @@ import Foreign.Storable (Storable (..))
 import Ghostty.FFI.BuildInfo
 import Ghostty.FFI.Color
 import Ghostty.FFI.Device
+import Ghostty.FFI.Focus
 import Ghostty.FFI.Formatter
 import Ghostty.FFI.GridRef
 import Ghostty.FFI.Io
+import Ghostty.FFI.Key.Encoder
+import Ghostty.FFI.Key.Event
 import Ghostty.FFI.Layout (CEnum (..), CField (..), CStruct (..))
 import Ghostty.FFI.Modes
+import Ghostty.FFI.Mouse
+import Ghostty.FFI.Mouse.Encoder
+import Ghostty.FFI.Mouse.Event
 import Ghostty.FFI.Osc
+import Ghostty.FFI.Paste
 import Ghostty.FFI.Point
 import Ghostty.FFI.Render
 import Ghostty.FFI.Screen
 import Ghostty.FFI.Selection
+import Ghostty.FFI.Sgr
 import Ghostty.FFI.SizeReport
 import Ghostty.FFI.Style
 import Ghostty.FFI.Terminal
@@ -191,7 +199,32 @@ structs =
     StructRow ghosttyFormatterScreenExtraLayout aScreenExtra,
     StructRow ghosttyFormatterTerminalExtraLayout aTerminalExtra,
     StructRow ghosttyFormatterTerminalOptionsLayout $
-      GhosttyFormatterTerminalOptions 0x40 GhosttyFormatterFormatVt 1 1 aTerminalExtra (addr 0x0102030405)
+      GhosttyFormatterTerminalOptions 0x40 GhosttyFormatterFormatVt 1 1 aTerminalExtra (addr 0x0102030405),
+    -- color.h
+    StructRow ghosttyColorPaletteMaskLayout (GhosttyColorPaletteMask [0x0102030405, 0x0607, 0x08, 0x090a0b0c0d0e0f10]),
+    StructRow ghosttyColorX11EntryLayout (GhosttyColorX11Entry (addr 0x0102030405) aRgb),
+    -- io.h, paste.h
+    StructRow ghosttyReaderLayout (GhosttyReader (funAddr 0x0102030405) (addr 0x060708090a)),
+    StructRow ghosttyMimeReaderLayout aMimeReader,
+    StructRow ghosttyPasteLayout $
+      GhosttyPaste
+        0x38
+        GhosttyClipboardLocationPrimary
+        GhosttyPasteSourceText
+        (addr 0x0102030405)
+        3
+        aMimeReader
+        1,
+    -- mouse/event.h, mouse/encoder.h
+    StructRow ghosttyMousePositionLayout (GhosttyMousePosition 12.5 (-3.25)),
+    StructRow ghosttyMouseEncoderSizeLayout (GhosttyMouseEncoderSize 0x28 1920 1080 9 18 1 2 3 4),
+    -- sgr.h
+    StructRow ghosttySgrUnknownLayout anSgrUnknown,
+    StructRow ghosttySgrAttributeLayout (SgrAttrUnknown anSgrUnknown),
+    StructRow ghosttySgrAttributeLayout (SgrAttrUnderline GhosttySgrUnderlineCurly),
+    StructRow ghosttySgrAttributeLayout (SgrAttrDirectColorBg aRgb),
+    StructRow ghosttySgrAttributeLayout (SgrAttrFg256 0x0a),
+    StructRow ghosttySgrAttributeLayout SgrAttrStrikethrough
   ]
   where
     aRgb = GhosttyColorRgb 1 2 3
@@ -208,6 +241,8 @@ structs =
     aSelection = GhosttySelection 0x40 aGridRef anotherGridRef 1
     aScreenExtra = GhosttyFormatterScreenExtra 0x10 1 1 1 1 1 1
     aTerminalExtra = GhosttyFormatterTerminalExtra 0x28 1 1 1 1 1 1 aScreenExtra
+    aMimeReader = GhosttyMimeReader (funAddr 0x0b0c0d0e0f) (addr 0x1011121314)
+    anSgrUnknown = GhosttySgrUnknown (addr 0x0102030405) 3 (addr 0x060708090a) 2
 
 -- | A pointer sample: an address no field could hold by accident.
 addr :: Int -> Ptr a
@@ -247,10 +282,341 @@ enums =
       GhosttyColorSchemeLight -> True
       GhosttyColorSchemeDark -> True
       GhosttyColorSchemeUnknown _ -> False,
+    EnumRow ghosttyFocusEventEnum $ \n -> case GhosttyFocusEvent (fromInteger n) of
+      GhosttyFocusGained -> True
+      GhosttyFocusLost -> True
+      GhosttyFocusEventUnknown _ -> False,
+    EnumRow ghosttyOptionAsAltEnum $ \n -> case GhosttyOptionAsAlt (fromInteger n) of
+      GhosttyOptionAsAltFalse -> True
+      GhosttyOptionAsAltTrue -> True
+      GhosttyOptionAsAltLeft -> True
+      GhosttyOptionAsAltRight -> True
+      GhosttyOptionAsAltUnknown _ -> False,
+    EnumRow ghosttyKeyEncoderOptionEnum $ \n -> case GhosttyKeyEncoderOption (fromInteger n) of
+      GhosttyKeyEncoderOptCursorKeyApplication -> True
+      GhosttyKeyEncoderOptKeypadKeyApplication -> True
+      GhosttyKeyEncoderOptIgnoreKeypadWithNumlock -> True
+      GhosttyKeyEncoderOptAltEscPrefix -> True
+      GhosttyKeyEncoderOptModifyOtherKeysState2 -> True
+      GhosttyKeyEncoderOptKittyFlags -> True
+      GhosttyKeyEncoderOptMacosOptionAsAlt -> True
+      GhosttyKeyEncoderOptBackarrowKeyMode -> True
+      GhosttyKeyEncoderOptionUnknown _ -> False,
+    EnumRow ghosttyKeyActionEnum $ \n -> case GhosttyKeyAction (fromInteger n) of
+      GhosttyKeyActionRelease -> True
+      GhosttyKeyActionPress -> True
+      GhosttyKeyActionRepeat -> True
+      GhosttyKeyActionUnknown _ -> False,
+    EnumRow ghosttyKeyEnum $ \n -> case GhosttyKey (fromInteger n) of
+      GhosttyKeyUnidentified -> True
+      GhosttyKeyBackquote -> True
+      GhosttyKeyBackslash -> True
+      GhosttyKeyBracketLeft -> True
+      GhosttyKeyBracketRight -> True
+      GhosttyKeyComma -> True
+      GhosttyKeyDigit0 -> True
+      GhosttyKeyDigit1 -> True
+      GhosttyKeyDigit2 -> True
+      GhosttyKeyDigit3 -> True
+      GhosttyKeyDigit4 -> True
+      GhosttyKeyDigit5 -> True
+      GhosttyKeyDigit6 -> True
+      GhosttyKeyDigit7 -> True
+      GhosttyKeyDigit8 -> True
+      GhosttyKeyDigit9 -> True
+      GhosttyKeyEqual -> True
+      GhosttyKeyIntlBackslash -> True
+      GhosttyKeyIntlRo -> True
+      GhosttyKeyIntlYen -> True
+      GhosttyKeyA -> True
+      GhosttyKeyB -> True
+      GhosttyKeyC -> True
+      GhosttyKeyD -> True
+      GhosttyKeyE -> True
+      GhosttyKeyF -> True
+      GhosttyKeyG -> True
+      GhosttyKeyH -> True
+      GhosttyKeyI -> True
+      GhosttyKeyJ -> True
+      GhosttyKeyK -> True
+      GhosttyKeyL -> True
+      GhosttyKeyM -> True
+      GhosttyKeyN -> True
+      GhosttyKeyO -> True
+      GhosttyKeyP -> True
+      GhosttyKeyQ -> True
+      GhosttyKeyR -> True
+      GhosttyKeyS -> True
+      GhosttyKeyT -> True
+      GhosttyKeyU -> True
+      GhosttyKeyV -> True
+      GhosttyKeyW -> True
+      GhosttyKeyX -> True
+      GhosttyKeyY -> True
+      GhosttyKeyZ -> True
+      GhosttyKeyMinus -> True
+      GhosttyKeyPeriod -> True
+      GhosttyKeyQuote -> True
+      GhosttyKeySemicolon -> True
+      GhosttyKeySlash -> True
+      GhosttyKeyAltLeft -> True
+      GhosttyKeyAltRight -> True
+      GhosttyKeyBackspace -> True
+      GhosttyKeyCapsLock -> True
+      GhosttyKeyContextMenu -> True
+      GhosttyKeyControlLeft -> True
+      GhosttyKeyControlRight -> True
+      GhosttyKeyEnter -> True
+      GhosttyKeyMetaLeft -> True
+      GhosttyKeyMetaRight -> True
+      GhosttyKeyShiftLeft -> True
+      GhosttyKeyShiftRight -> True
+      GhosttyKeySpace -> True
+      GhosttyKeyTab -> True
+      GhosttyKeyConvert -> True
+      GhosttyKeyKanaMode -> True
+      GhosttyKeyNonConvert -> True
+      GhosttyKeyDelete -> True
+      GhosttyKeyEnd -> True
+      GhosttyKeyHelp -> True
+      GhosttyKeyHome -> True
+      GhosttyKeyInsert -> True
+      GhosttyKeyPageDown -> True
+      GhosttyKeyPageUp -> True
+      GhosttyKeyArrowDown -> True
+      GhosttyKeyArrowLeft -> True
+      GhosttyKeyArrowRight -> True
+      GhosttyKeyArrowUp -> True
+      GhosttyKeyNumLock -> True
+      GhosttyKeyNumpad0 -> True
+      GhosttyKeyNumpad1 -> True
+      GhosttyKeyNumpad2 -> True
+      GhosttyKeyNumpad3 -> True
+      GhosttyKeyNumpad4 -> True
+      GhosttyKeyNumpad5 -> True
+      GhosttyKeyNumpad6 -> True
+      GhosttyKeyNumpad7 -> True
+      GhosttyKeyNumpad8 -> True
+      GhosttyKeyNumpad9 -> True
+      GhosttyKeyNumpadAdd -> True
+      GhosttyKeyNumpadBackspace -> True
+      GhosttyKeyNumpadClear -> True
+      GhosttyKeyNumpadClearEntry -> True
+      GhosttyKeyNumpadComma -> True
+      GhosttyKeyNumpadDecimal -> True
+      GhosttyKeyNumpadDivide -> True
+      GhosttyKeyNumpadEnter -> True
+      GhosttyKeyNumpadEqual -> True
+      GhosttyKeyNumpadMemoryAdd -> True
+      GhosttyKeyNumpadMemoryClear -> True
+      GhosttyKeyNumpadMemoryRecall -> True
+      GhosttyKeyNumpadMemoryStore -> True
+      GhosttyKeyNumpadMemorySubtract -> True
+      GhosttyKeyNumpadMultiply -> True
+      GhosttyKeyNumpadParenLeft -> True
+      GhosttyKeyNumpadParenRight -> True
+      GhosttyKeyNumpadSubtract -> True
+      GhosttyKeyNumpadSeparator -> True
+      GhosttyKeyNumpadUp -> True
+      GhosttyKeyNumpadDown -> True
+      GhosttyKeyNumpadRight -> True
+      GhosttyKeyNumpadLeft -> True
+      GhosttyKeyNumpadBegin -> True
+      GhosttyKeyNumpadHome -> True
+      GhosttyKeyNumpadEnd -> True
+      GhosttyKeyNumpadInsert -> True
+      GhosttyKeyNumpadDelete -> True
+      GhosttyKeyNumpadPageUp -> True
+      GhosttyKeyNumpadPageDown -> True
+      GhosttyKeyEscape -> True
+      GhosttyKeyF1 -> True
+      GhosttyKeyF2 -> True
+      GhosttyKeyF3 -> True
+      GhosttyKeyF4 -> True
+      GhosttyKeyF5 -> True
+      GhosttyKeyF6 -> True
+      GhosttyKeyF7 -> True
+      GhosttyKeyF8 -> True
+      GhosttyKeyF9 -> True
+      GhosttyKeyF10 -> True
+      GhosttyKeyF11 -> True
+      GhosttyKeyF12 -> True
+      GhosttyKeyF13 -> True
+      GhosttyKeyF14 -> True
+      GhosttyKeyF15 -> True
+      GhosttyKeyF16 -> True
+      GhosttyKeyF17 -> True
+      GhosttyKeyF18 -> True
+      GhosttyKeyF19 -> True
+      GhosttyKeyF20 -> True
+      GhosttyKeyF21 -> True
+      GhosttyKeyF22 -> True
+      GhosttyKeyF23 -> True
+      GhosttyKeyF24 -> True
+      GhosttyKeyF25 -> True
+      GhosttyKeyFn -> True
+      GhosttyKeyFnLock -> True
+      GhosttyKeyPrintScreen -> True
+      GhosttyKeyScrollLock -> True
+      GhosttyKeyPause -> True
+      GhosttyKeyBrowserBack -> True
+      GhosttyKeyBrowserFavorites -> True
+      GhosttyKeyBrowserForward -> True
+      GhosttyKeyBrowserHome -> True
+      GhosttyKeyBrowserRefresh -> True
+      GhosttyKeyBrowserSearch -> True
+      GhosttyKeyBrowserStop -> True
+      GhosttyKeyEject -> True
+      GhosttyKeyLaunchApp1 -> True
+      GhosttyKeyLaunchApp2 -> True
+      GhosttyKeyLaunchMail -> True
+      GhosttyKeyMediaPlayPause -> True
+      GhosttyKeyMediaSelect -> True
+      GhosttyKeyMediaStop -> True
+      GhosttyKeyMediaTrackNext -> True
+      GhosttyKeyMediaTrackPrevious -> True
+      GhosttyKeyPower -> True
+      GhosttyKeySleep -> True
+      GhosttyKeyAudioVolumeDown -> True
+      GhosttyKeyAudioVolumeMute -> True
+      GhosttyKeyAudioVolumeUp -> True
+      GhosttyKeyWakeUp -> True
+      GhosttyKeyCopy -> True
+      GhosttyKeyCut -> True
+      GhosttyKeyPaste -> True
+      GhosttyKeyUnknown _ -> False,
+    EnumRow ghosttyModeReportStateEnum $ \n -> case GhosttyModeReportState (fromInteger n) of
+      GhosttyModeReportNotRecognized -> True
+      GhosttyModeReportSet -> True
+      GhosttyModeReportReset -> True
+      GhosttyModeReportPermanentlySet -> True
+      GhosttyModeReportPermanentlyReset -> True
+      GhosttyModeReportStateUnknown _ -> False,
+    EnumRow ghosttyMouseShapeEnum $ \n -> case GhosttyMouseShape (fromInteger n) of
+      GhosttyMouseShapeDefault -> True
+      GhosttyMouseShapeContextMenu -> True
+      GhosttyMouseShapeHelp -> True
+      GhosttyMouseShapePointer -> True
+      GhosttyMouseShapeProgress -> True
+      GhosttyMouseShapeWait -> True
+      GhosttyMouseShapeCell -> True
+      GhosttyMouseShapeCrosshair -> True
+      GhosttyMouseShapeText -> True
+      GhosttyMouseShapeVerticalText -> True
+      GhosttyMouseShapeAlias -> True
+      GhosttyMouseShapeCopy -> True
+      GhosttyMouseShapeMove -> True
+      GhosttyMouseShapeNoDrop -> True
+      GhosttyMouseShapeNotAllowed -> True
+      GhosttyMouseShapeGrab -> True
+      GhosttyMouseShapeGrabbing -> True
+      GhosttyMouseShapeAllScroll -> True
+      GhosttyMouseShapeColResize -> True
+      GhosttyMouseShapeRowResize -> True
+      GhosttyMouseShapeNResize -> True
+      GhosttyMouseShapeEResize -> True
+      GhosttyMouseShapeSResize -> True
+      GhosttyMouseShapeWResize -> True
+      GhosttyMouseShapeNeResize -> True
+      GhosttyMouseShapeNwResize -> True
+      GhosttyMouseShapeSeResize -> True
+      GhosttyMouseShapeSwResize -> True
+      GhosttyMouseShapeEwResize -> True
+      GhosttyMouseShapeNsResize -> True
+      GhosttyMouseShapeNeswResize -> True
+      GhosttyMouseShapeNwseResize -> True
+      GhosttyMouseShapeZoomIn -> True
+      GhosttyMouseShapeZoomOut -> True
+      GhosttyMouseShapeUnknown _ -> False,
+    EnumRow ghosttyMouseTrackingModeEnum $ \n -> case GhosttyMouseTrackingMode (fromInteger n) of
+      GhosttyMouseTrackingNone -> True
+      GhosttyMouseTrackingX10 -> True
+      GhosttyMouseTrackingNormal -> True
+      GhosttyMouseTrackingButton -> True
+      GhosttyMouseTrackingAny -> True
+      GhosttyMouseTrackingModeUnknown _ -> False,
+    EnumRow ghosttyMouseFormatEnum $ \n -> case GhosttyMouseFormat (fromInteger n) of
+      GhosttyMouseFormatX10 -> True
+      GhosttyMouseFormatUtf8 -> True
+      GhosttyMouseFormatSgr -> True
+      GhosttyMouseFormatUrxvt -> True
+      GhosttyMouseFormatSgrPixels -> True
+      GhosttyMouseFormatUnknown _ -> False,
+    EnumRow ghosttyMouseEncoderOptionEnum $ \n -> case GhosttyMouseEncoderOption (fromInteger n) of
+      GhosttyMouseEncoderOptEvent -> True
+      GhosttyMouseEncoderOptFormat -> True
+      GhosttyMouseEncoderOptSize -> True
+      GhosttyMouseEncoderOptAnyButtonPressed -> True
+      GhosttyMouseEncoderOptTrackLastCell -> True
+      GhosttyMouseEncoderOptionUnknown _ -> False,
+    EnumRow ghosttyMouseActionEnum $ \n -> case GhosttyMouseAction (fromInteger n) of
+      GhosttyMouseActionPress -> True
+      GhosttyMouseActionRelease -> True
+      GhosttyMouseActionMotion -> True
+      GhosttyMouseActionUnknown _ -> False,
+    EnumRow ghosttyMouseButtonEnum $ \n -> case GhosttyMouseButton (fromInteger n) of
+      GhosttyMouseButtonUnknownValue -> True
+      GhosttyMouseButtonLeft -> True
+      GhosttyMouseButtonRight -> True
+      GhosttyMouseButtonMiddle -> True
+      GhosttyMouseButtonFour -> True
+      GhosttyMouseButtonFive -> True
+      GhosttyMouseButtonSix -> True
+      GhosttyMouseButtonSeven -> True
+      GhosttyMouseButtonEight -> True
+      GhosttyMouseButtonNine -> True
+      GhosttyMouseButtonTen -> True
+      GhosttyMouseButtonEleven -> True
+      GhosttyMouseButtonUnknown _ -> False,
     EnumRow ghosttyOscTerminatorEnum $ \n -> case GhosttyOscTerminator (fromInteger n) of
       GhosttyOscTerminatorSt -> True
       GhosttyOscTerminatorBel -> True
       GhosttyOscTerminatorUnknown _ -> False,
+    EnumRow ghosttyOscOptionEnum $ \n -> case GhosttyOscOption (fromInteger n) of
+      GhosttyOscOptUnknownMaxBytes -> True
+      GhosttyOscOptionUnknown _ -> False,
+    EnumRow ghosttyOscCommandTypeEnum $ \n -> case GhosttyOscCommandType (fromInteger n) of
+      GhosttyOscCommandInvalid -> True
+      GhosttyOscCommandChangeWindowTitle -> True
+      GhosttyOscCommandChangeWindowIcon -> True
+      GhosttyOscCommandSemanticPrompt -> True
+      GhosttyOscCommandClipboardContents -> True
+      GhosttyOscCommandReportPwd -> True
+      GhosttyOscCommandMouseShape -> True
+      GhosttyOscCommandColorOperation -> True
+      GhosttyOscCommandKittyColorProtocol -> True
+      GhosttyOscCommandShowDesktopNotification -> True
+      GhosttyOscCommandHyperlinkStart -> True
+      GhosttyOscCommandHyperlinkEnd -> True
+      GhosttyOscCommandConemuSleep -> True
+      GhosttyOscCommandConemuShowMessageBox -> True
+      GhosttyOscCommandConemuChangeTabTitle -> True
+      GhosttyOscCommandConemuProgressReport -> True
+      GhosttyOscCommandConemuWaitInput -> True
+      GhosttyOscCommandConemuGuimacro -> True
+      GhosttyOscCommandConemuRunProcess -> True
+      GhosttyOscCommandConemuOutputEnvironmentVariable -> True
+      GhosttyOscCommandConemuXtermEmulation -> True
+      GhosttyOscCommandConemuComment -> True
+      GhosttyOscCommandKittyTextSizing -> True
+      GhosttyOscCommandKittyClipboardProtocol -> True
+      GhosttyOscCommandKittyDndProtocol -> True
+      GhosttyOscCommandHierarchicalContext -> True
+      GhosttyOscCommandKittyDesktopNotification -> True
+      GhosttyOscCommandUnknown -> True
+      GhosttyOscCommandProgramStatus -> True
+      GhosttyOscCommandTypeUnknown _ -> False,
+    EnumRow ghosttyOscCommandDataEnum $ \n -> case GhosttyOscCommandData (fromInteger n) of
+      GhosttyOscDataInvalid -> True
+      GhosttyOscDataChangeWindowTitleStr -> True
+      GhosttyOscDataUnknownContent -> True
+      GhosttyOscDataUnknownTruncated -> True
+      GhosttyOscDataUnknownTerminator -> True
+      GhosttyOscCommandDataUnknown _ -> False,
+    EnumRow ghosttyPasteSourceEnum $ \n -> case GhosttyPasteSource (fromInteger n) of
+      GhosttyPasteSourceClipboard -> True
+      GhosttyPasteSourceText -> True
+      GhosttyPasteSourceUnknown _ -> False,
     EnumRow ghosttyPointTagEnum $ \n -> case GhosttyPointTag (fromInteger n) of
       GhosttyPointTagActive -> True
       GhosttyPointTagViewport -> True
@@ -460,6 +826,54 @@ enums =
       GhosttySelectionGestureEventOptGeometry -> True
       GhosttySelectionGestureEventOptViewport -> True
       GhosttySelectionGestureEventOptionUnknown _ -> False,
+    EnumRow ghosttySgrAttributeTagEnum $ \n -> case GhosttySgrAttributeTag (fromInteger n) of
+      GhosttySgrAttrUnset -> True
+      GhosttySgrAttrUnknown -> True
+      GhosttySgrAttrBold -> True
+      GhosttySgrAttrResetBold -> True
+      GhosttySgrAttrItalic -> True
+      GhosttySgrAttrResetItalic -> True
+      GhosttySgrAttrFaint -> True
+      GhosttySgrAttrUnderline -> True
+      GhosttySgrAttrUnderlineColor -> True
+      GhosttySgrAttrUnderlineColor256 -> True
+      GhosttySgrAttrResetUnderlineColor -> True
+      GhosttySgrAttrOverline -> True
+      GhosttySgrAttrResetOverline -> True
+      GhosttySgrAttrBlink -> True
+      GhosttySgrAttrResetBlink -> True
+      GhosttySgrAttrInverse -> True
+      GhosttySgrAttrResetInverse -> True
+      GhosttySgrAttrInvisible -> True
+      GhosttySgrAttrResetInvisible -> True
+      GhosttySgrAttrStrikethrough -> True
+      GhosttySgrAttrResetStrikethrough -> True
+      GhosttySgrAttrDirectColorFg -> True
+      GhosttySgrAttrDirectColorBg -> True
+      GhosttySgrAttrBg8 -> True
+      GhosttySgrAttrFg8 -> True
+      GhosttySgrAttrResetFg -> True
+      GhosttySgrAttrResetBg -> True
+      GhosttySgrAttrBrightBg8 -> True
+      GhosttySgrAttrBrightFg8 -> True
+      GhosttySgrAttrBg256 -> True
+      GhosttySgrAttrFg256 -> True
+      GhosttySgrAttributeTagUnknown _ -> False,
+    EnumRow ghosttySgrUnderlineEnum $ \n -> case GhosttySgrUnderline (fromInteger n) of
+      GhosttySgrUnderlineNone -> True
+      GhosttySgrUnderlineSingle -> True
+      GhosttySgrUnderlineDouble -> True
+      GhosttySgrUnderlineCurly -> True
+      GhosttySgrUnderlineDotted -> True
+      GhosttySgrUnderlineDashed -> True
+      GhosttySgrUnderlineUnknown _ -> False,
+    EnumRow ghosttySizeReportStyleEnum $ \n -> case GhosttySizeReportStyle (fromInteger n) of
+      GhosttySizeReportMode2048 -> True
+      GhosttySizeReportCsi14T -> True
+      GhosttySizeReportCsi16T -> True
+      GhosttySizeReportCsi18T -> True
+      GhosttySizeReportCsi19T -> True
+      GhosttySizeReportStyleUnknown _ -> False,
     EnumRow ghosttyStyleColorTagEnum $ \n -> case GhosttyStyleColorTag (fromInteger n) of
       GhosttyStyleColorNone -> True
       GhosttyStyleColorPalette -> True

@@ -45,23 +45,34 @@ library
     Ghostty.FFI.Allocator
     Ghostty.FFI.BuildInfo
     Ghostty.FFI.Color
+    Ghostty.FFI.ColorScheme
     Ghostty.FFI.Device
+    Ghostty.FFI.Focus
     Ghostty.FFI.Formatter
     Ghostty.FFI.GridRef
     Ghostty.FFI.Io
+    Ghostty.FFI.Key.Encoder
+    Ghostty.FFI.Key.Event
+    Ghostty.FFI.KittyGraphics
     Ghostty.FFI.Layout
     Ghostty.FFI.Modes
+    Ghostty.FFI.Mouse
+    Ghostty.FFI.Mouse.Encoder
+    Ghostty.FFI.Mouse.Event
     Ghostty.FFI.Osc
+    Ghostty.FFI.Paste
     Ghostty.FFI.Point
     Ghostty.FFI.Render
     Ghostty.FFI.Screen
     Ghostty.FFI.Selection
+    Ghostty.FFI.Sgr
     Ghostty.FFI.SizeReport
     Ghostty.FFI.Style
     Ghostty.FFI.Terminal
     Ghostty.FFI.Terminal.Callbacks
     Ghostty.FFI.Terminal.Handle
     Ghostty.FFI.Types
+    Ghostty.FFI.Unicode
 
   hs-source-dirs:   src
 
@@ -97,11 +108,17 @@ test-suite ghostty-vt-ffi-test
   main-is:          Main.hs
   other-modules:
     Test.Ghostty.FFI.BuildInfo
+    Test.Ghostty.FFI.Color
+    Test.Ghostty.FFI.Encode
     Test.Ghostty.FFI.Formatter
     Test.Ghostty.FFI.Layout
+    Test.Ghostty.FFI.Parse
     Test.Ghostty.FFI.Render
     Test.Ghostty.FFI.Support
     Test.Ghostty.FFI.Terminal
+
+  -- A paste's MIME reader can only be C (DESIGN.md §3.3).
+  c-sources:        test/cbits/gvtffi_test.c
 
   build-depends:
     , aeson ^>=2.3

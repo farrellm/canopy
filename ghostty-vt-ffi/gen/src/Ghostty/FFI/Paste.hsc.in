@@ -1,0 +1,67 @@
+{-# LANGUAGE CApiFFI #-}
+{-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE ViewPatterns #-}
+
+-- | @include/ghostty/vt/paste.h@: pasting into a terminal, which decides from
+-- its modes whether the paste is a Kitty paste event (mode 5522) or text,
+-- bracketed (mode 2004) or not; and, without a terminal, checking paste data
+-- for what could inject commands and encoding it.
+--
+-- __@safe@ and @unsafe@.__ 'ghosttyTerminalPaste' is @safe@: it pulls the
+-- data through the paste's MIME reader and streams the encoded bytes to the
+-- terminal's @WRITE_PTY@ callback, and either may be a Haskell function. The
+-- MIME reader receives structs by value, so it cannot be one: it is C
+-- ("Ghostty.FFI.Io"). The two terminal-free calls are @unsafe@: they call
+-- nothing back, and each is one pass over a buffer the caller hands over,
+-- at memory speed, not a walk of the scrollback.
+module Ghostty.FFI.Paste
+  ( -- * Pastes
+    {{xenum paste.h GhosttyPasteSource}}
+    {{xstruct paste.h GhosttyPaste}}
+    ghosttyTerminalPaste,
+
+    -- * Without a terminal
+    ghosttyPasteIsSafe,
+    ghosttyPasteEncode,
+  )
+where
+
+import Foreign.C.Types (CBool (..), CChar, CInt (..), CSize (..))
+import Foreign.Ptr (Ptr)
+import Foreign.Storable (Storable (..))
+import Ghostty.FFI.Io (GhosttyMimeReader)
+import Ghostty.FFI.Layout (CEnum (..), CField (..), CStruct (..), unnamed)
+import Ghostty.FFI.Terminal.Callbacks (GhosttyClipboardLocation (..))
+import Ghostty.FFI.Terminal.Handle (GhosttyTerminal (..))
+import Ghostty.FFI.Types (GhosttyResult (..), GhosttyString)
+
+#include <gvtffi_shims.h>
+
+{{enum paste.h GhosttyPasteSource}}
+{{struct paste.h GhosttyPaste}}
+-- | @ghostty_terminal_paste@: paste into a terminal by its current modes. The
+-- output goes to the @WRITE_PTY@ callback in chunks, in order; nothing is
+-- written on an error. @GHOSTTY_REJECTED@ (nothing written) when the text
+-- could inject commands and @allow_unsafe@ is false, and
+-- @GHOSTTY_INVALID_VALUE@ without a @WRITE_PTY@ callback. The out flag (which
+-- may be null) says whether anything was written. @safe@: it calls the MIME
+-- reader and the @WRITE_PTY@ callback, which may be a Haskell function.
+foreign import capi safe "ghostty/vt.h ghostty_terminal_paste"
+  ghosttyTerminalPaste :: GhosttyTerminal -> Ptr GhosttyPaste -> Ptr CBool -> IO GhosttyResult
+
+-- | @ghostty_paste_is_safe@: whether data holds nothing that could inject
+-- commands (a newline or carriage return, or the bracketed-paste end
+-- sequence), whatever the terminal's modes; stricter than
+-- 'ghosttyTerminalPaste''s own rule. @unsafe@: it calls nothing back, and is
+-- one pass over the data (above).
+foreign import capi unsafe "ghostty/vt.h ghostty_paste_is_safe"
+  ghosttyPasteIsSafe :: Ptr CChar -> CSize -> IO CBool
+
+-- | @ghostty_paste_encode@: encode paste data for the pty: unsafe control bytes
+-- become spaces, then the data is bracketed, or has its newlines made
+-- carriage returns. __It modifies the input in place.__ A null buffer, or one
+-- too small, returns @GHOSTTY_OUT_OF_SPACE@ with the size needed. @unsafe@:
+-- it calls nothing back, and is one pass over the data (above).
+foreign import capi unsafe "ghostty/vt.h ghostty_paste_encode"
+  ghosttyPasteEncode :: Ptr CChar -> CSize -> CBool -> Ptr CChar -> CSize -> Ptr CSize -> IO GhosttyResult

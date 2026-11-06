@@ -4,7 +4,8 @@ The milestones of DESIGN.md §13, broken into steps. **Each step is one CR**: it
 `-Werror`, passes every CI step, adds its `CHANGELOG.md` line, and updates `DESIGN.md` in the same
 commit if it changes a decision (§2.9). Section references (§) are to DESIGN.md.
 
-M0 is done (PR #1). Steps are numbered `M<n>.<k>` and are in dependency order within a milestone.
+M0 is done (PR #1), and M1.1–M1.3 (PRs #2–#4 and M1.3's second CR). Steps are numbered `M<n>.<k>`
+and are in dependency order within a milestone.
 
 ## Tracks
 
@@ -62,7 +63,9 @@ Exit: formatter goldens; every typed key exercised (§13).
 - Layout-test rows for each. May be split into two CRs (render+format, encoders+parsers+unicode) if
   it reviews too large.
 - Split: the first CR (PR #4) bound render.h, screen.h, selection.h and formatter.h whole, and
-  generated the by-value shims. `coverage.txt`'s `M1.3` lines are what the second CR binds.
+  generated the by-value shims. The second CR bound the encoders, both parsers, unicode, and the
+  rest of the partly bound headers and output types; `coverage.txt` defers nothing to M1.3 now.
+  **Done.**
 
 ### M1.4 `Ghostty` effect and scoped terminals
 
