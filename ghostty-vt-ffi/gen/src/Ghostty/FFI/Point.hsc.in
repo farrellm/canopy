@@ -1,0 +1,48 @@
+{-# LANGUAGE CApiFFI #-}
+{-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE ViewPatterns #-}
+
+-- | @include/ghostty/vt/point.h@: positions in the terminal grid, in one of
+-- four coordinate systems.
+module Ghostty.FFI.Point
+  ( -- * Coordinate systems
+    {{xenum point.h GhosttyPointTag}}
+
+    -- * Points
+    {{xstruct point.h GhosttyPointCoordinate}}
+    GhosttyPoint (..),
+    ghosttyPointLayout,
+  )
+where
+
+import Foreign.C.Types (CInt (..))
+import Foreign.Storable (Storable (..))
+import Ghostty.FFI.Layout (CEnum (..), CField (..), CStruct (..), unnamed)
+
+#include <gvtffi_shims.h>
+
+{{enum point.h GhosttyPointTag}}
+{{struct point.h GhosttyPointCoordinate}}
+-- | @GhosttyPoint@: a coordinate and the system it is in. In C a tagged
+-- union, but every arm is a coordinate, so here a record (§3.3).
+data GhosttyPoint = GhosttyPoint
+  { -- | @tag@: which coordinate system.
+    tag :: GhosttyPointTag,
+    -- | @value.coordinate@: the position in it.
+    coordinate :: GhosttyPointCoordinate
+  }
+  deriving stock (Eq, Show)
+
+instance Storable GhosttyPoint where
+  sizeOf _ = (#size GhosttyPoint)
+  alignment _ = (#alignment GhosttyPoint)
+  peek p =
+    GhosttyPoint
+      <$> (#peek GhosttyPoint, tag) p
+      <*> (#peek GhosttyPoint, value.coordinate) p
+  poke p s = do
+    (#poke GhosttyPoint, tag) p s.tag
+    (#poke GhosttyPoint, value.coordinate) p s.coordinate
+
+{{layout GhosttyPoint tag value}}

@@ -1,0 +1,203 @@
+{-# LANGUAGE CApiFFI #-}
+{-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE ViewPatterns #-}
+
+-- | The callback half of @include/ghostty/vt/terminal.h@ ("effects"): the
+-- function type behind each callback 'Ghostty.FFI.Terminal.GhosttyTerminalOption',
+-- the @wrapper@ that makes one from a Haskell function, and the structs the
+-- library passes to them.
+--
+-- Every struct a callback receives is borrowed for the call, and so is every
+-- string inside it: copy out with 'Ghostty.FFI.Types.ghosttyStringBytes'
+-- before returning. A callback runs inside a VT write, so it must not write to
+-- the same terminal, and the call that runs it must be @safe@ (§3.3).
+--
+-- Two callbacks return a 'GhosttyString' by value, which a @wrapper@ cannot
+-- make: @ENQUIRY@ ('GhosttyTerminalEnquiryFn') and @XTVERSION@
+-- ('GhosttyTerminalXtversionFn'). Their types are here; a function for either
+-- has to be written in C. @ghostty-effectful@ answers both from its
+-- configuration (§4.5).
+module Ghostty.FFI.Terminal.Callbacks
+  ( -- * Callback types
+    {{xfn wrapper terminal.h GhosttyTerminalWritePtyFn}}
+    {{xfn wrapper terminal.h GhosttyTerminalBellFn}}
+    {{xfn wrapper terminal.h GhosttyTerminalTitleChangedFn}}
+    {{xfn wrapper terminal.h GhosttyTerminalPwdChangedFn}}
+    {{xfn wrapper terminal.h GhosttyTerminalSizeFn}}
+    {{xfn wrapper terminal.h GhosttyTerminalColorSchemeFn}}
+    {{xfn wrapper terminal.h GhosttyTerminalDeviceAttributesFn}}
+    {{xfn wrapper terminal.h GhosttyTerminalClipboardWriteFn}}
+    {{xfn wrapper terminal.h GhosttyTerminalClipboardReadFn}}
+    {{xfn wrapper terminal.h GhosttyTerminalDesktopNotificationFn}}
+    {{xfn wrapper terminal.h GhosttyTerminalProgressReportFn}}
+    {{xfn wrapper terminal.h GhosttyTerminalProgramStatusFn}}
+    {{xfn wrapper terminal.h GhosttyTerminalSemanticPromptFn}}
+    {{xfn wrapper terminal.h GhosttyTerminalResetFn}}
+    {{xfn wrapper terminal.h GhosttyTerminalRenderHoldFn}}
+    {{xfn wrapper terminal.h GhosttyTerminalUnknownSequenceFn}}
+    {{xfn wrapper terminal.h GhosttyTerminalResizeWindowFn}}
+    {{xfn wrapper terminal.h GhosttyTerminalEnquiryFn}}
+    {{xfn wrapper terminal.h GhosttyTerminalXtversionFn}}
+
+    -- * Unknown sequences
+    {{xenum terminal.h GhosttyTerminalUnknownSequenceTag}}
+    {{xstruct terminal.h GhosttyTerminalUnknownStringSequence}}
+    {{xstruct terminal.h GhosttyTerminalUnknownOscSequence}}
+    GhosttyTerminalUnknownSequence (..),
+    ghosttyTerminalUnknownSequenceLayout,
+
+    -- * Clipboard
+    {{xenum terminal.h GhosttyClipboardLocation}}
+    {{xstruct terminal.h GhosttyClipboardContent}}
+    {{xenum terminal.h GhosttyClipboardWriteResult}}
+    {{xstruct terminal.h GhosttyClipboardWriteReply}}
+    {{xstruct terminal.h GhosttyClipboardWrite}}
+    {{xfn dynamic terminal.h GhosttyClipboardWriteReplyFn}}
+    {{xenum terminal.h GhosttyClipboardReadResult}}
+    {{xstruct terminal.h GhosttyClipboardReadReply}}
+    {{xstruct terminal.h GhosttyClipboardRead}}
+    {{xfn dynamic terminal.h GhosttyClipboardReadReplyFn}}
+
+    -- * Notifications and progress
+    {{xstruct terminal.h GhosttyTerminalDesktopNotification}}
+    {{xenum terminal.h GhosttyTerminalProgressState}}
+    {{xstruct terminal.h GhosttyTerminalProgressReport}}
+    {{xenum terminal.h GhosttyProgramStatusState}}
+    {{xenum terminal.h GhosttyProgramStatusKind}}
+    {{xstruct terminal.h GhosttyTerminalProgramStatus}}
+
+    -- * Semantic prompts
+    {{xenum terminal.h GhosttySemanticPromptKind}}
+    {{xenum terminal.h GhosttySemanticPromptPromptKind}}
+    {{xstruct terminal.h GhosttyTerminalSemanticPrompt}}
+
+    -- * Window resize requests
+    {{xenum terminal.h GhosttyTerminalResizeWindowTag}}
+    {{xstruct terminal.h GhosttyTerminalResizeWindowGrid}}
+    GhosttyTerminalResizeWindow (..),
+    ghosttyTerminalResizeWindowLayout,
+  )
+where
+
+import Foreign.C.Types (CBool (..), CInt (..), CSize (..))
+import Foreign.Ptr (FunPtr, Ptr)
+import Foreign.Storable (Storable (..))
+import Ghostty.FFI.Device (GhosttyColorScheme, GhosttyDeviceAttributes)
+import Ghostty.FFI.Layout (CEnum (..), CField (..), CStruct (..), unnamed)
+import Ghostty.FFI.Osc (GhosttyOscTerminator)
+import Ghostty.FFI.SizeReport (GhosttySizeReportSize)
+import Ghostty.FFI.Terminal.Handle (GhosttyTerminal (..))
+import Ghostty.FFI.Types (GhosttyString)
+
+#include <gvtffi_shims.h>
+
+-- * Callback types
+
+{{fn wrapper terminal.h GhosttyTerminalWritePtyFn}}
+{{fn wrapper terminal.h GhosttyTerminalBellFn}}
+{{fn wrapper terminal.h GhosttyTerminalTitleChangedFn}}
+{{fn wrapper terminal.h GhosttyTerminalPwdChangedFn}}
+{{fn wrapper terminal.h GhosttyTerminalSizeFn}}
+{{fn wrapper terminal.h GhosttyTerminalColorSchemeFn}}
+{{fn wrapper terminal.h GhosttyTerminalDeviceAttributesFn}}
+{{fn wrapper terminal.h GhosttyTerminalClipboardWriteFn}}
+{{fn wrapper terminal.h GhosttyTerminalClipboardReadFn}}
+{{fn wrapper terminal.h GhosttyTerminalDesktopNotificationFn}}
+{{fn wrapper terminal.h GhosttyTerminalProgressReportFn}}
+{{fn wrapper terminal.h GhosttyTerminalProgramStatusFn}}
+{{fn wrapper terminal.h GhosttyTerminalSemanticPromptFn}}
+{{fn wrapper terminal.h GhosttyTerminalResetFn}}
+{{fn wrapper terminal.h GhosttyTerminalRenderHoldFn}}
+{{fn wrapper terminal.h GhosttyTerminalUnknownSequenceFn}}
+{{fn wrapper terminal.h GhosttyTerminalResizeWindowFn}}
+{{fn wrapper terminal.h GhosttyTerminalEnquiryFn}}
+{{fn wrapper terminal.h GhosttyTerminalXtversionFn}}
+-- * Unknown sequences
+
+{{enum terminal.h GhosttyTerminalUnknownSequenceTag}}
+{{struct terminal.h GhosttyTerminalUnknownStringSequence}}
+{{struct terminal.h GhosttyTerminalUnknownOscSequence}}
+-- | @GhosttyTerminalUnknownSequence@: a sequence the library does not
+-- implement. A tagged union in C, so a sum here with an arm per tag (§3.3).
+data GhosttyTerminalUnknownSequence
+  = -- | @GHOSTTY_TERMINAL_UNKNOWN_SEQUENCE_APC@: @value.apc@.
+    UnknownSequenceApc GhosttyTerminalUnknownStringSequence
+  | -- | @GHOSTTY_TERMINAL_UNKNOWN_SEQUENCE_OSC@: @value.osc@.
+    UnknownSequenceOsc GhosttyTerminalUnknownOscSequence
+  | -- | A tag this binding does not name, whose value it cannot read. The
+    -- header asks callbacks to ignore these.
+    UnknownSequenceOther GhosttyTerminalUnknownSequenceTag
+  deriving stock (Eq, Show)
+
+instance Storable GhosttyTerminalUnknownSequence where
+  sizeOf _ = (#size GhosttyTerminalUnknownSequence)
+  alignment _ = (#alignment GhosttyTerminalUnknownSequence)
+  peek p =
+    (#peek GhosttyTerminalUnknownSequence, tag) p >>= \case
+      GhosttyTerminalUnknownSequenceApc -> UnknownSequenceApc <$> (#peek GhosttyTerminalUnknownSequence, value.apc) p
+      GhosttyTerminalUnknownSequenceOsc -> UnknownSequenceOsc <$> (#peek GhosttyTerminalUnknownSequence, value.osc) p
+      tag@(GhosttyTerminalUnknownSequenceTagUnknown _) -> pure (UnknownSequenceOther tag)
+  poke p = \case
+    UnknownSequenceApc s -> do
+      (#poke GhosttyTerminalUnknownSequence, tag) p GhosttyTerminalUnknownSequenceApc
+      (#poke GhosttyTerminalUnknownSequence, value.apc) p s
+    UnknownSequenceOsc s -> do
+      (#poke GhosttyTerminalUnknownSequence, tag) p GhosttyTerminalUnknownSequenceOsc
+      (#poke GhosttyTerminalUnknownSequence, value.osc) p s
+    UnknownSequenceOther tag -> (#poke GhosttyTerminalUnknownSequence, tag) p tag
+
+{{layout GhosttyTerminalUnknownSequence tag value}}
+-- * Clipboard
+
+{{enum terminal.h GhosttyClipboardLocation}}
+{{struct terminal.h GhosttyClipboardContent}}
+{{enum terminal.h GhosttyClipboardWriteResult}}
+{{struct terminal.h GhosttyClipboardWriteReply}}
+{{struct terminal.h GhosttyClipboardWrite}}
+{{fn dynamic terminal.h GhosttyClipboardWriteReplyFn}}
+{{enum terminal.h GhosttyClipboardReadResult}}
+{{struct terminal.h GhosttyClipboardReadReply}}
+{{struct terminal.h GhosttyClipboardRead}}
+{{fn dynamic terminal.h GhosttyClipboardReadReplyFn}}
+-- * Notifications and progress
+
+{{struct terminal.h GhosttyTerminalDesktopNotification}}
+{{enum terminal.h GhosttyTerminalProgressState}}
+{{struct terminal.h GhosttyTerminalProgressReport}}
+{{enum terminal.h GhosttyProgramStatusState}}
+{{enum terminal.h GhosttyProgramStatusKind}}
+{{struct terminal.h GhosttyTerminalProgramStatus}}
+-- * Semantic prompts
+
+{{enum terminal.h GhosttySemanticPromptKind}}
+{{enum terminal.h GhosttySemanticPromptPromptKind}}
+{{struct terminal.h GhosttyTerminalSemanticPrompt}}
+-- * Window resize requests
+
+{{enum terminal.h GhosttyTerminalResizeWindowTag}}
+{{struct terminal.h GhosttyTerminalResizeWindowGrid}}
+-- | @GhosttyTerminalResizeWindow@: a request to resize the window. A tagged
+-- union in C, so a sum here with an arm per tag (§3.3).
+data GhosttyTerminalResizeWindow
+  = -- | @GHOSTTY_TERMINAL_RESIZE_WINDOW_GRID@: @value.grid@.
+    ResizeWindowGrid GhosttyTerminalResizeWindowGrid
+  | -- | A tag this binding does not name, whose value it cannot read. The
+    -- header asks callbacks to ignore these.
+    ResizeWindowOther GhosttyTerminalResizeWindowTag
+  deriving stock (Eq, Show)
+
+instance Storable GhosttyTerminalResizeWindow where
+  sizeOf _ = (#size GhosttyTerminalResizeWindow)
+  alignment _ = (#alignment GhosttyTerminalResizeWindow)
+  peek p =
+    (#peek GhosttyTerminalResizeWindow, tag) p >>= \case
+      GhosttyTerminalResizeWindowGridTag -> ResizeWindowGrid <$> (#peek GhosttyTerminalResizeWindow, value.grid) p
+      tag@(GhosttyTerminalResizeWindowTagUnknown _) -> pure (ResizeWindowOther tag)
+  poke p = \case
+    ResizeWindowGrid g -> do
+      (#poke GhosttyTerminalResizeWindow, tag) p GhosttyTerminalResizeWindowGridTag
+      (#poke GhosttyTerminalResizeWindow, value.grid) p g
+    ResizeWindowOther tag -> (#poke GhosttyTerminalResizeWindow, tag) p tag
+
+{{layout GhosttyTerminalResizeWindow tag value}}

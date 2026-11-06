@@ -309,7 +309,9 @@ The rules, by module name across all packages:
 2. `cabal build all --enable-tests --enable-benchmarks --ghc-options=-Werror`
 3. `cabal test ghostty-vt-ffi-test ghostty-effectful-test tendril-test tree-sitter-ffi-test tree-sitter-effectful-test canopy-test`,
    plus `scripts/gen-ts-shims.py --check`, which fails if the committed shims (§5A.2) are not what
-   the vendored header generates
+   the vendored header generates; `scripts/gen-ghostty-ffi.py --check`, the same for the generated
+   ghostty binding (§3.3); and `scripts/check-ghostty-coverage.py`, which fails on a function or type
+   in the pinned headers that is neither bound nor deferred (§3.3)
 4. doctests for `tendril`, `ghostty-effectful` and `tree-sitter-effectful`
 5. `hlint --ignore-glob='lint/fixtures/**' .`, `lint/check-layering.sh`, `scripts/check-common-stanzas.sh`,
    `scripts/check-layout-rows.py` (§3.4)
@@ -339,7 +341,8 @@ library (`libghostty-vt.a`), headers and a pkg-config file. It has no dependenci
 Distribution packages do not exist yet, so:
 
 - **The commit is pinned** in `ghostty-vt-ffi/GHOSTTY_COMMIT`. Upgrading is one deliberate commit that
-  changes the pin, regenerates the layout baseline (§3.4) and says why.
+  changes the pin, regenerates the generated binding (§3.3), and says why. The layout test (§3.4) and
+  the coverage check then name whatever the new headers changed.
 - **`scripts/build-libghostty.sh`** fetches that commit and builds into `_deps/ghostty/<commit>/`,
   printing the `PKG_CONFIG_PATH` to export. A `cabal.project.local` is never required. Zig's own
   package fetcher is not relied on: in Zig 0.17.1 it fails inside `zig build` with
@@ -409,6 +412,19 @@ from it:
 - **One module per header** (`terminal.h` → `Ghostty.FFI.Terminal`, with its callback half in
   `Ghostty.FFI.Terminal.Callbacks`). A header is bound in part where only part of it is needed yet,
   and the module says which part.
+- **The mechanical code is generated from the headers**, by `scripts/gen-ghostty-ffi.py`, and
+  committed: each enum's patterns, `Unknown` view and descriptor, each plain struct's record,
+  `Storable` instance and descriptor, each callback type and its `wrapper`, the named modes, and the
+  layout test's enum rows. The input is a template per module (`ghostty-vt-ffi/gen/**.in`), the
+  module as written by hand with directive lines where generated code goes; tagged unions, arrays
+  and imports stay hand-written there. Docs are the header's own. CI runs it with `--check`, so a pin
+  bump that changes a header cannot leave the binding behind, and an edit to generated code cannot
+  survive.
+- **Coverage is checked against the headers.** `scripts/check-ghostty-coverage.py` lists every
+  `GHOSTTY_API` function and every type the pinned headers declare, and fails on one that is neither
+  bound nor listed in `ghostty-vt-ffi/coverage.txt` with the PLAN.md step that binds it (or `never`,
+  with a reason). An entry that no longer defers anything fails too. The `capi` prototype check
+  cannot find a function nobody bound; this can.
 - **A tagged union is a Haskell sum**: one constructor per arm the binding names, plus an `…Other`
   constructor that carries a tag the binding does not name, whose value it cannot read. The
   `Storable` instance reads the arm the tag selects. A union whose arms all have one type
@@ -444,7 +460,8 @@ size and every field's offset with the `hsc2hs`-derived values compiled into the
 from different places — the headers the binding was compiled against, and the library actually
 linked — so the test catches a header/library mismatch (a stale `_deps`, a distro `.so` at a
 different commit) that would otherwise be silent memory corruption. It also checks that
-`ghostty_build_info` reports the pinned build, and that every enum value the binding names exists.
+`ghostty_build_info` reports the pinned build, and that the binding names every enum value the
+library has.
 
 The values compiled into the binding are exported beside each type as a descriptor
 (`Ghostty.FFI.Layout`: `CStruct`, `CField`, `CEnum`), every number in it from `hsc2hs`, so the test
@@ -454,7 +471,10 @@ a field the binding does not marshal is a failure too. Each struct row also carr
 value: the `Storable` instance's `sizeOf` and `alignment` must equal the descriptor's, and the sample
 must `poke` and `peek` back unchanged over zeroed and over all-ones memory, so a field the instance
 skips is a failure. For an enum it checks the type's size and, for each value the binding names, that
-the manifest has that full C name (its `prefix` plus key) with that value. `ghostty_type_json()`
+the manifest has that full C name (its `prefix` plus key) with that value; and, the other way, that
+the binding names every value the manifest lists (apart from the `…MAX_VALUE` padding). So the
+binding is exhaustive at the pin, and a value a bump adds is a failure rather than an `Unknown` at
+run time. The `Unknown` view stays, because C enums are open. `ghostty_type_json()`
 describes enums as well as structs, so "exists" is checked against the linked library, not only the
 header. Every enum's `Unknown` view (§3.3) is built from its descriptor's values, and each enum row
 carries a total match on the `COMPLETE` set; the test checks, over every value the library lists,

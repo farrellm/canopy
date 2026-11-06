@@ -30,6 +30,15 @@ Written as changes land, not at release (DESIGN.md §2.9).
   `_continuation_write` are `safe` as well as the writes, because each can run a callback, and
   `_compress` is `safe` because a full pass can stall. Tagged unions are sums, and the binding never
   supplies an allocator.
+- `ghostty-vt-ffi`'s mechanical code is generated from the pinned headers by
+  `scripts/gen-ghostty-ffi.py`, from templates in `ghostty-vt-ffi/gen/`, and CI checks it is current
+  (`--check`). Callback types are derived from their C typedefs, and their docs are the header's.
+- `scripts/check-ghostty-coverage.py`, in CI, fails on any function or type in the pinned headers
+  that is neither bound nor listed in `ghostty-vt-ffi/coverage.txt` with the PLAN.md step that binds
+  it, and on an entry that no longer defers anything. 132 symbols are bound and 295 deferred.
+- The layout test requires every enum to name every value the library has, so a value a pin bump
+  adds fails the test. `build_info.h` is now bound whole for it (`GhosttyBuildInfo`'s other eight
+  keys, and `GhosttyOptimizeMode`), and DESIGN.md §2.8, §3.1, §3.3 and §3.4 say so.
 
 ### M0: infrastructure
 

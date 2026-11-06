@@ -1,0 +1,66 @@
+{-# LANGUAGE CApiFFI #-}
+{-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE ViewPatterns #-}
+
+-- | @include/ghostty/vt/device.h@: what the terminal's query callbacks answer
+-- with, the colour scheme and the device attributes (DA1, DA2, DA3).
+module Ghostty.FFI.Device
+  ( -- * Colour scheme
+    {{xenum device.h GhosttyColorScheme}}
+
+    -- * Device attributes
+    GhosttyDeviceAttributesPrimary (..),
+    ghosttyDeviceAttributesPrimaryLayout,
+    {{xstruct device.h GhosttyDeviceAttributesSecondary}}
+    {{xstruct device.h GhosttyDeviceAttributesTertiary}}
+    {{xstruct device.h GhosttyDeviceAttributes}}
+  )
+where
+
+import Foreign.C.Types (CInt (..), CSize (..))
+import Foreign.Marshal.Array (peekArray, pokeArray)
+import Foreign.Ptr (plusPtr)
+import Foreign.Storable (Storable (..))
+import Ghostty.FFI.Layout (CEnum (..), CField (..), CStruct (..), unnamed)
+
+#include <gvtffi_shims.h>
+
+{{enum device.h GhosttyColorScheme}}
+-- | @GhosttyDeviceAttributesPrimary@: the DA1 reply.
+data GhosttyDeviceAttributesPrimary = GhosttyDeviceAttributesPrimary
+  { -- | @conformance_level@: the conformance level (Pp), one of the header's
+    -- @GHOSTTY_DA_CONFORMANCE_*@ values.
+    conformanceLevel :: Word16,
+    -- | @features@: the whole fixed-size array of feature codes (Ps), of which
+    -- the first @num_features@ are reported. A 'peek' reads every element; a
+    -- 'poke' writes the list's first elements and zeroes the rest.
+    features :: [Word16],
+    -- | @num_features@: how many of @features@ are reported.
+    numFeatures :: CSize
+  }
+  deriving stock (Eq, Show)
+
+-- | How many elements @features@ has in C.
+featuresLen :: Int
+featuresLen = (#const GVTFFI_ARRAY_LEN(GhosttyDeviceAttributesPrimary, features))
+
+instance Storable GhosttyDeviceAttributesPrimary where
+  sizeOf _ = (#size GhosttyDeviceAttributesPrimary)
+  alignment _ = (#alignment GhosttyDeviceAttributesPrimary)
+  peek p =
+    GhosttyDeviceAttributesPrimary
+      <$> (#peek GhosttyDeviceAttributesPrimary, conformance_level) p
+      <*> peekArray featuresLen ((#ptr GhosttyDeviceAttributesPrimary, features) p)
+      <*> (#peek GhosttyDeviceAttributesPrimary, num_features) p
+  poke p s = do
+    (#poke GhosttyDeviceAttributesPrimary, conformance_level) p s.conformanceLevel
+    pokeArray
+      ((#ptr GhosttyDeviceAttributesPrimary, features) p)
+      (take featuresLen (s.features <> repeat 0))
+    (#poke GhosttyDeviceAttributesPrimary, num_features) p s.numFeatures
+
+{{layout GhosttyDeviceAttributesPrimary conformance_level features num_features}}
+{{struct device.h GhosttyDeviceAttributesSecondary}}
+{{struct device.h GhosttyDeviceAttributesTertiary}}
+{{struct device.h GhosttyDeviceAttributes}}

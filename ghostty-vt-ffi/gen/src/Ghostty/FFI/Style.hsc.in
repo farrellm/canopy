@@ -1,0 +1,79 @@
+{-# LANGUAGE CApiFFI #-}
+{-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE ViewPatterns #-}
+
+-- | @include/ghostty/vt/style.h@: a cell's SGR style, as grid references and
+-- the cursor report it.
+module Ghostty.FFI.Style
+  ( -- * Colours
+    {{xenum style.h GhosttyStyleColorTag}}
+    GhosttyStyleColor (..),
+    ghosttyStyleColorLayout,
+
+    -- * Styles
+    {{xstruct style.h GhosttyStyle}}
+    GhosttyStyleId,
+
+    -- * Calls
+    ghosttyStyleDefault,
+    ghosttyStyleIsDefault,
+  )
+where
+
+import Foreign.C.Types (CBool (..), CInt (..), CSize (..))
+import Foreign.Ptr (Ptr)
+import Foreign.Storable (Storable (..))
+import Ghostty.FFI.Color (GhosttyColorPaletteIndex, GhosttyColorRgb)
+import Ghostty.FFI.Layout (CEnum (..), CField (..), CStruct (..), unnamed)
+
+#include <gvtffi_shims.h>
+
+-- | @GhosttyStyleId@: a style's index in its page.
+type GhosttyStyleId = Word16
+
+{{enum style.h GhosttyStyleColorTag}}
+-- | @GhosttyStyleColor@: a colour in a style. A tagged union in C, so a sum
+-- here with an arm per tag (§3.3).
+data GhosttyStyleColor
+  = -- | @GHOSTTY_STYLE_COLOR_NONE@: no colour, the default.
+    StyleColorNone
+  | -- | @GHOSTTY_STYLE_COLOR_PALETTE@: @value.palette@.
+    StyleColorPalette GhosttyColorPaletteIndex
+  | -- | @GHOSTTY_STYLE_COLOR_RGB@: @value.rgb@.
+    StyleColorRgb GhosttyColorRgb
+  | -- | A tag this binding does not name, whose value it cannot read.
+    StyleColorOther GhosttyStyleColorTag
+  deriving stock (Eq, Show)
+
+instance Storable GhosttyStyleColor where
+  sizeOf _ = (#size GhosttyStyleColor)
+  alignment _ = (#alignment GhosttyStyleColor)
+  peek p =
+    (#peek GhosttyStyleColor, tag) p >>= \case
+      GhosttyStyleColorNone -> pure StyleColorNone
+      GhosttyStyleColorPalette -> StyleColorPalette <$> (#peek GhosttyStyleColor, value.palette) p
+      GhosttyStyleColorRgb -> StyleColorRgb <$> (#peek GhosttyStyleColor, value.rgb) p
+      tag@(GhosttyStyleColorTagUnknown _) -> pure (StyleColorOther tag)
+  poke p = \case
+    StyleColorNone -> (#poke GhosttyStyleColor, tag) p GhosttyStyleColorNone
+    StyleColorPalette i -> do
+      (#poke GhosttyStyleColor, tag) p GhosttyStyleColorPalette
+      (#poke GhosttyStyleColor, value.palette) p i
+    StyleColorRgb c -> do
+      (#poke GhosttyStyleColor, tag) p GhosttyStyleColorRgb
+      (#poke GhosttyStyleColor, value.rgb) p c
+    StyleColorOther tag -> (#poke GhosttyStyleColor, tag) p tag
+
+{{layout GhosttyStyleColor tag value}}
+{{struct style.h GhosttyStyle}}
+-- | @ghostty_style_default@: write the default style (every colour none, every
+-- flag off) to the pointer, @size@ included. @unsafe@: it does not call back
+-- into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_style_default"
+  ghosttyStyleDefault :: Ptr GhosttyStyle -> IO ()
+
+-- | @ghostty_style_is_default@: whether a style is the default one. @unsafe@:
+-- it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_style_is_default"
+  ghosttyStyleIsDefault :: Ptr GhosttyStyle -> IO CBool

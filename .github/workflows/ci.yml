@@ -101,6 +101,12 @@ jobs:
       - name: The committed tree-sitter shims are current (§5A.2)
         run: python3 scripts/gen-ts-shims.py --check
 
+      - name: The generated ghostty binding is current (§3.3)
+        run: python3 scripts/gen-ghostty-ffi.py --check
+
+      - name: The ghostty binding covers the pinned headers (§3.3)
+        run: python3 scripts/check-ghostty-coverage.py
+
       # 4
       - name: Doctest
         run: |

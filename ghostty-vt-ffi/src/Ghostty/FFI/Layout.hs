@@ -42,8 +42,9 @@ data CField = CField
   }
   deriving stock (Eq, Show)
 
--- | A C enum as the binding sees it: the values it names, not necessarily all
--- the header has. C enums are open (§3.3), so naming a subset is sound.
+-- | A C enum as the binding sees it: the values it names. The layout test
+-- requires every value the linked library has, so the binding is exhaustive at
+-- the pin; the @Unknown@ view (§3.3) is still there, because C enums are open.
 data CEnum = CEnum
   { -- | The C type name, as @ghostty_type_json()@ keys it.
     name :: Text,

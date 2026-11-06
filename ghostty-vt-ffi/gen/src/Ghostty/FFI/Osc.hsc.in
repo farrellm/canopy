@@ -1,0 +1,20 @@
+{-# LANGUAGE CApiFFI #-}
+{-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE ViewPatterns #-}
+
+-- | @include/ghostty/vt/osc.h@, the part the terminal's callbacks need: how an
+-- OSC sequence ended. The OSC parser itself arrives with M1.3.
+module Ghostty.FFI.Osc
+  ( -- * Terminators
+    {{xenum osc.h GhosttyOscTerminator}}
+  )
+where
+
+import Foreign.C.Types (CInt (..))
+import Foreign.Storable (Storable (..))
+import Ghostty.FFI.Layout (CEnum (..), unnamed)
+
+#include <gvtffi_shims.h>
+
+{{enum osc.h GhosttyOscTerminator}}
