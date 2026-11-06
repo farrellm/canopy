@@ -32,6 +32,7 @@ library
   import:           warnings, extensions
   exposed-modules:
     Ghostty.Effectful
+    Ghostty.Effectful.Cell
     Ghostty.Effectful.Color
     Ghostty.Effectful.Error
     Ghostty.Effectful.Event
@@ -41,10 +42,13 @@ library
     Ghostty.Effectful.Internal.Error
     Ghostty.Effectful.Internal.Feed
     Ghostty.Effectful.Internal.Keys
+    Ghostty.Effectful.Internal.Render
     Ghostty.Effectful.Internal.Size
     Ghostty.Effectful.Internal.Terminal
     Ghostty.Effectful.Mode
     Ghostty.Effectful.Point
+    Ghostty.Effectful.Render
+    Ghostty.Effectful.Render.Keys
     Ghostty.Effectful.Style
     Ghostty.Effectful.Terminal
     Ghostty.Effectful.Terminal.Keys
@@ -52,10 +56,11 @@ library
   hs-source-dirs:   src
 
   -- ENQ and XTVERSION's answers return a struct by value, which no Haskell
-  -- callback can (DESIGN.md §3.3, §4.5).
+  -- callback can (DESIGN.md §3.3, §4.5); a render hold captures its frame
+  -- with a C call inside the callback (§4.3).
   include-dirs:     include
-  includes:         gveff_answers.h
-  c-sources:        cbits/gveff_answers.c
+  includes:         gveff_terminal.h
+  c-sources:        cbits/gveff_terminal.c
   build-depends:
     , array ^>=0.5.8
     , base ^>=4.21.2.0
@@ -64,6 +69,7 @@ library
     , containers ^>=0.7
     , effectful-core ^>=2.7.1
     , ghostty-vt-ffi
+    , vector ^>=0.13
 
   mixins:
     base hiding (Prelude),
@@ -80,6 +86,7 @@ test-suite ghostty-effectful-test
     Test.Ghostty.Effectful
     Test.Ghostty.Effectful.Events
     Test.Ghostty.Effectful.Keys
+    Test.Ghostty.Effectful.Render
     Test.Ghostty.Effectful.Terminal
     Test.Ghostty.Effectful.TrackedRef
 
@@ -93,6 +100,7 @@ test-suite ghostty-effectful-test
     , tasty ^>=1.5
     , tasty-hunit ^>=0.10.2
     , text ^>=2.1
+    , vector ^>=0.13
 
   mixins:
     base hiding (Prelude),

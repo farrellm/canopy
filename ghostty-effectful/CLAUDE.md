@@ -22,10 +22,20 @@ events instead of callbacks. No export may expose a pointer.
   exception is recorded and thrown by the drain, never let into C. Anything needing the terminal
   (title, cursor) is a `Pending` entry resolved between writes. A query's answer is configuration
   (`TerminalConfig`, and a `Set…` option named for the callback's row); ENQ and XTVERSION answer in
-  C (`cbits/`), since they return a struct by value. Any operation whose C call can run a callback
-  returns the events it caused, as `feed`, `resize` and `reset` do (`Internal.Feed`, which can
-  read the terminal's keys); `setT`'s cannot, and a test holds that. A sized struct a callback
+  C (`cbits/gveff_terminal.c`, with the terminal's `USERDATA` struct), since they return a struct by
+  value. Any operation whose C call can run a callback returns the events it caused, as `feed`,
+  `resize` and `reset` do (`Internal.Feed`, which can read the terminal's keys); `setT`'s cannot,
+  and a test holds that. A sized struct a callback
   receives is read only after checking its `size` (`ShortStruct` otherwise).
+- **Render states and frames** (§4.3, `Internal.Render`, public `Render`): a render state is its
+  own rank-2 region inside its terminal's; a frame (`withFrame`, tag `f`) is shorter still, and what
+  leaves it is copied (`Cell`). A frame that returns cleans the dirty state; one that throws does
+  not. Frame and row reads are typed keys like the terminal's (`FrameData`/`RowData`, prefixed
+  `Render`/`Row`, held against the header by `Test.Ghostty.Effectful.Render`; deferred rows listed
+  there). `RENDER_HOLD` is C (`cbits/gveff_terminal.c`): it captures into the render states attached
+  to the terminal, then calls the Haskell callback, which only appends. A call that changes the
+  terminal or its viewport must call `wrote`, since a frame reads hyperlinks from the terminal only
+  while that count is unchanged.
 - **A C enum is closed at this level, with no unknown case**: an unnamed value is `UnknownEnum`
   (`Internal.Convert.unknownEnum`), because the version check and the layout test rule it out.
 - Tests may import `Internal` (to build values or reach `runGhosttyPinnedTo`).

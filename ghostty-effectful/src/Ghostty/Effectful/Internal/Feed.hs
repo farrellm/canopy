@@ -26,7 +26,7 @@ import Ghostty.Effectful.Internal.Callbacks (Answers (..), drain, joinWrites, re
 import Ghostty.Effectful.Internal.Error (expectSuccess, resultCode)
 import Ghostty.Effectful.Internal.Keys (getData)
 import Ghostty.Effectful.Internal.Size (CellPixels (..), GridSize (..), fromExtent)
-import Ghostty.Effectful.Internal.Terminal (Terminal (..))
+import Ghostty.Effectful.Internal.Terminal (Terminal (..), wrote)
 import Ghostty.FFI.Terminal
   ( GhosttyTerminalBoundary (..),
     GhosttyTerminalStringEnd (..),
@@ -48,6 +48,7 @@ resizeTerminal :: Terminal s -> GridSize -> CellPixels -> IO [TerminalEvent]
 resizeTerminal t g px = do
   -- The size callback runs inside the resize, so the answers change first,
   -- and change back if the resize is refused.
+  wrote t
   old <- readIORef t.answers
   writeIORef t.answers old {grid = g, pixels = px}
   ( expectSuccess (CallSite "ghostty_terminal_resize")
@@ -61,6 +62,7 @@ resizeTerminal t g px = do
 -- a reset the program asks for.)
 resetTerminal :: Terminal s -> IO [TerminalEvent]
 resetTerminal t = do
+  wrote t
   ghosttyTerminalReset t.handle
   drainEvents t
 
@@ -78,6 +80,7 @@ drainEvents t = resolve (getData t.handle) =<< drain t.events
 -- the input.
 feedTerminal :: Terminal s -> ByteString -> IO [TerminalEvent]
 feedTerminal t bytes = do
+  wrote t
   before <- try (drainEvents t)
   (failure, after) <- BSU.unsafeUseAsCStringLen bytes $ \(p, n) -> alloca $ \stop -> go stop (castPtr p) n (leftToMaybe before) []
   whenJust failure throwIO

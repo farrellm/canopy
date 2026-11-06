@@ -51,7 +51,9 @@ data Handles = Handles
     -- | how many terminals are open
     openCount :: IORef Int,
     -- | how many tracked grid references are live
-    refCount :: IORef Int
+    refCount :: IORef Int,
+    -- | how many render states are open
+    renderCount :: IORef Int
   }
 
 -- | The start of every operation: on the owner thread, the interpreter's
@@ -83,7 +85,8 @@ runGhosttyPinnedTo pin act = do
       owner <- liftIO myThreadId
       open <- newIORef 0
       refs <- newIORef 0
-      Right <$> evalStaticRep (GhosttyRep Handles {owner, openCount = open, refCount = refs}) act
+      renders <- newIORef 0
+      Right <$> evalStaticRep (GhosttyRep Handles {owner, openCount = open, refCount = refs, renderCount = renders}) act
 
 -- | The linked library's build metadata (@VERSION_BUILD@), which
 -- @scripts/build-libghostty.sh@ stamps with the commit it built; 'Nothing' if

@@ -155,6 +155,29 @@ Written as changes land, not at release (DESIGN.md §2.9).
   report. The calls that resolve events moved to `Ghostty.Effectful.Internal.Feed`, which reads the
   terminal's keys directly instead of taking a reader from every caller.
 
+- `ghostty-effectful` has render states and frames (M1.7, DESIGN.md §4.3), in
+  `Ghostty.Effectful.Render`. `withRenderState` scopes a render state to a rank-2 region inside its
+  terminal's; `withFrame` updates it and scopes a frame (tag `f`), whose `dirtyRows`/`allRows` and
+  their `cells` are borrowed until the next update. Cells are copied into `Cell`
+  (`Ghostty.Effectful.Cell`: text, width, style, resolved colours, hyperlink, protection, OSC 133
+  content). A frame that returns consumes its changes (`ghostty_render_state_clean`); one that throws
+  leaves them for the next. Frame and row data are typed keys (`FrameData`, `RowData` in
+  `Ghostty.Effectful.Render.Keys`), each held against the header with its deferred rows, as M1.5's
+  are; the cell keys a copy reads are held the same way.
+- A synchronized-output hold (mode 2026) shows the frame from when it began: the `RENDER_HOLD`
+  callback is now C (`cbits/gveff_terminal.c`, renamed from `gveff_answers.c` with the terminal's
+  `USERDATA` now a struct), which updates every render state attached to the terminal, as the header
+  asks, before calling the Haskell callback that appends the event. A hold the caller ends by
+  turning the mode off is noticed at the next frame. A hold that begins while a frame of a render
+  state is open does not capture into it, since that would invalidate the rows being read.
+- A hyperlink's URI is read from the terminal, so a cell has it only while the terminal is still the
+  frame's moment: not in a held frame, nor after the terminal was written to, which a new count of
+  changes on each terminal tells.
+- Tests: only the rows changed since the last frame are dirty; copied cells survive the next update;
+  rows read in any order; styles, palette colours, wide and combining characters, links,
+  background-only cells, semantic content; every hold case above; every frame and row key on a fresh
+  frame and against the header; row identity through a scroll; the cursor outside the viewport.
+
 ### M0: infrastructure
 
 - Seven packages under one `cabal.project`, each a skeleton wired to its neighbours in §1.3:

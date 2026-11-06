@@ -14,8 +14,12 @@
 -- way, and becomes 'UnknownEnum' then.
 --
 -- @ENQUIRY@ and @XTVERSION@ return a struct by value, which no Haskell
--- function can, so they are C (@cbits/gveff_answers.c@), answering from the
--- terminal's @USERDATA@: an array of two strings this module owns.
+-- function can, so they are C (@cbits/gveff_terminal.c@), answering from the
+-- terminal's @USERDATA@ (a 'GveffUserdata'), whose two strings this module
+-- owns. @RENDER_HOLD@ is C too: when a hold begins it captures the frame into
+-- every render state attached to the terminal, which is a C call the header
+-- asks for inside the callback (DESIGN.md §4.3), and then calls the Haskell
+-- callback that appends the event.
 module Ghostty.Effectful.Internal.Callbacks
   ( -- * Pending events
     Pending (..),
@@ -26,6 +30,7 @@ module Ghostty.Effectful.Internal.Callbacks
     -- * Answers
     Answers (..),
     Installed (..),
+    GveffUserdata,
     installCallbacks,
     releaseCallbacks,
     setEnquiryAnswer,
@@ -33,28 +38,36 @@ module Ghostty.Effectful.Internal.Callbacks
 
     -- * Callbacks
     onClipboardWrite,
+
+    -- * Frame capture
+    captureAttach,
+    captureDetach,
+    captureHeld,
+    captureRelease,
+    captureFraming,
   )
 where
 
 import Control.Exception (catch, mask_, onException, throwIO)
 import Data.ByteString qualified as BS
 import Data.ByteString.Unsafe qualified as BSU
-import Foreign.C.Types (CBool, CInt, CSize)
+import Foreign.C.Types (CBool (..), CInt (..), CSize)
 import Foreign.Marshal.Alloc (free, mallocBytes)
-import Foreign.Marshal.Array (mallocArray, peekArray)
+import Foreign.Marshal.Array (peekArray)
 import Foreign.Marshal.Utils (copyBytes, with)
 import Foreign.Ptr (FunPtr, Ptr, castFunPtr, castFunPtrToPtr, castPtr, freeHaskellFunPtr, nullPtr)
 import Foreign.Storable (Storable (..))
-import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..))
+import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), ResultCode (..))
 import Ghostty.Effectful.Event
 import Ghostty.Effectful.Internal.Convert (unknownEnum)
-import Ghostty.Effectful.Internal.Error (expectSuccess)
+import Ghostty.Effectful.Internal.Error (expectSuccess, resultCode)
 import Ghostty.Effectful.Internal.Size (CellPixels (..), GridSize (..), extent, fromExtent)
 import Ghostty.Effectful.Point (Point (..))
 import Ghostty.Effectful.Terminal.Keys (ColorScheme (..), DeviceAttributes (..), TerminalData (..))
 import Ghostty.FFI.Device
 import Ghostty.FFI.Layout (CEnum, CStruct (..))
 import Ghostty.FFI.Osc (ghosttyOscTerminatorEnum, pattern GhosttyOscTerminatorBel, pattern GhosttyOscTerminatorSt, pattern GhosttyOscTerminatorUnknown)
+import Ghostty.FFI.Render (GhosttyRenderState (..))
 import Ghostty.FFI.SizeReport (GhosttySizeReportSize (..))
 import Ghostty.FFI.Terminal
   ( GhosttyTerminal,
@@ -81,7 +94,7 @@ import Ghostty.FFI.Terminal
     pattern GhosttyTerminalOptXtversion,
   )
 import Ghostty.FFI.Terminal.Callbacks
-import Ghostty.FFI.Types (GhosttyString (..), ghosttyStringBytes)
+import Ghostty.FFI.Types (GhosttyResult (..), GhosttyString (..), ghosttyStringBytes)
 
 -- | What a callback appended: an event, or what will make one after the
 -- write.
@@ -150,10 +163,14 @@ data Answers = Answers
 data Installed = Installed
   { -- | the Haskell callbacks' function pointers
     funPtrs :: [FunPtr ()],
-    -- | the @USERDATA@ array the C callbacks answer from: ENQ's reply, then
-    -- XTVERSION's name
-    userdata :: Ptr GhosttyString
+    -- | the @USERDATA@ the C callbacks answer from
+    userdata :: Ptr GveffUserdata
   }
+
+-- | A terminal's @USERDATA@, @GveffUserdata@ in @include/gveff_terminal.h@:
+-- ENQ's reply and XTVERSION's name, first, as an array of two strings; then
+-- the render states that a hold captures into.
+data GveffUserdata
 
 -- | Install every callback but @CLIPBOARD_READ@ on a terminal, appending to
 -- the buffer and answering from the answers, with ENQ and XTVERSION
@@ -168,8 +185,8 @@ installCallbacks h buf answers enq xtv = do
         modifyIORef' made (castFunPtr fp :)
         setPtr opt (castFunPtrToPtr fp)
       setPtr opt p = expectSuccess (CallSite "ghostty_terminal_set") =<< ghosttyTerminalSet h opt p
-  ud <- mallocArray answerCount
-  traverse_ (\k -> pokeElemOff ud k emptyString) [0 .. answerCount - 1]
+  ud <- gveffUserdataNew
+  when (ud == nullPtr) $ throwIO (OutOfMemory (CallSite "gveff_userdata_new"))
   let install = do
         replaceAnswer ud enquiryIndex enq
         replaceAnswer ud xtversionIndex xtv
@@ -189,20 +206,23 @@ installCallbacks h buf answers enq xtv = do
         wrapped (mkGhosttyTerminalProgramStatusFn (onProgramStatus buf)) GhosttyTerminalOptProgramStatus
         wrapped (mkGhosttyTerminalSemanticPromptFn (onSemanticPrompt buf)) GhosttyTerminalOptSemanticPrompt
         wrapped (mkGhosttyTerminalResetFn (\_ _ -> push buf (Ready Reset))) GhosttyTerminalOptReset
-        wrapped (mkGhosttyTerminalRenderHoldFn (\_ _ b -> push buf (Ready (RenderHold (b /= 0))))) GhosttyTerminalOptRenderHold
+        notify <- mkGhosttyTerminalRenderHoldFn (onRenderHold buf ud)
+        modifyIORef' made (castFunPtr notify :)
+        gveffSetHoldNotify ud notify
+        setPtr GhosttyTerminalOptRenderHold (castFunPtrToPtr gveffRenderHold)
         wrapped (mkGhosttyTerminalUnknownSequenceFn (onUnknownSequence buf)) GhosttyTerminalOptUnknownSequence
         wrapped (mkGhosttyTerminalResizeWindowFn (onResizeWindow buf)) GhosttyTerminalOptResizeWindow
   install `onException` (readIORef made >>= \fps -> releaseCallbacks Installed {funPtrs = fps, userdata = ud})
   fps <- readIORef made
   pure Installed {funPtrs = fps, userdata = ud}
 
--- | Free the callbacks and the answer strings. Only once the terminal that
--- calls them is freed.
+-- | Free the callbacks, the answer strings and the @USERDATA@. Only once the
+-- terminal that calls them is freed.
 releaseCallbacks :: Installed -> IO ()
 releaseCallbacks i = do
   traverse_ freeHaskellFunPtr i.funPtrs
-  traverse_ (peekElemOff i.userdata >=> freeString) [0 .. answerCount - 1]
-  free i.userdata
+  traverse_ (peekElemOff (answersOf i.userdata) >=> freeString) [0 .. answerCount - 1]
+  gveffUserdataFree i.userdata
 
 -- | Set ENQ's reply; empty sends none.
 setEnquiryAnswer :: Installed -> ByteString -> IO ()
@@ -214,7 +234,7 @@ setXtversionAnswer i = replaceAnswer i.userdata xtversionIndex
 
 -- | Replace one of the @USERDATA@ strings with a copy of the bytes, and free
 -- the old one. No write is running, so no C callback is reading it.
-replaceAnswer :: Ptr GhosttyString -> Int -> ByteString -> IO ()
+replaceAnswer :: Ptr GveffUserdata -> Int -> ByteString -> IO ()
 replaceAnswer ud k bs = mask_ $ do
   new <-
     if BS.null bs
@@ -223,13 +243,17 @@ replaceAnswer ud k bs = mask_ $ do
         dst <- mallocBytes n
         copyBytes dst (castPtr src) n
         pure GhosttyString {ptr = dst, len = fromIntegral n}
-  old <- peekElemOff ud k
-  pokeElemOff ud k new
+  old <- peekElemOff (answersOf ud) k
+  pokeElemOff (answersOf ud) k new
   freeString old
 
--- | Where ENQ's reply and XTVERSION's name sit in the @USERDATA@ array, and
--- its length: @GVEFF_ANSWER_ENQUIRY@, @GVEFF_ANSWER_XTVERSION@ and
--- @GVEFF_ANSWER_COUNT@ in @include/gveff_answers.h@.
+-- | The answer strings: @answers@, the struct's first field (C asserts it).
+answersOf :: Ptr GveffUserdata -> Ptr GhosttyString
+answersOf = castPtr
+
+-- | Where ENQ's reply and XTVERSION's name sit in the @USERDATA@'s
+-- @answers@, and its length: @GVEFF_ANSWER_ENQUIRY@, @GVEFF_ANSWER_XTVERSION@
+-- and @GVEFF_ANSWER_COUNT@ in @include/gveff_terminal.h@.
 enquiryIndex, xtversionIndex, answerCount :: Int
 enquiryIndex = 0
 xtversionIndex = 1
@@ -243,13 +267,83 @@ emptyString = GhosttyString {ptr = nullPtr, len = 0}
 freeString :: GhosttyString -> IO ()
 freeString s = when (s.ptr /= nullPtr) (free s.ptr)
 
--- | ENQ's answer, in C (@cbits/gveff_answers.c@).
-foreign import capi "gveff_answers.h &gveff_enquiry"
+-- | ENQ's answer, in C (@cbits/gveff_terminal.c@).
+foreign import capi "gveff_terminal.h &gveff_enquiry"
   gveffEnquiry :: GhosttyTerminalEnquiryFn
 
 -- | XTVERSION's answer, in C.
-foreign import capi "gveff_answers.h &gveff_xtversion"
+foreign import capi "gveff_terminal.h &gveff_xtversion"
   gveffXtversion :: GhosttyTerminalXtversionFn
+
+-- | The render-hold callback, in C: it captures, then calls the notifier.
+foreign import capi "gveff_terminal.h &gveff_render_hold"
+  gveffRenderHold :: GhosttyTerminalRenderHoldFn
+
+-- | A zeroed @USERDATA@, or null. @unsafe@, as is every call below: none
+-- calls back into Haskell, and each is a few loads and stores.
+foreign import capi unsafe "gveff_terminal.h gveff_userdata_new"
+  gveffUserdataNew :: IO (Ptr GveffUserdata)
+
+-- | Free a @USERDATA@ and its capture list, not the answers' bytes.
+foreign import capi unsafe "gveff_terminal.h gveff_userdata_free"
+  gveffUserdataFree :: Ptr GveffUserdata -> IO ()
+
+-- | Set the Haskell callback a hold reports to.
+foreign import capi unsafe "gveff_terminal.h gveff_set_hold_notify"
+  gveffSetHoldNotify :: Ptr GveffUserdata -> GhosttyTerminalRenderHoldFn -> IO ()
+
+-- | Capture into a render state from now on; false if the list cannot grow.
+foreign import capi unsafe "gveff_terminal.h gveff_capture_attach"
+  gveffCaptureAttach :: Ptr GveffUserdata -> GhosttyRenderState -> IO CBool
+
+-- | Stop capturing into a render state.
+foreign import capi unsafe "gveff_terminal.h gveff_capture_detach"
+  gveffCaptureDetach :: Ptr GveffUserdata -> GhosttyRenderState -> IO ()
+
+-- | Whether a render state holds a frame captured when a hold began.
+foreign import capi unsafe "gveff_terminal.h gveff_capture_held"
+  gveffCaptureHeld :: Ptr GveffUserdata -> GhosttyRenderState -> IO CBool
+
+-- | Drop a render state's captured frame.
+foreign import capi unsafe "gveff_terminal.h gveff_capture_release"
+  gveffCaptureRelease :: Ptr GveffUserdata -> GhosttyRenderState -> IO ()
+
+-- | Mark a frame of a render state open or closed.
+foreign import capi unsafe "gveff_terminal.h gveff_capture_framing"
+  gveffCaptureFraming :: Ptr GveffUserdata -> GhosttyRenderState -> CBool -> IO ()
+
+-- | The first failed capture since the last call, or success; and reset it.
+foreign import capi unsafe "gveff_terminal.h gveff_capture_failure"
+  gveffCaptureFailure :: Ptr GveffUserdata -> IO GhosttyResult
+
+-- * Frame capture
+
+-- | Capture a terminal's frames into a render state when a hold begins, from
+-- now on (DESIGN.md §4.3). Out of memory if the list cannot grow.
+captureAttach :: Installed -> GhosttyRenderState -> IO ()
+captureAttach i rs = do
+  ok <- gveffCaptureAttach i.userdata rs
+  when (ok == 0) $ throwIO (OutOfMemory (CallSite "gveff_capture_attach"))
+
+-- | Stop capturing into a render state, before it is freed.
+captureDetach :: Installed -> GhosttyRenderState -> IO ()
+captureDetach i = gveffCaptureDetach i.userdata
+
+-- | Whether a render state holds the frame captured when a hold began, the
+-- hold not having ended since.
+captureHeld :: Installed -> GhosttyRenderState -> IO Bool
+captureHeld i rs = (/= 0) <$> gveffCaptureHeld i.userdata rs
+
+-- | Drop a render state's captured frame: its owner ended the hold by
+-- turning the mode off, which calls no callback.
+captureRelease :: Installed -> GhosttyRenderState -> IO ()
+captureRelease i = gveffCaptureRelease i.userdata
+
+-- | Mark a frame of a render state open ('True') or closed. A hold that
+-- begins while one is open does not capture into it, since its rows are
+-- being read and an update would invalidate them.
+captureFraming :: Installed -> GhosttyRenderState -> Bool -> IO ()
+captureFraming i rs b = gveffCaptureFraming i.userdata rs (if b then 1 else 0)
 
 -- * The callbacks
 
@@ -269,6 +363,19 @@ text s = decodeUtf8 <$> ghosttyStringBytes s
 -- | A percentage the header gives as -1 when absent.
 percentOf :: Int8 -> Maybe Word8
 percentOf n = if n < 0 then Nothing else Just (fromIntegral n)
+
+-- | @RENDER_HOLD@'s Haskell half, called by the C callback after it
+-- captured: a capture that failed, then the event.
+onRenderHold :: IORef [Pending] -> Ptr GveffUserdata -> GhosttyTerminal -> Ptr () -> CBool -> IO ()
+onRenderHold buf ud _ _ held = sheltered buf () $ do
+  failure <- gveffCaptureFailure ud
+  case resultCode failure of
+    ResultSuccess -> pass
+    ResultOutOfMemory -> push buf (Failed (toException (OutOfMemory captureSite)))
+    other -> push buf (Failed (toException (Invariant captureSite other)))
+  push buf (Ready (RenderHold (held /= 0)))
+  where
+    captureSite = CallSite "ghostty_render_state_update"
 
 -- | @WRITE_PTY@: copy the reply out.
 onWritePty :: IORef [Pending] -> GhosttyTerminal -> Ptr () -> Ptr Word8 -> CSize -> IO ()

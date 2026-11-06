@@ -30,6 +30,7 @@ module Ghostty.Effectful.Internal.Terminal
     -- * Calls
     openTerminal,
     closeTerminal,
+    wrote,
 
     -- * Tracked references
     trackPoint,
@@ -88,7 +89,12 @@ data Terminal s = Terminal
     -- | what the query callbacks answer with
     answers :: IORef Answers,
     -- | the callbacks, freed with the terminal
-    installed :: Installed
+    installed :: Installed,
+    -- | how many calls have changed the terminal or its viewport: a frame
+    -- read when this was one value describes the terminal only while it
+    -- still is. Every operation that writes, resizes, resets, sets an
+    -- option or scrolls the viewport counts ('wrote').
+    writes :: IORef Word64
   }
 
 -- | A tracked reference to a cell of a terminal in the region @s@: it
@@ -173,7 +179,13 @@ openTerminal cfg = do
   installed <-
     installCallbacks handle events answers cfg.enquiry (encodeUtf8 cfg.xtversion)
       `onException` ghosttyTerminalFree handle
-  pure Terminal {handle, refs, nextRef, events, answers, installed}
+  writes <- newIORef 0
+  pure Terminal {handle, refs, nextRef, events, answers, installed, writes}
+
+-- | Count a call that changed the terminal (§4.3: a frame's hyperlinks are
+-- read from the terminal only while it has not changed since).
+wrote :: Terminal s -> IO ()
+wrote t = modifyIORef' t.writes (+ 1)
 
 -- | Free every tracked reference still registered, taking their number off
 -- the counter, then @ghostty_terminal_free@, then the callbacks, which the

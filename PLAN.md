@@ -4,7 +4,7 @@ The milestones of DESIGN.md §13, broken into steps. **Each step is one CR**: it
 `-Werror`, passes every CI step, adds its `CHANGELOG.md` line, and updates `DESIGN.md` in the same
 commit if it changes a decision (§2.9). Section references (§) are to DESIGN.md.
 
-M0 is done (PR #1), and M1.1–M1.6 (PRs #2–#8). Steps are numbered `M<n>.<k>`
+M0 is done (PR #1), and M1.1–M1.7 (PRs #2–#9). Steps are numbered `M<n>.<k>`
 and are in dependency order within a milestone.
 
 ## Tracks
@@ -109,6 +109,11 @@ Exit: formatter goldens; every typed key exercised (§13).
 - `Ghostty.Effectful.Render`: render state handle, `withFrame` (frame tag `f`), `dirtyRows`,
   `cells` copying into `Cell`/`Style`/`Rgb`/`Hyperlink`, cursor and palette.
 - Tests: only dirty rows reported after a partial update; copied cells survive the next update.
+- `withRenderState` is its own rank-2 region inside the terminal's. Frame and row data are typed
+  keys (`FrameData`, `RowData`) held against the header, as M1.5's are. A frame that returns
+  consumes its dirty state. A synchronized-output hold is captured by a C `RENDER_HOLD` callback,
+  answering §4.5's question; hyperlink URIs are read from the terminal only while it is the frame's
+  moment. Overscan is never requested (DESIGN.md §4.3). **Done.**
 
 ### M1.8 Formatter and goldens
 
