@@ -54,6 +54,11 @@ Exit: formatter goldens; every typed key exercised (§13).
 
 - `Ghostty.FFI.Render` (render state, row and cell iterators, dirty iteration), `.Format`,
   `.Encode` (key, mouse, focus, paste, size report, mode report), `.Parse` (OSC, SGR), `.Unicode`.
+- The rest of the headers M1.2 bound in part (`screen.h`, `color.h`, `modes.h`, `osc.h`,
+  `size_report.h`, `io.h`), and the output types of terminal keys that live in these headers:
+  `GhosttySelection`, `GhosttyMouseShape`, `GhosttyKittyKeyFlags`, the `GhosttyKittyGraphics`
+  handle, and `GhosttySgrUnderline` (the `int` in `GhosttyStyle`). M1.5 needs all of them. Each
+  header's line leaves `ghostty-vt-ffi/coverage.txt` as it is bound.
 - Layout-test rows for each. May be split into two CRs (render+format, encoders+parsers+unicode) if
   it reviews too large.
 
@@ -517,7 +522,8 @@ Exit: feature table §8 complete. Steps are mostly independent of each other.
 
 ### M6.15 Rich output
 
-- Kitty graphics placements (render-state FFI + passthrough when the host supports it), OSC 8
+- Kitty graphics placements (render-state FFI, `kitty_graphics.h`, and `sys.h`'s PNG decoder hook;
+  passthrough when the host supports it), OSC 8
   hyperlinks end to end, opt-in output-as-code highlighting per profile (§8.3).
 
 ### M6.16 Node, Julia, utop profiles

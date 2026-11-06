@@ -1,0 +1,47 @@
+{-# LANGUAGE CApiFFI #-}
+{-# LANGUAGE PatternSynonyms #-}
+
+-- | @include/ghostty/vt/modes.h@, the part the terminal's mode keys need:
+-- the packed mode type, its helpers, and the named modes. Mode reports arrive
+-- with M1.3's encoders.
+--
+-- A mode is not a C enum but a @uint16_t@ the header builds with a macro, so
+-- the named modes are patterns over a plain number and have no @COMPLETE@
+-- set: any number is some mode.
+module Ghostty.FFI.Modes
+  ( -- * Modes
+    GhosttyMode,
+    ghosttyModeNew,
+    ghosttyModeValue,
+    ghosttyModeAnsi,
+
+    -- * Named modes
+    {{xmodes}}
+  )
+where
+
+import Foreign.C.Types (CBool (..))
+
+#include <gvtffi_shims.h>
+
+-- | @GhosttyMode@: a mode number with its kind in the top bit, set for an ANSI
+-- mode and clear for a DEC private one.
+type GhosttyMode = Word16
+
+-- | @ghostty_mode_new@: pack a mode number and whether it is ANSI.
+-- A @static inline@ function, reachable only through @capi@ (§3.3).
+-- @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_mode_new"
+  ghosttyModeNew :: Word16 -> CBool -> GhosttyMode
+
+-- | @ghostty_mode_value@: the mode number without its kind bit. @unsafe@: it
+-- does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_mode_value"
+  ghosttyModeValue :: GhosttyMode -> Word16
+
+-- | @ghostty_mode_ansi@: whether the mode is an ANSI one. @unsafe@: it does not
+-- call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_mode_ansi"
+  ghosttyModeAnsi :: GhosttyMode -> CBool
+
+{{modes}}

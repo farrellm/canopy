@@ -1,0 +1,32 @@
+{-# LANGUAGE CApiFFI #-}
+{-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE ViewPatterns #-}
+
+-- | @include/ghostty/vt/build_info.h@: compile-time facts about the linked
+-- library (DESIGN.md §3.4).
+module Ghostty.FFI.BuildInfo
+  ( -- * Keys
+    {{xenum build_info.h GhosttyBuildInfo}}
+
+    -- * Values
+    {{xenum build_info.h GhosttyOptimizeMode}}
+
+    -- * Calls
+    ghosttyBuildInfo,
+  )
+where
+
+import Foreign.C.Types (CInt (..))
+import Foreign.Ptr (Ptr)
+import Foreign.Storable (Storable (..))
+import Ghostty.FFI.Layout (CEnum (..), unnamed)
+import Ghostty.FFI.Types (GhosttyResult (..))
+
+#include <gvtffi_shims.h>
+
+{{enumT build_info.h GhosttyBuildInfo}}
+{{enum build_info.h GhosttyOptimizeMode}}
+-- | @ghostty_build_info@. @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_build_info"
+  ghosttyBuildInfo :: GhosttyBuildInfo -> Ptr () -> IO GhosttyResult

@@ -309,7 +309,9 @@ The rules, by module name across all packages:
 2. `cabal build all --enable-tests --enable-benchmarks --ghc-options=-Werror`
 3. `cabal test ghostty-vt-ffi-test ghostty-effectful-test tendril-test tree-sitter-ffi-test tree-sitter-effectful-test canopy-test`,
    plus `scripts/gen-ts-shims.py --check`, which fails if the committed shims (§5A.2) are not what
-   the vendored header generates
+   the vendored header generates; `scripts/gen-ghostty-ffi.py --check`, the same for the generated
+   ghostty binding (§3.3); and `scripts/check-ghostty-coverage.py`, which fails on a function or type
+   in the pinned headers that is neither bound nor deferred (§3.3)
 4. doctests for `tendril`, `ghostty-effectful` and `tree-sitter-effectful`
 5. `hlint --ignore-glob='lint/fixtures/**' .`, `lint/check-layering.sh`, `scripts/check-common-stanzas.sh`,
    `scripts/check-layout-rows.py` (§3.4)
@@ -339,7 +341,8 @@ library (`libghostty-vt.a`), headers and a pkg-config file. It has no dependenci
 Distribution packages do not exist yet, so:
 
 - **The commit is pinned** in `ghostty-vt-ffi/GHOSTTY_COMMIT`. Upgrading is one deliberate commit that
-  changes the pin, regenerates the layout baseline (§3.4) and says why.
+  changes the pin, regenerates the generated binding (§3.3), and says why. The layout test (§3.4) and
+  the coverage check then name whatever the new headers changed.
 - **`scripts/build-libghostty.sh`** fetches that commit and builds into `_deps/ghostty/<commit>/`,
   printing the `PKG_CONFIG_PATH` to export. A `cabal.project.local` is never required. Zig's own
   package fetcher is not relied on: in Zig 0.17.1 it fails inside `zig build` with
@@ -398,6 +401,37 @@ from it:
   real prototype through the C compiler. A wrong argument type is a C compile error at build time,
   which `ccall` would let through to a crash. `static inline` helpers in the headers
   (`ghostty_mode_new`) are reachable only this way.
+- **Five functions take a struct by value**, which GHC's FFI cannot pass:
+  `ghostty_terminal_scroll_viewport`, `_grid_ref`, `_grid_ref_track`, `_continuation_write` and
+  `ghostty_tracked_grid_ref_set`. Each gets a `static inline` pointer shim in
+  `ghostty-vt-ffi/include/gvtffi_shims.h`, called through `capi` like any other function, so the
+  compiler still checks both prototypes. There are five, so they are written by hand, not generated
+  as tree-sitter's 56 are (§5A.2). Two callbacks *return* a struct by value (`ENQUIRY` and
+  `XTVERSION` return a `GhosttyString`), which a Haskell `wrapper` cannot. Their types are bound,
+  and a function for either has to be written in C (§4.5).
+- **One module per header** (`terminal.h` → `Ghostty.FFI.Terminal`, with its callback half in
+  `Ghostty.FFI.Terminal.Callbacks`). A header is bound in part where only part of it is needed yet,
+  and the module says which part.
+- **The mechanical code is generated from the headers**, by `scripts/gen-ghostty-ffi.py`, and
+  committed: each enum's patterns, `Unknown` view and descriptor, each plain struct's record,
+  `Storable` instance and descriptor, each callback type and its `wrapper`, the named modes, and the
+  layout test's enum rows. The input is a template per module (`ghostty-vt-ffi/gen/**.in`), the
+  module as written by hand with directive lines where generated code goes; tagged unions, arrays
+  and imports stay hand-written there. Docs are the header's own. CI runs it with `--check`, so a pin
+  bump that changes a header cannot leave the binding behind, and an edit to generated code cannot
+  survive.
+- **Coverage is checked against the headers.** `scripts/check-ghostty-coverage.py` lists every
+  `GHOSTTY_API` function and every type the pinned headers declare, and fails on one that is neither
+  bound nor listed in `ghostty-vt-ffi/coverage.txt` with the PLAN.md step that binds it (or `never`,
+  with a reason). An entry that no longer defers anything fails too. The `capi` prototype check
+  cannot find a function nobody bound; this can.
+- **A tagged union is a Haskell sum**: one constructor per arm the binding names, plus an `…Other`
+  constructor that carries a tag the binding does not name, whose value it cannot read. The
+  `Storable` instance reads the arm the tag selects. A union whose arms all have one type
+  (`GhosttyPoint`) is a record. C `bool` is `CBool`, never `Bool`, whose `Storable` is four bytes.
+- **The binding never supplies an allocator.** Every function that takes a `GhosttyAllocator *` is
+  passed null, the library's default, and the struct is not marshalled. A Haskell allocator would
+  run Haskell inside every allocation the library makes, against §4.1's third goal.
 - **`hsc2hs` for every struct and enum.** Offsets, sizes and enum values come from the headers through
   the C compiler, never from hand-copied numbers.
 - **Enums are newtypes over the C integer with pattern synonyms**, `COMPLETE`-annotated, plus an
@@ -407,7 +441,12 @@ from it:
 - **`unsafe` FFI calls by default**, `safe` only for calls that can call back into Haskell
   (`vt_write`, `vt_write_until`, `paste`, `render_state_update` if it ever gains callbacks). This is
   a per-import decision recorded in the import's comment, because an `unsafe` call that re-enters
-  Haskell is a crash, and that cannot be checked by the compiler.
+  Haskell is a crash, and that cannot be checked by the compiler. Reading the header found more
+  than the writes: `terminal_reset` and `terminal_resize` end a render hold through its callback
+  (and resize sends an in-band size report), `continuation_write` calls its writer, and
+  `terminal_set` is `safe` because the header does not promise that no option reports through a
+  callback. One call is `safe` for a different reason: `terminal_compress` calls nothing back, but a
+  full pass can stall, and an `unsafe` call would hold up every Haskell thread at the next GC.
 - **Raw types only.** `Ptr`, `FunPtr`, `CSize`, `Word8`. No `ForeignPtr`, no exceptions, no `Text`.
   Everything that makes it safe is `ghostty-effectful`'s job; this package's job is to be complete and
   exactly right. The one exception is `ghosttyStringBytes`, which copies a borrowed `GhosttyString`
@@ -421,7 +460,8 @@ size and every field's offset with the `hsc2hs`-derived values compiled into the
 from different places — the headers the binding was compiled against, and the library actually
 linked — so the test catches a header/library mismatch (a stale `_deps`, a distro `.so` at a
 different commit) that would otherwise be silent memory corruption. It also checks that
-`ghostty_build_info` reports the pinned build, and that every enum value the binding names exists.
+`ghostty_build_info` reports the pinned build, and that the binding names every enum value the
+library has.
 
 The values compiled into the binding are exported beside each type as a descriptor
 (`Ghostty.FFI.Layout`: `CStruct`, `CField`, `CEnum`), every number in it from `hsc2hs`, so the test
@@ -431,7 +471,10 @@ a field the binding does not marshal is a failure too. Each struct row also carr
 value: the `Storable` instance's `sizeOf` and `alignment` must equal the descriptor's, and the sample
 must `poke` and `peek` back unchanged over zeroed and over all-ones memory, so a field the instance
 skips is a failure. For an enum it checks the type's size and, for each value the binding names, that
-the manifest has that full C name (its `prefix` plus key) with that value. `ghostty_type_json()`
+the manifest has that full C name (its `prefix` plus key) with that value; and, the other way, that
+the binding names every value the manifest lists (apart from the `…MAX_VALUE` padding). So the
+binding is exhaustive at the pin, and a value a bump adds is a failure rather than an `Unknown` at
+run time. The `Unknown` view stays, because C enums are open. `ghostty_type_json()`
 describes enums as well as structs, so "exists" is checked against the linked library, not only the
 header. Every enum's `Unknown` view (§3.3) is built from its descriptor's values, and each enum row
 carries a total match on the `COMPLETE` set; the test checks, over every value the library lists,
@@ -569,6 +612,8 @@ inside them.
 **Query callbacks are configuration, not callbacks.** Colour scheme, device attributes, enquiry,
 XTVERSION and pixel size are answered from a pure `TerminalConfig` record that the caller can update
 with `setT`. No user code runs during a query; the answers are data that a test can inspect.
+ENQ and XTVERSION are answered by a callback that returns a `GhosttyString` by value, which no
+Haskell function can be (§3.3), so those two answers are returned by C, from the configured bytes.
 
 ### 4.6 Concurrency
 
@@ -1798,6 +1843,7 @@ reading the pinned sources. A ✗ changed the design, in the section named.
 | ghci and python emit OSC 133 marks set through their prompt strings | ✓ both; PyREPL re-emits per redraw, hence the bootstrap | §7.2 |
 | ghci `:complete repl` and `:type` are usable as hidden queries | ✓ replies sit cleanly between marks | §9.3 |
 | `SeqUnlift` refuses cross-thread use, so `Ghostty` cannot leak to another thread | ½: `SeqUnlift` does refuse (✓, exact error message observed), but effectful's `forkIO` clones the environment, so a fork inherits the effect; added the effect-row split and an owner-thread check | §4.6 |
+| GHC can call libghostty-vt directly | ✗ 5 functions take a struct by value and 2 callbacks return one (M1.2, at the pin); hand-written pointer shims, and C for the two callbacks | §3.3, §4.5 |
 | `vt_write_until` can stop at each OSC 133 mark | ✓ `BOUNDARY_OSC_END`; the pre-scan fallback is gone | §4.5 |
 | `pkgconfig-depends: libghostty-vt ==0.1.*` | ✗ the wildcard does not parse there; `>=0.1 && <0.2` does and admits `0.1.0-dev`; static linking is a separate `libghostty-vt-static` package | §3.1 |
 | `ghostty_build_info` identifies the pinned build | ✗ it reports the library's `0.1.0-dev` with empty build metadata (M0's CI, at the pin; first read as the app version `1.4.1-dev+…`); the build script stamps the commit in with `-Dlib-version-string`, and the check compares build metadata with the pin | §3.4 |

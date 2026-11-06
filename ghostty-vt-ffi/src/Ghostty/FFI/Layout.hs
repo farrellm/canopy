@@ -12,8 +12,11 @@ module Ghostty.FFI.Layout
   ( CStruct (..),
     CField (..),
     CEnum (..),
+    unnamed,
   )
 where
+
+import Foreign.C.Types (CInt)
 
 -- | A C struct as the binding sees it.
 data CStruct = CStruct
@@ -39,8 +42,9 @@ data CField = CField
   }
   deriving stock (Eq, Show)
 
--- | A C enum as the binding sees it: the values it names, not necessarily all
--- the header has. C enums are open (§3.3), so naming a subset is sound.
+-- | A C enum as the binding sees it: the values it names. The layout test
+-- requires every value the linked library has, so the binding is exhaustive at
+-- the pin; the @Unknown@ view (§3.3) is still there, because C enums are open.
 data CEnum = CEnum
   { -- | The C type name, as @ghostty_type_json()@ keys it.
     name :: Text,
@@ -50,3 +54,11 @@ data CEnum = CEnum
     values :: [(Text, Integer)]
   }
   deriving stock (Eq, Show)
+
+-- | A value the enum does not name, or 'Nothing' for one it does. Every enum's
+-- @Unknown@ view (§3.3) is this over its descriptor, so the view and the
+-- descriptor cannot disagree.
+unnamed :: CEnum -> CInt -> Maybe CInt
+unnamed e n
+  | toInteger n `elem` map snd e.values = Nothing
+  | otherwise = Just n

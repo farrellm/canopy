@@ -1,0 +1,22 @@
+{-# LANGUAGE CApiFFI #-}
+{-# LANGUAGE DuplicateRecordFields #-}
+
+-- | @include/ghostty/vt/io.h@, the part the terminal needs: the writer that
+-- @ghostty_terminal_continuation_write@ calls. Readers arrive with the step
+-- that first needs one.
+module Ghostty.FFI.Io
+  ( -- * Writers
+    {{xstruct io.h GhosttyWriter}}
+    {{xfn wrapper io.h GhosttyWriterFn}}
+  )
+where
+
+import Foreign.C.Types (CBool (..), CSize (..))
+import Foreign.Ptr (FunPtr, Ptr)
+import Foreign.Storable (Storable (..))
+import Ghostty.FFI.Layout (CField (..), CStruct (..))
+
+#include <gvtffi_shims.h>
+
+{{fn wrapper io.h GhosttyWriterFn}}
+{{struct io.h GhosttyWriter}}

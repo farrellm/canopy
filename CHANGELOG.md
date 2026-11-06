@@ -16,6 +16,29 @@ Written as changes land, not at release (DESIGN.md §2.9).
   fails if a bound type has no descriptor or no row.
 - `GhosttyBuildInfo` has the `COMPLETE` set and `GhosttyBuildInfoUnknown` view §3.3 requires, which
   M0 left out.
+- `ghostty-vt-ffi` binds `terminal.h` (M1.2): `Ghostty.FFI.Terminal` (lifecycle, every
+  `GhosttyTerminalOption` and `GhosttyTerminalData` key with its type documented, VT writes,
+  `vt_write_until` and its boundary enums, continuations, the viewport, compression, grid refs) and
+  `Ghostty.FFI.Terminal.Callbacks` (every callback type with a `wrapper`, and the structs they
+  receive). Also `Ghostty.FFI.GridRef` (untracked and tracked refs), `Point`, `Style`, `Device`,
+  `Modes`, `Allocator`, and the parts of `color.h`, `osc.h`, `size_report.h`, `io.h` and `screen.h`
+  these need. 59 descriptors, each with a layout-test row, and a behavioural test of the shims,
+  callbacks and `vt_write_until`.
+- DESIGN.md §3.3, §4.5 and §14.2: five functions take a struct by value, so they call
+  `static inline` pointer shims (`include/gvtffi_shims.h`). The `ENQUIRY` and `XTVERSION` callbacks
+  return one, so no Haskell function can be them. `terminal_reset`, `_resize`, `_set` and
+  `_continuation_write` are `safe` as well as the writes, because each can run a callback, and
+  `_compress` is `safe` because a full pass can stall. Tagged unions are sums, and the binding never
+  supplies an allocator.
+- `ghostty-vt-ffi`'s mechanical code is generated from the pinned headers by
+  `scripts/gen-ghostty-ffi.py`, from templates in `ghostty-vt-ffi/gen/`, and CI checks it is current
+  (`--check`). Callback types are derived from their C typedefs, and their docs are the header's.
+- `scripts/check-ghostty-coverage.py`, in CI, fails on any function or type in the pinned headers
+  that is neither bound nor listed in `ghostty-vt-ffi/coverage.txt` with the PLAN.md step that binds
+  it, and on an entry that no longer defers anything. 132 symbols are bound and 295 deferred.
+- The layout test requires every enum to name every value the library has, so a value a pin bump
+  adds fails the test. `build_info.h` is now bound whole for it (`GhosttyBuildInfo`'s other eight
+  keys, and `GhosttyOptimizeMode`), and DESIGN.md §2.8, §3.1, §3.3 and §3.4 say so.
 
 ### M0: infrastructure
 

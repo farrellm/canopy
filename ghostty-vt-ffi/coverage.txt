@@ -1,0 +1,44 @@
+# What ghostty-vt-ffi does not bind yet, and the PLAN.md step that binds it.
+# scripts/check-ghostty-coverage.py fails on any function or type in the pinned
+# headers that is neither bound nor listed here, and on an entry that no longer
+# defers anything. A header entry covers everything in it not bound yet; a
+# symbol entry covers one name, and wins over its header's.
+#
+# <header or symbol>   <step>   [why]
+
+# M1.3: render state, formatter, encoders, parsers, unicode, and the rest of
+# the headers M1.2 bound in part.
+render.h               M1.3
+screen.h               M1.3     cell and row data; the handles are bound
+formatter.h            M1.3
+selection.h            M1.3     the formatter takes a selection
+key/encoder.h          M1.3
+key/event.h            M1.3
+mouse.h                M1.3     GhosttyMouseShape
+mouse/encoder.h        M1.3
+mouse/event.h          M1.3
+focus.h                M1.3
+paste.h                M1.3
+size_report.h          M1.3     the encoder; the size is bound
+modes.h                M1.3     mode reports; the modes are bound
+color_scheme.h         M1.3
+color.h                M1.3     parsing and palettes; RGB is bound
+osc.h                  M1.3     the parser; the terminator is bound
+sgr.h                  M1.3
+unicode.h              M1.3
+io.h                   M1.3     readers; the writer is bound
+types.h                M1.3     the handles and value types of those headers
+
+# Later steps.
+search.h               M6.6
+GhosttySearch          M6.6
+snapshot.h             M6.10
+GhosttySnapshotDecoder M6.10
+kitty_graphics.h       M6.15
+GhosttyKittyGraphicsImage M6.15
+GhosttyKittyGraphicsPlacementIterator M6.15
+sys.h                  M6.15    the PNG decoder kitty graphics needs; logging and RNG with it
+
+# Never.
+wasm.h                 never    WebAssembly builds only
+GhosttyAllocatorVtable never    allocators are not marshalled (DESIGN.md §3.3)

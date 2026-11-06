@@ -21,7 +21,7 @@ two disagree, the design is the intent and the code is behind. Conventions are c
 | `cabal.project` | Lists the seven packages. |
 | `.ormolu` | ormolu's fixities and re-exports (§2.5). Copied from cassini. Not style config. |
 | `.hlint.yaml`, `lint/` | §2.6's layering rules, their fixtures, and `lint/check-layering.sh`. |
-| `scripts/` | `build-libghostty.sh` (with `prefetch-zig-deps.py`), `vendor-tree-sitter.sh`, `gen-ts-shims.py`, `check-common-stanzas.sh`, `check-haddock.py`, `check-layout-rows.py`. |
+| `scripts/` | `build-libghostty.sh` (with `prefetch-zig-deps.py`), `vendor-tree-sitter.sh`, `gen-ts-shims.py`, `gen-ghostty-ffi.py`, `check-ghostty-coverage.py`, `check-common-stanzas.sh`, `check-haddock.py`, `check-layout-rows.py`. |
 | `_deps/` | Gitignored output of `build-libghostty.sh`: the Zig, the ghostty checkout, and the built library. |
 | `.github/workflows/ci.yml` | CI, §2.8 steps 1–7. Step 8 arrives with the first benchmark. |
 
@@ -48,7 +48,7 @@ two disagree, the design is the intent and the code is behind. Conventions are c
 5. **Ormolu reads `default-extensions` from each package's `.cabal`. Never pass `--no-cabal`.**
 6. **Pins move only on purpose.** `ghostty-vt-ffi/GHOSTTY_COMMIT` and
    `tree-sitter-ffi/TREE_SITTER_VERSION` each change in one commit that says why. A tree-sitter bump
-   also regenerates the shims.
+   also regenerates the shims, and a ghostty bump the generated binding (`gen-ghostty-ffi.py`).
 7. **Goldens are read before they are accepted.** Every fixed bug adds a numbered regression case
    and a `CHANGELOG.md` line in the same commit (§11.1).
 
@@ -62,7 +62,8 @@ root:
   `LD_LIBRARY_PATH`. Without it, any package that depends on `ghostty-vt-ffi` fails at configure
   time. That is by design (§3.1).
 - Build: `cabal build all --enable-tests --enable-benchmarks --ghc-options=-Werror`
-- Test: `cabal test all`, and `python3 scripts/gen-ts-shims.py --check`
+- Test: `cabal test all`, `python3 scripts/gen-ts-shims.py --check`,
+  `python3 scripts/gen-ghostty-ffi.py --check` and `python3 scripts/check-ghostty-coverage.py`
 - Doctest: `cabal repl --with-repl=doctest --repl-options=-Wno-missing-export-lists lib:<pkg>`, for
   `tendril`, `ghostty-effectful` and `tree-sitter-effectful`
 - Lint: `hlint --ignore-glob='lint/fixtures/**' .`, `lint/check-layering.sh`,
