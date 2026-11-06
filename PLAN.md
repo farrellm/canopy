@@ -4,7 +4,7 @@ The milestones of DESIGN.md §13, broken into steps. **Each step is one CR**: it
 `-Werror`, passes every CI step, adds its `CHANGELOG.md` line, and updates `DESIGN.md` in the same
 commit if it changes a decision (§2.9). Section references (§) are to DESIGN.md.
 
-M0 is done (PR #1), and M1.1–M1.4 (PRs #2–#6). Steps are numbered `M<n>.<k>`
+M0 is done (PR #1), and M1.1–M1.5 (PRs #2–#7). Steps are numbered `M<n>.<k>`
 and are in dependency order within a milestone.
 
 ## Tracks
