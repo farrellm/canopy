@@ -42,6 +42,7 @@ library
   import:           warnings, extensions
   exposed-modules:
     Ghostty.FFI.BuildInfo
+    Ghostty.FFI.Layout
     Ghostty.FFI.Types
 
   hs-source-dirs:   src
@@ -65,16 +66,22 @@ library
 
   default-language: GHC2024
 
--- §3.4: the layout test. In M0, the build identity check alone.
+-- §3.4: the layout test, and the build identity check.
 test-suite ghostty-vt-ffi-test
   import:           warnings, extensions
   type:             exitcode-stdio-1.0
   hs-source-dirs:   test
   main-is:          Main.hs
-  other-modules:    Test.Ghostty.FFI.BuildInfo
+  other-modules:
+    Test.Ghostty.FFI.BuildInfo
+    Test.Ghostty.FFI.Layout
+
   build-depends:
+    , aeson ^>=2.3
     , base ^>=4.21.2.0
+    , bytestring ^>=0.12
     , canopy-prelude
+    , containers ^>=0.7
     , ghostty-vt-ffi
     , tasty ^>=1.5
     , tasty-hunit ^>=0.10.2

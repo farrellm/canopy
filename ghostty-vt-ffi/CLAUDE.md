@@ -11,6 +11,11 @@ Only `Ghostty.Effectful.**` and `Test.Ghostty.**` may import it (§2.6 rule 1).
   use a closed sum. Every value comes from `hsc2hs` (`#const`), never a hand-copied number.
 - **Each import's comment says why it is `safe` or `unsafe`.** An `unsafe` call that re-enters
   Haskell crashes, and the compiler cannot catch that.
+- **Every struct and enum the binding marshals exports a descriptor** (`Ghostty.FFI.Layout`) beside
+  it, every number from `hsc2hs`, and has one row in `test/Test/Ghostty/FFI/Layout.hs`'s `structs` or
+  `enums`. That is the layout test (§3.4). A struct row lists every field, because the test requires
+  the library's field names exactly. An enum with an `Unknown` view builds it from the descriptor.
+- Write hsc2hs directives inside expressions parenthesised, `(#const X)`: a bare one takes the rest
+  of the line.
 - `ghostty-vt-ffi-test` compiles `GHOSTTY_COMMIT` in (Template Haskell, `makeRelativeToProject`), so
-  it runs from any directory and rebuilds when the pin moves. In M0 it checks only the build
-  identity. The full layout test (§3.4) arrives in M1.
+  it runs from any directory and rebuilds when the pin moves.

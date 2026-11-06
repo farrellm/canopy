@@ -4,6 +4,14 @@ Written as changes land, not at release (DESIGN.md §2.9).
 
 ## Unreleased
 
+### M1: ghostty
+
+- `ghostty-vt-ffi-test` is the full layout test (DESIGN.md §3.4): it parses the linked library's
+  `ghostty_type_json()` and checks every bound struct's size, alignment, field names, offsets and
+  sizes, and every named enum value, against the binding's `hsc2hs` values. The binding exports those
+  values as descriptors (`Ghostty.FFI.Layout`), and binds `ghostty_type_json`. `GhosttyResultUnknown`
+  is built from the same descriptor, and checked to exclude exactly the named results.
+
 ### M0: infrastructure
 
 - Seven packages under one `cabal.project`, each a skeleton wired to its neighbours in §1.3:

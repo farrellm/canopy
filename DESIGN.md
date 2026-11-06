@@ -230,7 +230,8 @@ common extensions
 three as `arguments`, since hlint does not read cabal files.
 
 Per module, as needed: `TemplateHaskell` (only for `makeFieldLabelsNoPrefix` and
-`makeEffect`), `TypeFamilies`, `CApiFFI`, `StrictData` (§10.7), `PatternSynonyms`.
+`makeEffect`), `TypeFamilies`, `CApiFFI`, `StrictData` (§10.7), `PatternSynonyms`,
+`DuplicateRecordFields` (where records in one module share a field name, read by record dot).
 
 ### 2.5 Formatting and lint
 
@@ -420,6 +421,19 @@ from different places — the headers the binding was compiled against, and the 
 linked — so the test catches a header/library mismatch (a stale `_deps`, a distro `.so` at a
 different commit) that would otherwise be silent memory corruption. It also checks that
 `ghostty_build_info` reports the pinned build, and that every enum value the binding names exists.
+
+The values compiled into the binding are exported beside each type as a descriptor
+(`Ghostty.FFI.Layout`: `CStruct`, `CField`, `CEnum`), every number in it from `hsc2hs`, so the test
+has no layout of its own and a struct or enum is added to it by one row. For a struct it checks size,
+alignment, and each field's offset and size, and that the field *names* are exactly the library's, so
+a field the binding does not marshal is a failure too. For an enum it checks the type's size and, for
+each value the binding names, that the manifest has that full C name (its `prefix` plus key) with
+that value. `ghostty_type_json()` describes enums as well as structs, so "exists" is checked against
+the linked library, not only the header. An enum with an `Unknown` view (§3.3) builds the view from
+its descriptor's values, and the test checks, over every value the library lists, that the view
+excludes exactly the named ones; that check goes through a total match on the `COMPLETE` set, so a
+pattern synonym missing from the descriptor fails the test, and one missing from the match fails to
+compile.
 Build info reports the *library's* version (`build.zig`'s `lib_version`, `0.1.0-dev`), and its
 build metadata (`VERSION_BUILD`) is empty unless the build is given one. So `build-libghostty.sh`
 stamps the pin in: it builds with `-Dlib-version-string=<lib_version>+<commit>`, and the check

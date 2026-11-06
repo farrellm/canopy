@@ -1,4 +1,5 @@
 {-# LANGUAGE CApiFFI #-}
+{-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE PatternSynonyms #-}
 
 -- | @include/ghostty/vt/build_info.h@: compile-time facts about the linked
@@ -8,6 +9,7 @@ module Ghostty.FFI.BuildInfo
     GhosttyBuildInfo (..),
     pattern GhosttyBuildInfoVersionString,
     pattern GhosttyBuildInfoVersionBuild,
+    ghosttyBuildInfoEnum,
 
     -- * Calls
     ghosttyBuildInfo,
@@ -16,6 +18,7 @@ where
 
 import Foreign.C.Types (CInt (..))
 import Foreign.Ptr (Ptr)
+import Ghostty.FFI.Layout (CEnum (..))
 import Ghostty.FFI.Types (GhosttyResult (..))
 
 #include <ghostty/vt.h>
@@ -36,6 +39,19 @@ pattern GhosttyBuildInfoVersionString = GhosttyBuildInfo (#const GHOSTTY_BUILD_I
 -- @GhosttyString *@.
 pattern GhosttyBuildInfoVersionBuild :: GhosttyBuildInfo
 pattern GhosttyBuildInfoVersionBuild = GhosttyBuildInfo (#const GHOSTTY_BUILD_INFO_VERSION_BUILD)
+
+-- | Every value of @GhosttyBuildInfo@ this binding names, for the layout test
+-- (§3.4).
+ghosttyBuildInfoEnum :: CEnum
+ghosttyBuildInfoEnum =
+  CEnum
+    { name = "GhosttyBuildInfo",
+      size = (#size GhosttyBuildInfo),
+      values =
+        [ ("GHOSTTY_BUILD_INFO_VERSION_STRING", (#const GHOSTTY_BUILD_INFO_VERSION_STRING)),
+          ("GHOSTTY_BUILD_INFO_VERSION_BUILD", (#const GHOSTTY_BUILD_INFO_VERSION_BUILD))
+        ]
+    }
 
 -- | @ghostty_build_info@. @unsafe@: it does not call back into Haskell.
 foreign import capi unsafe "ghostty/vt.h ghostty_build_info"

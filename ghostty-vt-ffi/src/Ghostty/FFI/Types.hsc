@@ -1,3 +1,5 @@
+{-# LANGUAGE CApiFFI #-}
+{-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE ViewPatterns #-}
 
@@ -18,19 +20,28 @@ module Ghostty.FFI.Types
     pattern GhosttyLimitExceeded,
     pattern GhosttyRejected,
     pattern GhosttyResultUnknown,
+    ghosttyResultEnum,
 
     -- * Strings
     GhosttyString (..),
     ghosttyStringBytes,
+    ghosttyStringLayout,
+
+    -- * Type manifest
+    ghosttyTypeJson,
   )
 where
 
 import Data.ByteString qualified as BS
-import Foreign.C.Types (CInt (..), CSize (..))
+import Foreign.C.ConstPtr (ConstPtr (..))
+import Foreign.C.Types (CChar, CInt (..), CSize (..))
 import Foreign.Ptr (Ptr, castPtr, nullPtr)
 import Foreign.Storable (Storable (..))
+import Ghostty.FFI.Layout (CEnum (..), CField (..), CStruct (..))
 
 #include <ghostty/vt.h>
+
+#define FIELD_SIZE(t, f) sizeof(((t *)0)->f)
 
 -- | @GhosttyResult@: the return value of every fallible call.
 newtype GhosttyResult = GhosttyResult CInt
@@ -76,20 +87,30 @@ pattern GhosttyResultUnknown n <- (unknownResult -> Just n)
     GhosttyResultUnknown n = GhosttyResult n
 
 unknownResult :: GhosttyResult -> Maybe CInt
-unknownResult r@(GhosttyResult n)
-  | r `elem` known = Nothing
+unknownResult (GhosttyResult n)
+  | toInteger n `elem` map snd ghosttyResultEnum.values = Nothing
   | otherwise = Just n
-  where
-    known =
-      [ GhosttySuccess,
-        GhosttyOutOfMemory,
-        GhosttyInvalidValue,
-        GhosttyOutOfSpace,
-        GhosttyNoValue,
-        GhosttyIoError,
-        GhosttyLimitExceeded,
-        GhosttyRejected
-      ]
+
+-- | Every value of @GhosttyResult@ this binding names, for the layout test
+-- (§3.4). It is also what 'GhosttyResultUnknown' excludes, so a pattern above
+-- that is missing here would be seen as unknown, which the layout test
+-- catches.
+ghosttyResultEnum :: CEnum
+ghosttyResultEnum =
+  CEnum
+    { name = "GhosttyResult",
+      size = (#size GhosttyResult),
+      values =
+        [ ("GHOSTTY_SUCCESS", (#const GHOSTTY_SUCCESS)),
+          ("GHOSTTY_OUT_OF_MEMORY", (#const GHOSTTY_OUT_OF_MEMORY)),
+          ("GHOSTTY_INVALID_VALUE", (#const GHOSTTY_INVALID_VALUE)),
+          ("GHOSTTY_OUT_OF_SPACE", (#const GHOSTTY_OUT_OF_SPACE)),
+          ("GHOSTTY_NO_VALUE", (#const GHOSTTY_NO_VALUE)),
+          ("GHOSTTY_IO_ERROR", (#const GHOSTTY_IO_ERROR)),
+          ("GHOSTTY_LIMIT_EXCEEDED", (#const GHOSTTY_LIMIT_EXCEEDED)),
+          ("GHOSTTY_REJECTED", (#const GHOSTTY_REJECTED))
+        ]
+    }
 
 {-# COMPLETE
   GhosttySuccess,
@@ -114,8 +135,8 @@ data GhosttyString = GhosttyString
   deriving stock (Eq, Show)
 
 instance Storable GhosttyString where
-  sizeOf _ = #size GhosttyString
-  alignment _ = #alignment GhosttyString
+  sizeOf _ = (#size GhosttyString)
+  alignment _ = (#alignment GhosttyString)
   peek p =
     GhosttyString
       <$> (#peek GhosttyString, ptr) p
@@ -132,3 +153,24 @@ ghosttyStringBytes :: GhosttyString -> IO ByteString
 ghosttyStringBytes s
   | s.ptr == nullPtr = pure BS.empty
   | otherwise = BS.packCStringLen (castPtr s.ptr, fromIntegral s.len)
+
+-- | The layout of @GhosttyString@ as compiled, for the layout test (§3.4).
+ghosttyStringLayout :: CStruct
+ghosttyStringLayout =
+  CStruct
+    { name = "GhosttyString",
+      size = (#size GhosttyString),
+      align = (#alignment GhosttyString),
+      fields =
+        [ CField "ptr" (#offset GhosttyString, ptr) (#const FIELD_SIZE(GhosttyString, ptr)),
+          CField "len" (#offset GhosttyString, len) (#const FIELD_SIZE(GhosttyString, len))
+        ]
+    }
+
+-- | @ghostty_type_json@: the linked library's description of every public
+-- type (sizes, alignments, field offsets, enum values), as a static
+-- NUL-terminated JSON string valid for the life of the process. What the
+-- layout test checks the binding against (§3.4). @unsafe@: it does not call
+-- back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_type_json"
+  ghosttyTypeJson :: IO (ConstPtr CChar)
