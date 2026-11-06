@@ -1,17 +1,14 @@
 -- | Tracked grid references (PLAN.md M1.5): they follow their cell, refuse
 -- points outside the grid, and are freed by 'untrack' or with their
--- terminal, never twice. Output is written with the raw @vt_write@ until
--- @feed@ exists (M1.6).
+-- terminal, never twice.
 module Test.Ghostty.Effectful.TrackedRef (tests) where
 
 import Data.ByteString qualified as BS
 import Effectful (Eff, IOE, runEff)
-import Foreign.Ptr (castPtr)
 import Ghostty.Effectful (Ghostty, runGhostty)
-import Ghostty.Effectful.Internal.Terminal (Extent (..), Terminal (..))
+import Ghostty.Effectful.Internal.Terminal (Extent (..))
 import Ghostty.Effectful.Point (Coord (..), Point (..))
 import Ghostty.Effectful.Terminal
-import Ghostty.FFI.Terminal (ghosttyTerminalVtWrite)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
@@ -81,7 +78,6 @@ config = terminalConfig GridSize {cols = Extent 80, rows = Extent 24}
 tracked :: Terminal s -> Point 'Active -> Eff '[Ghostty, IOE] (TrackedRef s)
 tracked t p = track t p >>= maybe (liftIO (assertFailure ("not tracked: " <> show p))) pure
 
--- | Feed bytes through the raw binding.
+-- | Feed bytes, dropping the events.
 write :: Terminal s -> ByteString -> Eff '[Ghostty, IOE] ()
-write t bs = liftIO $ BS.useAsCStringLen bs $ \(p, n) ->
-  ghosttyTerminalVtWrite t.handle (castPtr p) (fromIntegral n)
+write t = void . feed t

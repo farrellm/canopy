@@ -8,7 +8,12 @@
 -- against the header:
 --
 -- * the callback options and @USERDATA@: the binding installs those itself,
---   and never lets a caller (§4.5, PLAN.md M1.6);
+--   and never lets a caller (§4.5). The callbacks that answer a query, or
+--   reply to a request, answer from the terminal's configuration instead, and
+--   each is an option here that sets the answer: 'SetColorScheme',
+--   'SetDeviceAttributes', 'SetEnquiry', 'SetXtversion', 'SetSize' and
+--   'SetClipboardWrite'. @CLIPBOARD_READ@ is never installed, so a program's
+--   clipboard read is answered as empty;
 -- * @SELECTION@, both ways: its value is a pair of grid references, which
 --   arrives with the selection API (PLAN.md M6.5);
 -- * the @KITTY_GRAPHICS@ data key: a borrowed handle, which arrives with
@@ -25,6 +30,9 @@ module Ghostty.Effectful.Terminal.Keys
     TerminalOption (..),
 
     -- * Values
+    ColorScheme (..),
+    DeviceAttributes (..),
+    defaultDeviceAttributes,
     Screen (..),
     CursorShape (..),
     KittyFlags (..),
@@ -207,8 +215,65 @@ data TerminalOption a where
   SetXtChecksumReport :: TerminalOption Bool
   -- | How DECRQCRA checksums are computed, now and after a reset.
   SetXtChecksumExtension :: TerminalOption ChecksumExtension
+  -- | The answer to a colour scheme query (CSI ? 996 n); 'Nothing' leaves
+  -- the query unanswered.
+  SetColorScheme :: TerminalOption (Maybe ColorScheme)
+  -- | The answers to device attribute queries (DA1, DA2, DA3).
+  SetDeviceAttributes :: TerminalOption DeviceAttributes
+  -- | The reply to ENQ; empty sends none.
+  SetEnquiry :: TerminalOption ByteString
+  -- | The name XTVERSION reports; empty reports the library's own,
+  -- @libghostty@.
+  SetXtversion :: TerminalOption Text
+  -- | Whether size queries (XTWINOPS 14, 16, 18, 19 and in-band reports,
+  -- mode 2048) are answered, from the terminal's grid and cell size.
+  SetSize :: TerminalOption Bool
+  -- | Whether clipboard writes are accepted: each then arrives as a
+  -- 'Ghostty.Effectful.Event.ClipboardWrite', and the program is told it
+  -- succeeded. Refused, a write is dropped, and a program that asks for a
+  -- reply (OSC 5522) is told it was denied.
+  SetClipboardWrite :: TerminalOption Bool
 
 deriving stock instance Show (TerminalOption a)
+
+-- | A colour scheme, as a terminal reports it.
+data ColorScheme
+  = -- | dark text on a light background
+    Light
+  | -- | light text on a dark background
+    Dark
+  deriving stock (Eq, Show, Enum, Bounded)
+
+-- | What a terminal reports itself to be (DA1, DA2, DA3).
+data DeviceAttributes = DeviceAttributes
+  { -- | DA1's conformance level (62 for VT220, 65 for VT520)
+    conformanceLevel :: Word16,
+    -- | DA1's feature codes (22 for ANSI colour, 52 for the clipboard); the
+    -- first 64 are reported
+    features :: [Word16],
+    -- | DA2's terminal type (1 for VT220)
+    deviceType :: Word16,
+    -- | DA2's firmware version
+    firmwareVersion :: Word16,
+    -- | DA2's ROM cartridge number, 0 for an emulator
+    romCartridge :: Word16,
+    -- | DA3's unit ID
+    unitId :: Word32
+  }
+  deriving stock (Eq, Show)
+
+-- | What the library reports with no answer configured: a VT220 with ANSI
+-- colour, firmware 0, unit 0.
+defaultDeviceAttributes :: DeviceAttributes
+defaultDeviceAttributes =
+  DeviceAttributes
+    { conformanceLevel = 62,
+      features = [22],
+      deviceType = 1,
+      firmwareVersion = 0,
+      romCartridge = 0,
+      unitId = 0
+    }
 
 -- | A terminal's two screens.
 data Screen

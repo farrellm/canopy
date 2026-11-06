@@ -48,12 +48,12 @@ tests =
         r @?= ("boom", 0),
       testCase "resize and reset run on an open terminal" $ do
         r <- ghostty $ withTerminal config {cellPixels = CellPixels 9 18} $ \t -> do
-          resize t (grid 120 40) (CellPixels 10 20)
-          reset t
+          _ <- resize t (grid 120 40) (CellPixels 10 20)
+          _ <- reset t
           openTerminals
         r @?= 1,
       testCase "an operation from a forked thread throws WrongThread" $ do
-        r <- ghostty $ withTerminal config $ \t -> fromForkedThread (reset t)
+        r <- ghostty $ withTerminal config $ \t -> fromForkedThread (void (reset t))
         r @?= Left (WrongThread (CallSite "reset")),
       testCase "opening a terminal from a forked thread throws WrongThread" $ do
         r <- ghostty $ fromForkedThread (withTerminal config (const pass))

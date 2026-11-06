@@ -53,6 +53,11 @@ data GhosttyError
     -- together rule this out: the linked library is the pinned one, and the
     -- binding names every value the pinned one has (DESIGN.md §3.3, §3.4).
     UnknownEnum CallSite Text Integer
+  | -- | The library passed a sized struct (named by the 'Text') of fewer
+    -- bytes (the 'Integer') than the binding reads, so its fields are not
+    -- read. The version check and the layout test rule this out, as they
+    -- do 'UnknownEnum'.
+    ShortStruct CallSite Text Integer
   deriving stock (Eq, Show)
   deriving anyclass (Exception)
 

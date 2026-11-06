@@ -3,10 +3,13 @@
 -- without their constructors; the calls here are what the 'Ghostty'
 -- interpreter runs, after its owner-thread check.
 --
--- A terminal owns the tracked grid references made from it, in a registry
--- keyed by number. A 'TrackedRef' names its entry, not the C handle, so a
--- reference that was untracked, or whose terminal was freed, is never
--- passed to the library again: it finds no entry.
+-- A terminal owns the callbacks the binding installed on it, the buffer they
+-- append to, and the answers its query callbacks give
+-- ("Ghostty.Effectful.Internal.Callbacks"). It also owns the tracked grid
+-- references made from it, in a registry keyed by number. A 'TrackedRef'
+-- names its entry, not the C handle, so a reference that was untracked, or
+-- whose terminal was freed, is never passed to the library again: it finds
+-- no entry.
 module Ghostty.Effectful.Internal.Terminal
   ( -- * Handles
     Terminal (..),
@@ -27,8 +30,6 @@ module Ghostty.Effectful.Internal.Terminal
     -- * Calls
     openTerminal,
     closeTerminal,
-    resizeTerminal,
-    resetTerminal,
 
     -- * Tracked references
     trackPoint,
@@ -39,14 +40,23 @@ module Ghostty.Effectful.Internal.Terminal
   )
 where
 
-import Control.Exception (throwIO)
+import Control.Exception (onException, throwIO)
 import Data.IntMap.Strict qualified as IntMap
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Marshal.Utils (with)
 import Foreign.Ptr (nullPtr)
 import Foreign.Storable (peek)
 import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), ResultCode (..))
+import Ghostty.Effectful.Internal.Callbacks
+  ( Answers (..),
+    Installed,
+    Pending,
+    installCallbacks,
+    releaseCallbacks,
+  )
 import Ghostty.Effectful.Internal.Error (expectSuccess, resultCode)
+import Ghostty.Effectful.Internal.Size (CellPixels (..), Extent (..), GridSize (..), extent, fromExtent, noCellPixels)
+import Ghostty.Effectful.Terminal.Keys (ColorScheme, DeviceAttributes, defaultDeviceAttributes)
 import Ghostty.FFI.GridRef
   ( GhosttyTrackedGridRef,
     ghosttyTrackedGridRefFree,
@@ -60,8 +70,6 @@ import Ghostty.FFI.Terminal
     ghosttyTerminalFree,
     ghosttyTerminalGridRefTrack,
     ghosttyTerminalNew,
-    ghosttyTerminalReset,
-    ghosttyTerminalResize,
   )
 
 -- | A terminal, alive in the region @s@ that
@@ -74,7 +82,13 @@ data Terminal s = Terminal
     -- | the tracked references made from it and not yet untracked
     refs :: IORef (IntMap GhosttyTrackedGridRef),
     -- | the next registry key
-    nextRef :: IORef Int
+    nextRef :: IORef Int,
+    -- | what the callbacks appended since it was last drained, newest first
+    events :: IORef [Pending],
+    -- | what the query callbacks answer with
+    answers :: IORef Answers,
+    -- | the callbacks, freed with the terminal
+    installed :: Installed
   }
 
 -- | A tracked reference to a cell of a terminal in the region @s@: it
@@ -90,63 +104,53 @@ data TrackedRef s = TrackedRef
 instance Eq (TrackedRef s) where
   a == b = a.key == b.key
 
--- | A number of cells along one axis: never zero, which the library refuses
--- for a terminal's columns or rows.
-newtype Extent = Extent Word16
-  deriving stock (Eq, Ord, Show)
-
--- | An extent of @n@ cells, if @n@ is not zero.
---
--- >>> extent 80
--- Just (Extent 80)
--- >>> extent 0
--- Nothing
-extent :: Word16 -> Maybe Extent
-extent n = if n == 0 then Nothing else Just (Extent n)
-
--- | The number of cells.
-fromExtent :: Extent -> Word16
-fromExtent (Extent n) = n
-
--- | A terminal's grid, in cells.
-data GridSize = GridSize
-  { -- | columns
-    cols :: Extent,
-    -- | rows
-    rows :: Extent
-  }
-  deriving stock (Eq, Show)
-
--- | One cell's size in pixels, which image protocols and size reports use.
--- Zero means unknown.
-data CellPixels = CellPixels
-  { -- | width
-    width :: Word32,
-    -- | height
-    height :: Word32
-  }
-  deriving stock (Eq, Show)
-
--- | A cell size of zero by zero: unknown, the library's own starting value.
-noCellPixels :: CellPixels
-noCellPixels = CellPixels 0 0
-
--- | How a terminal starts.
+-- | How a terminal starts, and how it answers the program's queries
+-- (DESIGN.md §4.5). Each answer can be changed later with
+-- 'Ghostty.Effectful.Terminal.setT', through the option named beside it.
 data TerminalConfig = TerminalConfig
   { -- | the grid
     size :: GridSize,
     -- | one cell, in pixels
-    cellPixels :: CellPixels
+    cellPixels :: CellPixels,
+    -- | the answer to a colour scheme query; 'Nothing' leaves it unanswered
+    -- ('SetColorScheme')
+    colorScheme :: Maybe ColorScheme,
+    -- | the answers to device attribute queries ('SetDeviceAttributes')
+    deviceAttributes :: DeviceAttributes,
+    -- | the reply to ENQ; empty sends none ('SetEnquiry')
+    enquiry :: ByteString,
+    -- | the name XTVERSION reports; empty reports @libghostty@
+    -- ('SetXtversion')
+    xtversion :: Text,
+    -- | whether size queries are answered ('SetSize')
+    reportSize :: Bool,
+    -- | whether clipboard writes are accepted ('SetClipboardWrite')
+    acceptClipboardWrites :: Bool
   }
   deriving stock (Eq, Show)
 
--- | A terminal of the given grid, with the cell size unknown.
+-- | A terminal of the given grid, with the cell size unknown, answering
+-- size queries and device attributes as the library would, and nothing
+-- else: no colour scheme, no ENQ reply, the library's XTVERSION, and no
+-- clipboard writes.
 terminalConfig :: GridSize -> TerminalConfig
-terminalConfig g = TerminalConfig {size = g, cellPixels = noCellPixels}
+terminalConfig g =
+  TerminalConfig
+    { size = g,
+      cellPixels = noCellPixels,
+      colorScheme = Nothing,
+      deviceAttributes = defaultDeviceAttributes,
+      enquiry = "",
+      xtversion = "",
+      reportSize = True,
+      acceptClipboardWrites = False
+    }
 
 -- | @ghostty_terminal_new@ with the default allocator (§3.3), at the
--- configured grid, with an empty registry. The cell size is the caller's to
--- set, inside the scope that frees the terminal on every path.
+-- configured grid, with an empty registry and every callback installed. The
+-- cell size is the caller's to set, inside the scope that frees the
+-- terminal on every path. If the callbacks cannot be installed, the terminal
+-- is freed and the error thrown.
 openTerminal :: TerminalConfig -> IO (Terminal s)
 openTerminal cfg = do
   handle <- alloca $ \out -> do
@@ -155,27 +159,32 @@ openTerminal cfg = do
     peek out
   refs <- newIORef mempty
   nextRef <- newIORef 0
-  pure Terminal {handle, refs, nextRef}
+  events <- newIORef []
+  answers <-
+    newIORef
+      Answers
+        { scheme = cfg.colorScheme,
+          attributes = cfg.deviceAttributes,
+          sizeQueries = cfg.reportSize,
+          clipboard = cfg.acceptClipboardWrites,
+          grid = cfg.size,
+          pixels = noCellPixels
+        }
+  installed <-
+    installCallbacks handle events answers cfg.enquiry (encodeUtf8 cfg.xtversion)
+      `onException` ghosttyTerminalFree handle
+  pure Terminal {handle, refs, nextRef, events, answers, installed}
 
 -- | Free every tracked reference still registered, taking their number off
--- the counter, then @ghostty_terminal_free@.
+-- the counter, then @ghostty_terminal_free@, then the callbacks, which the
+-- terminal can no longer call.
 closeTerminal :: IORef Int -> Terminal s -> IO ()
 closeTerminal open t = do
   live <- atomicModifyIORef' t.refs (mempty,)
   traverse_ ghosttyTrackedGridRefFree live
   modifyIORef' open (subtract (IntMap.size live))
   ghosttyTerminalFree t.handle
-
--- | @ghostty_terminal_resize@. Its one documented refusal, a zero extent or a
--- null terminal, cannot be expressed, so only running out of memory remains.
-resizeTerminal :: GhosttyTerminal -> GridSize -> CellPixels -> IO ()
-resizeTerminal h g px =
-  expectSuccess (CallSite "ghostty_terminal_resize")
-    =<< ghosttyTerminalResize h (fromExtent g.cols) (fromExtent g.rows) px.width px.height
-
--- | @ghostty_terminal_reset@: a full reset (RIS), keeping the size.
-resetTerminal :: GhosttyTerminal -> IO ()
-resetTerminal = ghosttyTerminalReset
+  releaseCallbacks t.installed
 
 -- | @ghostty_terminal_grid_ref_track@: a tracked reference to the cell at a
 -- point of the active screen, registered with the terminal and counted;

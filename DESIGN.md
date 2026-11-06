@@ -653,7 +653,9 @@ What a write would refuse is kept out by the value's type, as `Extent` does for 
   unrepresentable.
 
 Three groups of header rows have no constructor, each for a reason: the callback options and
-`USERDATA`, which the binding installs itself and never lets a caller (§4.5); `SELECTION` both ways,
+`USERDATA`, which the binding installs itself and never lets a caller (§4.5), except the six whose
+callback answers the program, each of which is an option that sets the answer (`SetColorScheme`,
+`SetDeviceAttributes`, `SetEnquiry`, `SetXtversion`, `SetSize`, `SetClipboardWrite`); `SELECTION` both ways,
 whose value is a pair of grid references and arrives with the selection API (M6.5); and the
 `KITTY_GRAPHICS` data key, a borrowed handle, with image placements (M6.15). A test holds the
 constructors plus this list against the header's enums, so a row a pin bump adds fails it. A
@@ -687,35 +689,63 @@ constructor to an `IORef`'d buffer owned by that terminal. `feed` drains it:
 ```haskell
 feed :: Ghostty :> es => Terminal s -> ByteString -> Eff es [TerminalEvent]
 
-data TerminalEvent
-  = WritePty ByteString          -- replies to the child's queries; caller writes them to the PTY
+data TerminalEvent                     -- Ghostty.Effectful.Event
+  = WritePty ByteString                -- replies to the child's queries; caller writes them to the PTY
   | Bell
   | TitleChanged Text
   | PwdChanged Text
-  | SemanticPrompt PromptMark    -- OSC 133: A/B/C/D with parameters (§7.3)
-  | ClipboardWrite ClipboardTarget ByteString
+  | SemanticPrompt PromptMark          -- OSC 133: A/B/C/D with parameters (§7.3), and the cursor
+  | ClipboardWrite ClipboardLocation [ClipboardContent]
   | Notification Text Text
   | Progress ProgressReport
-  | RenderHold Bool              -- synchronized output, mode 2026
-  | UnknownSequence SequenceKind ByteString
+  | ProgramStatus ProgramReport        -- OSC 7501
+  | RenderHold Bool                    -- synchronized output, mode 2026
+  | UnknownSequence UnsupportedSequence
   | Reset
-  | ResizeRequest Word16 Word16
+  | ResizeRequest WindowSize           -- CSI 8 t; Nothing keeps an axis
 ```
 
 Events come back in the order the bytes produced them, which matters: a `SemanticPrompt C` must be
 seen at the right point in the stream so that the output range it opens starts at the right row. To
 get that, `feed` writes with `ghostty_terminal_vt_write_until(…, GHOSTTY_TERMINAL_BOUNDARY_OSC_END,
 …)`, which stops right after each OSC terminator and reports how much it consumed. After each stop,
-if the drained buffer gained a `SemanticPrompt`, `feed` reads `CURSOR_X`/`CURSOR_Y` and attaches the
-position to the event, then continues with the rest of the chunk. The header forbids calling
-`vt_write` from inside a callback, which this never does: positions are read between writes, not
-inside them.
+the buffer is drained and resolved: a `SemanticPrompt` gets `CURSOR_X`/`CURSOR_Y`, and a title or
+working-directory change gets the new value (their callbacks carry none). Then the write continues
+with the rest of the chunk. The header forbids calling `vt_write` from inside a callback, which this
+never does: the terminal is read between writes, not inside them. (Checked, M1.6: an OSC ended by
+`ESC \` is dispatched at the `ESC`, where `vt_write_until` stops, so its mark's cursor is right too;
+and the same stream split at every byte gives the same events.) Adjacent `WritePty`s are joined, so
+one reply is one write: across stops, and with any events buffered before the write.
+
+A callback must not let an exception into C, so each body is guarded: an exception is recorded in
+the buffer and thrown by the drain, after the write. So is a C enum value the binding does not name
+(`UnknownEnum`, §4.7), which a callback cannot throw. A failure while resolving one stop's events does
+not stop the write: every byte is written, so the terminal never falls behind the program's output,
+and the first failure is thrown after. `resize` and `reset` call callbacks too (the end of a render
+hold, mode 2048's in-band size report), so they return `[TerminalEvent]` as `feed` does. `setT`
+returns `()`: the header says setting a mode never invokes a callback, not even the end of a render
+hold, and a test writes every option and finds nothing buffered, so a pin bump that changes this
+fails it. An event left by a call that threw before returning it comes first in the next `feed`.
 
 **Query callbacks are configuration, not callbacks.** Colour scheme, device attributes, enquiry,
-XTVERSION and pixel size are answered from a pure `TerminalConfig` record that the caller can update
-with `setT`. No user code runs during a query; the answers are data that a test can inspect.
-ENQ and XTVERSION are answered by a callback that returns a `GhosttyString` by value, which no
-Haskell function can be (§3.3), so those two answers are returned by C, from the configured bytes.
+XTVERSION and size are answered from `TerminalConfig`, which the caller can update with `setT`
+(`SetColorScheme`, `SetDeviceAttributes`, `SetEnquiry`, `SetXtversion`, `SetSize`: options named for
+their callback's row, §4.4). No user code runs during a query; the answers are data that a test can
+inspect. Size is answered from the terminal's own grid and cell size, kept by `resize`. A device
+attributes callback that declines gets the library's defaults (VT220 with ANSI colour), not silence,
+so `defaultDeviceAttributes` is those and the callback always answers. ENQ and XTVERSION are answered
+by a callback that returns a `GhosttyString` by value, which no Haskell function can be (§3.3), so
+those two answers are returned by C (`ghostty-effectful/cbits/gveff_answers.c`) from bytes the
+binding owns, reached through `USERDATA`. A clipboard write must be answered before its callback
+returns, so whether to accept it is configuration too (`SetClipboardWrite`, off by default): accepted,
+it is an event and the program is told it succeeded; refused, it is dropped and the program told it
+was denied. `CLIPBOARD_READ` is never installed, so a program's clipboard read is answered as empty;
+installing it would also turn on kitty paste events, which nothing wants yet.
+
+A render hold's frame is a question for M1.7: the header asks the embedder to capture the frame in
+the `RENDER_HOLD` callback, because by the time the write returns the bytes after mode 2026 was set
+have been processed, and `vt_write_until` cannot stop at a CSI. The event comes in order, but the
+frame it points at is gone by then.
 
 ### 4.6 Concurrency
 
@@ -745,7 +775,12 @@ data GhosttyError                       -- thrown
   | WrongThread CallSite                -- §4.6
   | Invariant CallSite ResultCode       -- the library returned what the header says it cannot
   | UnknownEnum CallSite Text Integer   -- a C enum value the binding does not name (§3.3)
+  | ShortStruct CallSite Text Integer   -- a sized struct the library passed, smaller than the binding reads
 ```
+
+A sized struct passed to a callback may be read only as far as its `size` field covers, so a callback
+checks it before reading, and one too short is `ShortStruct`, recorded and thrown by the drain like
+`UnknownEnum`. The version check and the layout test rule both out.
 
 `ResultCode` is `GhosttyResult` closed, with an unknown case (§3.3), so no `Ghostty.FFI` type
 escapes. `CallSite` names the C function, or the operation for `WrongThread`. Errors a caller can
@@ -762,6 +797,7 @@ every signature would hide the errors that matter. The version check in `runGhos
 | Module | Wraps |
 | :--- | :--- |
 | `Ghostty.Effectful.Terminal` | new/free/reset/resize, `feed`, typed get/set, scroll viewport, grid refs, tracked refs |
+| `Ghostty.Effectful.Event` | `TerminalEvent` and the values it carries (§4.5) |
 | `Ghostty.Effectful.Render` | render state, frames, dirty rows, cells, cursor, colours, kitty-graphics placements |
 | `Ghostty.Effectful.Format` | plain / VT / HTML formatting of a terminal, a selection or a row range |
 | `Ghostty.Effectful.Encode` | key, mouse, focus, paste, size-report, mode-report encoding, configured from a terminal's modes |

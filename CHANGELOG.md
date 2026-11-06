@@ -129,6 +129,32 @@ Written as changes land, not at release (DESIGN.md §2.9).
   and the layout test together rule that value out. §4.4 gains the option rules, the mode index,
   the deferred rows and tracked references.
 
+- `ghostty-effectful` has events and `feed` (M1.6, DESIGN.md §4.5). The binding installs every
+  terminal callback but `CLIPBOARD_READ`; each only appends to the terminal's buffer, and is guarded
+  so that no exception reaches C (one is thrown after the write instead). `feed` writes with
+  `vt_write_until` stopping after each OSC, and between stops reads the cursor for each OSC 133 mark
+  and the new title or working directory. `TerminalEvent` and its values are
+  `Ghostty.Effectful.Event`. `resize` and `reset` now return the events they cause (the end of a
+  render hold, mode 2048's size report).
+- `TerminalConfig` answers the program's queries: colour scheme, device attributes, ENQ, XTVERSION
+  and size, and whether clipboard writes are accepted. Each is a `TerminalOption` named for its
+  callback's row (`SetColorScheme`, `SetDeviceAttributes`, `SetEnquiry`, `SetXtversion`, `SetSize`,
+  `SetClipboardWrite`). ENQ and XTVERSION are answered in C (`cbits/gveff_answers.c`), because their
+  callbacks return a struct by value. The grid types moved to `Ghostty.Effectful.Internal.Size`.
+- Tests: the events of a mixed OSC 133 / bell / title stream, in order, and the same with the
+  stream split at every byte; a mark ended by `ESC \` reads the cursor right after it; query
+  replies arrive as `WritePty` and follow each answer option; clipboard, notification, progress,
+  program status, render hold, reset, resize-request and unsupported-sequence events.
+- Fixed in review, each with a numbered regression case: a failure resolving one OSC stop's events
+  stopped `feed` there, so the rest of the input never reached the terminal (regression 1; every
+  byte is now written, and the failure thrown after); replies were joined only within one stop, so
+  an OSC between two replies split them into two writes (regression 2); `setT` causing no event is
+  now held by a test rather than assumed (regression 3); the clipboard-write callback read its
+  request without checking the struct's `size` (regression 4; a short one is `ShortStruct`, a new
+  `GhosttyError`, and the write is denied). A refused `resize` now restores the size its queries
+  report. The calls that resolve events moved to `Ghostty.Effectful.Internal.Feed`, which reads the
+  terminal's keys directly instead of taking a reader from every caller.
+
 ### M0: infrastructure
 
 - Seven packages under one `cabal.project`, each a skeleton wired to its neighbours in §1.3:
