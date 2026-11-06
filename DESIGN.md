@@ -656,7 +656,10 @@ Three groups of header rows have no constructor, each for a reason: the callback
 `USERDATA`, which the binding installs itself and never lets a caller (§4.5); `SELECTION` both ways,
 whose value is a pair of grid references and arrives with the selection API (M6.5); and the
 `KITTY_GRAPHICS` data key, a borrowed handle, with image placements (M6.15). A test holds the
-constructors plus this list against the header's enums, so a row a pin bump adds fails it.
+constructors plus this list against the header's enums, so a row a pin bump adds fails it. A
+constructor is named for its row (`CursorX` for `GHOSTTY_TERMINAL_DATA_CURSOR_X`, `SetTitle` for
+`GHOSTTY_TERMINAL_OPT_TITLE`), and a test holds each name against the number its marshalling sends,
+so two keys of the same type and fresh value cannot be swapped unnoticed.
 
 The marshalling for each constructor is a `Storable`-level `peek` at the right type, written once per
 constructor (`Ghostty.Effectful.Internal.Keys`). The values are plain Haskell types in their own

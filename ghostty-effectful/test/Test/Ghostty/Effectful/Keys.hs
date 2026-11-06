@@ -6,6 +6,8 @@
 -- tables, and the mode list and its index held against the library.
 module Test.Ghostty.Effectful.Keys (tests) where
 
+import Data.Char (isUpper, toUpper)
+import Data.List (stripPrefix)
 import Effectful (Eff, IOE, runEff)
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Marshal.Utils (with)
@@ -74,6 +76,9 @@ tests =
       testCase "every data key is a constructor, or deferred" $
         sort (ordNub (map (\(Some k) -> dataNumber (dataKey k)) allData) <> map snd deferredData)
           @?= sort [v | (n :: Text, v) <- ghosttyTerminalDataEnum.values, n /= "GHOSTTY_TERMINAL_DATA_INVALID"],
+      testCase "every data key is its header row's name" $
+        filter (\(c, h) -> h /= Just ("GHOSTTY_TERMINAL_DATA_" <> c)) (map (\(Some k) -> (headerName (show k), rowName ghosttyTerminalDataEnum (dataNumber (dataKey k)))) allData)
+          @?= [],
       testCase "every option writes, and reads back where a key reads it" $ do
         failures <- ghostty $ withTerminal config $ \t ->
           concat <$> traverse (\(Some o) -> written t o) allOptions
@@ -81,6 +86,9 @@ tests =
       testCase "every option is a constructor, or deferred" $
         sort (ordNub (map (\(Some o) -> optionNumber (optionKey o)) allOptions) <> map snd deferredOptions)
           @?= sort (map snd ghosttyTerminalOptionEnum.values),
+      testCase "every option is its header row's name" $
+        filter (\(c, h) -> h /= Just ("GHOSTTY_TERMINAL_OPT_" <> c)) (map (\(Some o) -> (headerName (fromMaybe "" (stripPrefix "Set" (show o))), rowName ghosttyTerminalOptionEnum (optionNumber (optionKey o)))) allOptions)
+          @?= [],
       testCase "the modes are exactly the ones the library recognises" $ do
         recognised <- ghostty $ withTerminal config $ \t ->
           liftIO (filterM (recognises t) [ghosttyModeNew n a | n <- [0 .. 0x7fff], a <- [0, 1]])
@@ -102,6 +110,18 @@ ghostty act = runEff (runGhostty act) >>= either (assertFailure . show) pure
 -- | An 80×24 terminal.
 config :: TerminalConfig
 config = terminalConfig GridSize {cols = Extent 80, rows = Extent 24}
+
+-- | A constructor's name as the header spells its row: the first word of
+-- its 'show', in upper snake case (@CursorX@ is @CURSOR_X@).
+headerName :: String -> Text
+headerName = toText . go . takeWhile (/= ' ')
+  where
+    go (c : cs) = toUpper c : concatMap (\x -> if isUpper x then ['_', x] else [toUpper x]) cs
+    go [] = []
+
+-- | The header's name for a row's number.
+rowName :: CEnum -> Integer -> Maybe Text
+rowName e n = fst <$> find ((== n) . snd) e.values
 
 -- * Data
 
@@ -246,7 +266,7 @@ allOptions =
     Some SetKittyImageMediumSharedMem,
     Some SetApcMaxBytes,
     Some SetApcMaxBytesKitty,
-    Some SetDefaultCursorShape,
+    Some SetDefaultCursorStyle,
     Some SetDefaultCursorBlink,
     Some SetGlyphProtocol,
     Some SetScrollbackMaxBytes,
@@ -323,7 +343,7 @@ written t o = case o of
   SetKittyImageMediumSharedMem -> roundTrip o True KittyImageMediumSharedMem (fromMaybe True)
   SetApcMaxBytes -> (<>) <$> writes o (Just 4096) <*> writes o Nothing
   SetApcMaxBytesKitty -> (<>) <$> writes o (Just 4096) <*> writes o Nothing
-  SetDefaultCursorShape -> concat <$> traverse (writes o) universe
+  SetDefaultCursorStyle -> concat <$> traverse (writes o) universe
   SetDefaultCursorBlink -> writes o True
   SetGlyphProtocol -> writes o False
   SetScrollbackMaxBytes -> (<>) <$> roundTrip o (Just 10000000) ScrollbackMaxBytes id <*> roundTrip o Nothing ScrollbackMaxBytes id

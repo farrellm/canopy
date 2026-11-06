@@ -108,7 +108,7 @@ optionKey = \case
   SetKittyImageMediumSharedMem -> GhosttyTerminalOptKittyImageMediumSharedMem
   SetApcMaxBytes -> GhosttyTerminalOptApcMaxBytes
   SetApcMaxBytesKitty -> GhosttyTerminalOptApcMaxBytesKitty
-  SetDefaultCursorShape -> GhosttyTerminalOptDefaultCursorStyle
+  SetDefaultCursorStyle -> GhosttyTerminalOptDefaultCursorStyle
   SetDefaultCursorBlink -> GhosttyTerminalOptDefaultCursorBlink
   SetGlyphProtocol -> GhosttyTerminalOptGlyphProtocol
   SetScrollbackMaxBytes -> GhosttyTerminalOptScrollbackMaxBytes
@@ -335,7 +335,7 @@ setOption h opt v = case opt of
   SetKittyImageMediumSharedMem -> flag v
   SetApcMaxBytes -> maybeWith (toCSize <$> v) put
   SetApcMaxBytesKitty -> maybeWith (toCSize <$> v) put
-  SetDefaultCursorShape -> with (cursorStyle v) (put . castPtr)
+  SetDefaultCursorStyle -> with (cursorStyle v) (put . castPtr)
   SetDefaultCursorBlink -> flag v
   SetGlyphProtocol -> flag v
   SetScrollbackMaxBytes -> maybeWith (toCSize <$> v) put

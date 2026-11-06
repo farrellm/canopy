@@ -114,6 +114,8 @@ Written as changes land, not at release (DESIGN.md §2.9).
   reset default for the mode, so `SetModeDefault` cannot take one it refuses. `TerminfoName` and
   `ChecksumExtension` make the other two refusable writes unrepresentable. The callback options,
   `SELECTION` and `KITTY_GRAPHICS` are left to M1.6, M6.5 and M6.15.
+  A constructor is named for its header row, and a test checks that its marshalling sends that
+  row's number.
 - Tracked grid references (`TrackedRef s`: `track`, `refPoint`, `moveRef`, `refAlive`, `untrack`,
   `openTrackedRefs`) are owned by their terminal's region and freed with it. `untrack` is
   idempotent, and an untracked reference is never passed to the library again.

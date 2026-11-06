@@ -169,7 +169,7 @@ data TerminalOption a where
   -- restores the built-in limit.
   SetApcMaxBytesKitty :: TerminalOption (Maybe Word)
   -- | The cursor shape DECSCUSR 0 resets to.
-  SetDefaultCursorShape :: TerminalOption CursorShape
+  SetDefaultCursorStyle :: TerminalOption CursorShape
   -- | Whether the cursor DECSCUSR 0 resets to blinks.
   SetDefaultCursorBlink :: TerminalOption Bool
   -- | Whether Glyph Protocol APC sequences are handled. Turning it off
