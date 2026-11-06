@@ -4,6 +4,19 @@ Written as changes land, not at release (DESIGN.md §2.9).
 
 ## Unreleased
 
+### M1: ghostty
+
+- `ghostty-vt-ffi-test` is the full layout test (DESIGN.md §3.4): it parses the linked library's
+  `ghostty_type_json()` and checks every bound struct's size, alignment, field names, offsets and
+  sizes, and every named enum value, against the binding's `hsc2hs` values. The binding exports those
+  values as descriptors (`Ghostty.FFI.Layout`), and binds `ghostty_type_json`. Each struct's `Storable`
+  instance is checked against its descriptor (size, alignment, and a poke/peek round trip over
+  zeroed and all-ones memory). Each enum's `Unknown` view is built from its descriptor and checked,
+  through a total match, to exclude exactly the named values. `scripts/check-layout-rows.py`, in CI,
+  fails if a bound type has no descriptor or no row.
+- `GhosttyBuildInfo` has the `COMPLETE` set and `GhosttyBuildInfoUnknown` view §3.3 requires, which
+  M0 left out.
+
 ### M0: infrastructure
 
 - Seven packages under one `cabal.project`, each a skeleton wired to its neighbours in §1.3:

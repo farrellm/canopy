@@ -230,7 +230,8 @@ common extensions
 three as `arguments`, since hlint does not read cabal files.
 
 Per module, as needed: `TemplateHaskell` (only for `makeFieldLabelsNoPrefix` and
-`makeEffect`), `TypeFamilies`, `CApiFFI`, `StrictData` (§10.7), `PatternSynonyms`.
+`makeEffect`), `TypeFamilies`, `CApiFFI`, `StrictData` (§10.7), `PatternSynonyms`,
+`DuplicateRecordFields` (where records in one module share a field name, read by record dot).
 
 ### 2.5 Formatting and lint
 
@@ -310,7 +311,8 @@ The rules, by module name across all packages:
    plus `scripts/gen-ts-shims.py --check`, which fails if the committed shims (§5A.2) are not what
    the vendored header generates
 4. doctests for `tendril`, `ghostty-effectful` and `tree-sitter-effectful`
-5. `hlint --ignore-glob='lint/fixtures/**' .`, `lint/check-layering.sh`, `scripts/check-common-stanzas.sh`
+5. `hlint --ignore-glob='lint/fixtures/**' .`, `lint/check-layering.sh`, `scripts/check-common-stanzas.sh`,
+   `scripts/check-layout-rows.py` (§3.4)
 6. `ormolu --mode check $(git ls-files '*.hs')`
 7. `cabal haddock` with the coverage floor
 8. The benchmark gate (§12.3), allocation only.
@@ -420,6 +422,24 @@ from different places — the headers the binding was compiled against, and the 
 linked — so the test catches a header/library mismatch (a stale `_deps`, a distro `.so` at a
 different commit) that would otherwise be silent memory corruption. It also checks that
 `ghostty_build_info` reports the pinned build, and that every enum value the binding names exists.
+
+The values compiled into the binding are exported beside each type as a descriptor
+(`Ghostty.FFI.Layout`: `CStruct`, `CField`, `CEnum`), every number in it from `hsc2hs`, so the test
+has no layout of its own and a struct or enum is added to it by one row. For a struct it checks size,
+alignment, and each field's offset and size, and that the field *names* are exactly the library's, so
+a field the binding does not marshal is a failure too. Each struct row also carries a sample
+value: the `Storable` instance's `sizeOf` and `alignment` must equal the descriptor's, and the sample
+must `poke` and `peek` back unchanged over zeroed and over all-ones memory, so a field the instance
+skips is a failure. For an enum it checks the type's size and, for each value the binding names, that
+the manifest has that full C name (its `prefix` plus key) with that value. `ghostty_type_json()`
+describes enums as well as structs, so "exists" is checked against the linked library, not only the
+header. Every enum's `Unknown` view (§3.3) is built from its descriptor's values, and each enum row
+carries a total match on the `COMPLETE` set; the test checks, over every value the library lists,
+that the view excludes exactly the named ones. So a pattern synonym missing from the descriptor fails
+the test, and one missing from the match fails to compile. That a bound type has a row at all is
+checked by `scripts/check-layout-rows.py` in CI's lint job: every hand-written `Storable` instance
+needs a `…Layout` descriptor, every newtype over a C integer an `…Enum` one, and every descriptor a
+row.
 Build info reports the *library's* version (`build.zig`'s `lib_version`, `0.1.0-dev`), and its
 build metadata (`VERSION_BUILD`) is empty unless the build is given one. So `build-libghostty.sh`
 stamps the pin in: it builds with `-Dlib-version-string=<lib_version>+<commit>`, and the check
