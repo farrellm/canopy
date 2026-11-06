@@ -36,11 +36,7 @@ import Ghostty.FFI.Terminal
     pattern GhosttyTerminalDataSelection,
     pattern GhosttyTerminalOptBell,
     pattern GhosttyTerminalOptClipboardRead,
-    pattern GhosttyTerminalOptClipboardWrite,
-    pattern GhosttyTerminalOptColorScheme,
     pattern GhosttyTerminalOptDesktopNotification,
-    pattern GhosttyTerminalOptDeviceAttributes,
-    pattern GhosttyTerminalOptEnquiry,
     pattern GhosttyTerminalOptModeDefault,
     pattern GhosttyTerminalOptProgramStatus,
     pattern GhosttyTerminalOptProgressReport,
@@ -50,12 +46,10 @@ import Ghostty.FFI.Terminal
     pattern GhosttyTerminalOptResizeWindow,
     pattern GhosttyTerminalOptSelection,
     pattern GhosttyTerminalOptSemanticPrompt,
-    pattern GhosttyTerminalOptSize,
     pattern GhosttyTerminalOptTitleChanged,
     pattern GhosttyTerminalOptUnknownSequence,
     pattern GhosttyTerminalOptUserdata,
     pattern GhosttyTerminalOptWritePty,
-    pattern GhosttyTerminalOptXtversion,
   )
 import Ghostty.FFI.Types (pattern GhosttyInvalidValue, pattern GhosttySuccess)
 import Test.Tasty (TestTree, testGroup)
@@ -278,7 +272,13 @@ allOptions =
     Some SetClipboardWriteMaxBytes,
     Some SetResizePullScrollback,
     Some SetXtChecksumReport,
-    Some SetXtChecksumExtension
+    Some SetXtChecksumExtension,
+    Some SetColorScheme,
+    Some SetDeviceAttributes,
+    Some SetEnquiry,
+    Some SetXtversion,
+    Some SetSize,
+    Some SetClipboardWrite
   ]
     <> [Some (SetMode m) | SomeModeKey m <- allModes]
     <> [Some (SetModeDefault m) | SomeModeKey k <- allModes, Just m <- [configurableMode k]]
@@ -287,23 +287,17 @@ allOptions =
 deferredOptions :: [(Text, Integer)]
 deferredOptions =
   ("SELECTION: grid references, PLAN.md M6.5", optionNumber GhosttyTerminalOptSelection)
-    : [ ("a callback or its userdata, installed by the binding, PLAN.md M1.6", optionNumber o)
+    : ("CLIPBOARD_READ: never installed, so reads are answered empty", optionNumber GhosttyTerminalOptClipboardRead)
+    : [ ("a callback or its userdata, installed by the binding (DESIGN.md §4.5)", optionNumber o)
       | o <-
           [ GhosttyTerminalOptUserdata,
             GhosttyTerminalOptWritePty,
             GhosttyTerminalOptBell,
-            GhosttyTerminalOptEnquiry,
-            GhosttyTerminalOptXtversion,
             GhosttyTerminalOptTitleChanged,
-            GhosttyTerminalOptSize,
-            GhosttyTerminalOptColorScheme,
-            GhosttyTerminalOptDeviceAttributes,
             GhosttyTerminalOptPwdChanged,
-            GhosttyTerminalOptClipboardWrite,
             GhosttyTerminalOptDesktopNotification,
             GhosttyTerminalOptProgressReport,
             GhosttyTerminalOptUnknownSequence,
-            GhosttyTerminalOptClipboardRead,
             GhosttyTerminalOptRenderHold,
             GhosttyTerminalOptSemanticPrompt,
             GhosttyTerminalOptReset,
@@ -358,6 +352,14 @@ written t o = case o of
   SetResizePullScrollback -> writes o False
   SetXtChecksumReport -> writes o True
   SetXtChecksumExtension -> writes o decChecksum {fullCodepoints = True, dontNegate = True}
+  -- The answers are read back by the queries they answer, in
+  -- "Test.Ghostty.Effectful.Events".
+  SetColorScheme -> (<>) <$> writes o (Just Dark) <*> writes o Nothing
+  SetDeviceAttributes -> writes o defaultDeviceAttributes
+  SetEnquiry -> writes o "\ENQ reply"
+  SetXtversion -> writes o "canopy"
+  SetSize -> writes o False
+  SetClipboardWrite -> writes o True
   where
     red' = Rgb 255 0 0
 

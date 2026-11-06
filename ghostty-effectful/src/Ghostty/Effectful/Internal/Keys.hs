@@ -28,8 +28,10 @@ import Foreign.Ptr (Ptr, castPtr, nullPtr)
 import Foreign.Storable (Storable (..))
 import Ghostty.Effectful.Color (Palette, paletteColors, paletteFromList)
 import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), ResultCode (..))
+import Ghostty.Effectful.Internal.Callbacks (Answers (..), setEnquiryAnswer, setXtversionAnswer)
 import Ghostty.Effectful.Internal.Convert (enumName, fromRgb, fromStyle, modeCode, toRgb, unknownEnum)
 import Ghostty.Effectful.Internal.Error (expectSuccess, resultCode)
+import Ghostty.Effectful.Internal.Terminal (Terminal (..))
 import Ghostty.Effectful.Style (Style)
 import Ghostty.Effectful.Terminal.Keys
   ( ChecksumExtension (..),
@@ -93,7 +95,8 @@ dataKey = \case
   MouseShape -> GhosttyTerminalDataMouseShape
   MemoryUsage -> GhosttyTerminalDataMemoryUsage
 
--- | The header's key for a write.
+-- | The header's key for a write. For an option that sets a query's answer,
+-- the callback option whose answer it is, which 'setOption' never sends.
 optionKey :: TerminalOption a -> GhosttyTerminalOption
 optionKey = \case
   SetTitle -> GhosttyTerminalOptTitle
@@ -123,6 +126,12 @@ optionKey = \case
   SetResizePullScrollback -> GhosttyTerminalOptResizePullScrollback
   SetXtChecksumReport -> GhosttyTerminalOptXtChecksumReport
   SetXtChecksumExtension -> GhosttyTerminalOptXtChecksumExtension
+  SetColorScheme -> GhosttyTerminalOptColorScheme
+  SetDeviceAttributes -> GhosttyTerminalOptDeviceAttributes
+  SetEnquiry -> GhosttyTerminalOptEnquiry
+  SetXtversion -> GhosttyTerminalOptXtversion
+  SetSize -> GhosttyTerminalOptSize
+  SetClipboardWrite -> GhosttyTerminalOptClipboardWrite
 
 -- | @ghostty_terminal_get@ at the key's output type, copied out.
 getData :: GhosttyTerminal -> TerminalData a -> IO a
@@ -319,8 +328,10 @@ fromMemoryUsage u =
 
 -- | @ghostty_terminal_set@ with the value poked at the key's input type.
 -- Nothing a constructor can carry is refused, so a refusal is 'Invariant'.
-setOption :: GhosttyTerminal -> TerminalOption a -> a -> IO ()
-setOption h opt v = case opt of
+-- An option that sets the answer to a query is not the library's: it
+-- changes what the binding's callback answers with (DESIGN.md §4.5).
+setOption :: Terminal s -> TerminalOption a -> a -> IO ()
+setOption t opt v = case opt of
   SetTitle -> text v put
   SetPwd -> text v put
   SetColorForeground -> maybeWith (toRgb <$> v) put
@@ -350,8 +361,16 @@ setOption h opt v = case opt of
   SetResizePullScrollback -> flag v
   SetXtChecksumReport -> flag v
   SetXtChecksumExtension -> with (checksumBits v) (put . castPtr)
+  SetColorScheme -> answer (\a -> a {scheme = v})
+  SetDeviceAttributes -> answer (\a -> a {attributes = v})
+  SetSize -> answer (\a -> a {sizeQueries = v})
+  SetClipboardWrite -> answer (\a -> a {clipboard = v})
+  SetEnquiry -> setEnquiryAnswer t.installed v
+  SetXtversion -> setXtversionAnswer t.installed (encodeUtf8 v)
   where
+    h = t.handle
     k = optionKey opt
+    answer = modifyIORef' t.answers
     site = CallSite ("ghostty_terminal_set " <> enumName ghosttyTerminalOptionEnum (let GhosttyTerminalOption n = k in n))
 
     put :: Ptr () -> IO ()

@@ -4,7 +4,7 @@ The milestones of DESIGN.md §13, broken into steps. **Each step is one CR**: it
 `-Werror`, passes every CI step, adds its `CHANGELOG.md` line, and updates `DESIGN.md` in the same
 commit if it changes a decision (§2.9). Section references (§) are to DESIGN.md.
 
-M0 is done (PR #1), and M1.1–M1.5 (PRs #2–#7). Steps are numbered `M<n>.<k>`
+M0 is done (PR #1), and M1.1–M1.6 (PRs #2–#8). Steps are numbered `M<n>.<k>`
 and are in dependency order within a milestone.
 
 ## Tracks
@@ -99,6 +99,10 @@ Exit: formatter goldens; every typed key exercised (§13).
   `SemanticPrompt`.
 - `TerminalConfig` answers queries (colour scheme, DA, ENQ, XTVERSION, size); updatable via `setT`.
 - Tests: event order across mixed OSC 133 / bell / title streams; query replies arrive as `WritePty`.
+- Every callback is installed but `CLIPBOARD_READ` (reads answered empty). Whether clipboard writes
+  are accepted is a seventh answer (`SetClipboardWrite`), since the header needs a reply before the
+  callback returns. `resize` and `reset` return the events they cause. ENQ and XTVERSION answer in
+  C. Capturing a render hold's frame is left to M1.7 (DESIGN.md §4.5). **Done.**
 
 ### M1.7 Render frames
 
