@@ -20,7 +20,14 @@ Only `Ghostty.Effectful.**` and `Test.Ghostty.**` may import it (§2.6 rule 1).
 - **C enums are newtypes with pattern synonyms, `COMPLETE` with an `…Unknown` view** (§3.3). Never
   use a closed sum. Every value comes from `hsc2hs` (`#const`), never a hand-copied number.
 - **Each import's comment says why it is `safe` or `unsafe`.** An `unsafe` call that re-enters
-  Haskell crashes, and the compiler cannot catch that.
+  Haskell crashes, and the compiler cannot catch that. `safety.txt` ties each decision to a
+  fingerprint of the function's header text; after binding a function, or when
+  `scripts/check-ghostty-safety.py` says its header changed, read the header's docs for it, then
+  run the script with `--update` and commit the file. Never edit it by hand.
+- **`capi` does not check integer widths or pointers to Haskell types**, so
+  `scripts/check-ghostty-signatures.py` compares every import, callback type and struct record with
+  the header's C types by name. Write the Haskell type the header names: `Word16` for `uint16_t`,
+  `Ptr GhosttySelection` for `GhosttySelection *`, the enum or handle of the C name.
 - **Every struct and enum the binding marshals exports a descriptor** (`Ghostty.FFI.Layout`) beside
   it, every number from `hsc2hs`, named `tLayout` or `tEnum` after its type `T`. Each has one row in
   `test/Test/Ghostty/FFI/Layout.hs`: `StructRow` with a sample value whose fields are all non-zero

@@ -55,6 +55,17 @@ Written as changes land, not at release (DESIGN.md §2.9).
   five shims with it; eleven are bound. `io.h`'s `GhosttyMimeReaderFn` receives structs by value,
   so like `ENQUIRY` and `XTVERSION` it can only be written in C. The formatter's and selection's
   format calls are `safe` although they run no callback, because they walk the scrollback.
+- DESIGN.md §3.3, §5A.2 and §14.2: `capi` checks less than §3.3 said. A probe (GHC 9.12.4, GCC 16)
+  showed that an integer of the wrong width or signedness converts silently and truncates, and that a
+  `Ptr` to a Haskell type, so every struct pointer and every handle, reaches C as `void *` and is
+  accepted for any pointer. `scripts/check-ghostty-signatures.py`, in CI, now compares each of the 94
+  `capi` imports, the 22 callback types and the 48 struct records with the headers' C types by name.
+  Mutating a width, a handle, a result, a pointee, a field, an array, a union arm, a synonym or a
+  callback parameter each fails it. `tree-sitter-ffi` gets the same check at M4.1.
+- `scripts/check-ghostty-safety.py`, in CI, ties each `safe`/`unsafe` decision to a fingerprint of
+  the function's header doc and prototype (`ghostty-vt-ffi/safety.txt`), so a pin bump that changes
+  what a bound function documents fails until it is re-read and recorded with `--update`. The 94
+  decisions were recorded as they stand; no header doc of an `unsafe` call mentions a callback.
 
 
 ### M0: infrastructure

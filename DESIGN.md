@@ -310,8 +310,11 @@ The rules, by module name across all packages:
 3. `cabal test ghostty-vt-ffi-test ghostty-effectful-test tendril-test tree-sitter-ffi-test tree-sitter-effectful-test canopy-test`,
    plus `scripts/gen-ts-shims.py --check`, which fails if the committed shims (§5A.2) are not what
    the vendored header generates; `scripts/gen-ghostty-ffi.py --check`, the same for the generated
-   ghostty binding (§3.3); and `scripts/check-ghostty-coverage.py`, which fails on a function or type
-   in the pinned headers that is neither bound nor deferred (§3.3)
+   ghostty binding (§3.3); `scripts/check-ghostty-coverage.py`, which fails on a function or type
+   in the pinned headers that is neither bound nor deferred (§3.3); `scripts/check-ghostty-signatures.py`,
+   which compares the binding's types with the headers' (§3.3); and `scripts/check-ghostty-safety.py`,
+   which fails when a bound function's header text changed since its `safe`/`unsafe` was decided
+   (§3.3)
 4. doctests for `tendril`, `ghostty-effectful` and `tree-sitter-effectful`
 5. `hlint --ignore-glob='lint/fixtures/**' .`, `lint/check-layering.sh`, `scripts/check-common-stanzas.sh`,
    `scripts/check-layout-rows.py` (§3.4)
@@ -398,9 +401,19 @@ from it:
 ### 3.3 Binding conventions
 
 - **`CApiFFI` (`foreign import capi`) for every function**, so that GHC compiles calls against the
-  real prototype through the C compiler. A wrong argument type is a C compile error at build time,
-  which `ccall` would let through to a crash. `static inline` helpers in the headers
-  (`ghostty_mode_new`) are reachable only this way.
+  real prototype through the C compiler. `static inline` helpers in the headers
+  (`ghostty_mode_new`) are reachable only this way. The C compiler catches less than it seems
+  (checked, GHC 9.12.4 and GCC 16): an integer of the wrong width or signedness, as a parameter or a
+  result, converts silently and truncates at run time, and a `Ptr` to a Haskell-defined type (every
+  struct, and every handle, a newtype over one) reaches C as `void *`, which converts to any
+  pointer. Only an integer for a pointer, and a pointer to the wrong C scalar, are errors.
+- **So signatures are checked against the headers by name.**
+  `scripts/check-ghostty-signatures.py` maps each `capi` import's parameter and result types, each
+  callback type's, and each field of every record that marshals a C struct, to C (`Word16` to
+  `uint16_t`, `Ptr T` to `T *`, a `Ghostty…` type to the C type of its name) and compares them with
+  the pinned headers, ignoring `const`. Enums and handles are compared by name, so one handle for
+  another fails; type synonyms and C scalar typedefs resolve to what they name, and each synonym
+  must name what its C typedef does.
 - **Eighteen functions take a struct by value, and one returns one**, which GHC's FFI cannot do
   (at the pin; `ghostty_mouse_event_get_position` is the one that returns). Each that the binding
   binds gets a `static inline` pointer shim in `ghostty-vt-ffi/include/gvtffi_shims.h`, taking the
@@ -430,8 +443,8 @@ from it:
 - **Coverage is checked against the headers.** `scripts/check-ghostty-coverage.py` lists every
   `GHOSTTY_API` function and every type the pinned headers declare, and fails on one that is neither
   bound nor listed in `ghostty-vt-ffi/coverage.txt` with the PLAN.md step that binds it (or `never`,
-  with a reason). An entry that no longer defers anything fails too. The `capi` prototype check
-  cannot find a function nobody bound; this can.
+  with a reason). An entry that no longer defers anything fails too. The signature check cannot
+  find a function nobody bound; this can.
 - **A tagged union is a Haskell sum**: one constructor per arm the binding names, plus an `…Other`
   constructor that carries a tag the binding does not name, whose value it cannot read. The
   `Storable` instance reads the arm the tag selects. A union whose arms all have one type
@@ -448,7 +461,13 @@ from it:
 - **`unsafe` FFI calls by default**, `safe` only for calls that can call back into Haskell
   (`vt_write`, `vt_write_until`, `paste`, `render_state_update` if it ever gains callbacks). This is
   a per-import decision recorded in the import's comment, because an `unsafe` call that re-enters
-  Haskell is a crash, and that cannot be checked by the compiler. Reading the header found more
+  Haskell is a crash, and that cannot be checked by the compiler. What is checked is that each
+  decision was made against the header as it is: `ghostty-vt-ffi/safety.txt` records every bound
+  function's mode and a fingerprint of its doc comment and prototype, and
+  `scripts/check-ghostty-safety.py` fails when either drifts, as at a pin bump that changes what a
+  function documents, until someone re-reads it and records the result (`--update`). It is a
+  prompt to re-read, not a proof; a callback documented only in a header's overview, not on the
+  function, does not change the fingerprint. Reading the header found more
   than the writes: `terminal_reset` and `terminal_resize` end a render hold through its callback
   (and resize sends an in-band size report), `continuation_write` calls its writer, and
   `terminal_set` is `safe` because the header does not promise that no option reports through a
@@ -914,7 +933,9 @@ void tsffi_node_child(const TSNode *self, uint32_t child_index, TSNode *out) {
   (`hs-tree-sitter-capi` solves the same problem with `hsc2hs` `#{def}` blocks written by hand.)
 - **Every import is `capi`**, against `api.h` for the functions that take only scalars and pointers
   and against `tsffi_shims.h` for the rest, so the C compiler checks each Haskell signature against a
-  real prototype (§3.3's reason).
+  real prototype as far as it can (§3.3's reason). §3.3 found that this misses integer widths and
+  pointers to Haskell types, so `tree-sitter-ffi` gets a signature check like ghostty's when its
+  functions are bound (M4.1).
 - Structs and enums come from `hsc2hs`, as in §3.3; `TSSymbol`, `TSFieldId` and `TSStateId` are
   `Word16` newtypes, and C enums are newtypes with `COMPLETE` pattern synonyms, open for the same
   reason as §3.3's.
@@ -1855,6 +1876,7 @@ reading the pinned sources. A ✗ changed the design, in the section named.
 | ghci `:complete repl` and `:type` are usable as hidden queries | ✓ replies sit cleanly between marks | §9.3 |
 | `SeqUnlift` refuses cross-thread use, so `Ghostty` cannot leak to another thread | ½: `SeqUnlift` does refuse (✓, exact error message observed), but effectful's `forkIO` clones the environment, so a fork inherits the effect; added the effect-row split and an owner-thread check | §4.6 |
 | GHC can call libghostty-vt directly | ✗ 18 functions take a struct by value, 1 returns one, 2 callbacks return one and 1 receives two (at the pin; M1.2 counted 5 and the callbacks in the headers it bound, M1.3 the rest); generated pointer shims, and C for the callbacks | §3.3, §4.5 |
+| `capi` makes the C compiler check each Haskell signature against the prototype | ✗ integers of the wrong width or signedness convert silently and truncate, and a `Ptr` to a Haskell type is `void *`, accepted for any pointer, handles included (probe, GCC 16); a signature check against the headers by name | §3.3 |
 | `vt_write_until` can stop at each OSC 133 mark | ✓ `BOUNDARY_OSC_END`; the pre-scan fallback is gone | §4.5 |
 | `pkgconfig-depends: libghostty-vt ==0.1.*` | ✗ the wildcard does not parse there; `>=0.1 && <0.2` does and admits `0.1.0-dev`; static linking is a separate `libghostty-vt-static` package | §3.1 |
 | `ghostty_build_info` identifies the pinned build | ✗ it reports the library's `0.1.0-dev` with empty build metadata (M0's CI, at the pin; first read as the app version `1.4.1-dev+…`); the build script stamps the commit in with `-Dlib-version-string`, and the check compares build metadata with the pin | §3.4 |
