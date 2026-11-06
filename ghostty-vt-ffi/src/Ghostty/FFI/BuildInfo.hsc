@@ -34,6 +34,9 @@ module Ghostty.FFI.BuildInfo
 
     -- * Calls
     ghosttyBuildInfo,
+
+    -- * The pin
+    ghosttyPinnedCommit,
   )
 where
 
@@ -210,3 +213,9 @@ ghosttyOptimizeModeEnum =
 -- | @ghostty_build_info@. @unsafe@: it does not call back into Haskell.
 foreign import capi unsafe "ghostty/vt.h ghostty_build_info"
   ghosttyBuildInfo :: GhosttyBuildInfo -> Ptr () -> IO GhosttyResult
+
+-- | @GHOSTTY_COMMIT@, the libghostty-vt commit this binding was generated
+-- against. The linked library's @VERSION_BUILD@ must be exactly this
+-- (DESIGN.md §3.4, §4.7).
+ghosttyPinnedCommit :: ByteString
+ghosttyPinnedCommit = "c7f68a7f48c6a5b357689eb8c2328bc2dab5d8ed"

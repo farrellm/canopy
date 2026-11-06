@@ -4,7 +4,7 @@ The milestones of DESIGN.md §13, broken into steps. **Each step is one CR**: it
 `-Werror`, passes every CI step, adds its `CHANGELOG.md` line, and updates `DESIGN.md` in the same
 commit if it changes a decision (§2.9). Section references (§) are to DESIGN.md.
 
-M0 is done (PR #1), and M1.1–M1.3 (PRs #2–#4 and M1.3's second CR). Steps are numbered `M<n>.<k>`
+M0 is done (PR #1), and M1.1–M1.4 (PRs #2–#6). Steps are numbered `M<n>.<k>`
 and are in dependency order within a milestone.
 
 ## Tracks
@@ -69,11 +69,14 @@ Exit: formatter goldens; every typed key exercised (§13).
 
 ### M1.4 `Ghostty` effect and scoped terminals
 
-- `Ghostty.Effectful`: the static `Ghostty` effect, `runGhostty` with the version check returning
+- `Ghostty.Effectful`: the `Ghostty` effect, `runGhostty` with the version check returning
   `Either VersionMismatch` (§4.7), the owner-thread check on every operation (§4.6).
 - `GhosttyError`; `Invariant` thrown for results the header says cannot happen.
 - `Ghostty.Effectful.Terminal`: `withTerminal` (rank-2 region, `bracket` release), `resize`, `reset`.
 - Tests: handle released on exception; use from a forked thread throws; version mismatch refuses.
+- `Ghostty` is statically dispatched, with one interpreter (DESIGN.md §4.2). Later steps add their
+  operations as plain functions in their own modules, each starting with `owned`. The pin reaches
+  the version check as the generated `ghosttyPinnedCommit`. **Done.**
 
 ### M1.5 Typed keys
 

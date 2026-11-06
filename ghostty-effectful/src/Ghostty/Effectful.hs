@@ -1,27 +1,25 @@
-{-# LANGUAGE PatternSynonyms #-}
+-- | The high-level interface to libghostty-vt (DESIGN.md §4): the 'Ghostty'
+-- effect and its interpreter. The handles are in "Ghostty.Effectful.Terminal"
+-- and its siblings, and the errors in "Ghostty.Effectful.Error".
+module Ghostty.Effectful
+  ( -- * The effect
+    Ghostty,
+    runGhostty,
 
--- | The high-level interface to libghostty-vt (DESIGN.md §4).
---
--- M0 skeleton: only the build identity, read through the raw binding, so the
--- package edge to @ghostty-vt-ffi@ and the link to the C library are wired.
-module Ghostty.Effectful (buildMetadata) where
+    -- * Build identity
+    buildMetadata,
+  )
+where
 
 import Effectful (Eff, IOE, (:>))
-import Foreign.Marshal.Alloc (alloca)
-import Foreign.Ptr (Ptr, castPtr)
-import Foreign.Storable (peek)
-import Ghostty.FFI.BuildInfo (ghosttyBuildInfo, pattern GhosttyBuildInfoVersionBuild)
-import Ghostty.FFI.Types (GhosttyString, ghosttyStringBytes, pattern GhosttySuccess)
+import Ghostty.Effectful.Internal.Effect (Ghostty, linkedBuild, runGhostty)
 
 -- | The linked library's build metadata: the commit it was built from, or
--- 'Nothing' if the library would not say.
+-- 'Nothing' if the library would not say. 'runGhostty' refuses to run unless
+-- it is the pinned commit.
 --
 -- >>> import Effectful (runEff)
 -- >>> isJust <$> runEff buildMetadata
 -- True
 buildMetadata :: (IOE :> es) => Eff es (Maybe Text)
-buildMetadata = liftIO $ alloca $ \(p :: Ptr GhosttyString) -> do
-  r <- ghosttyBuildInfo GhosttyBuildInfoVersionBuild (castPtr p)
-  if r /= GhosttySuccess
-    then pure Nothing
-    else Just . decodeUtf8 <$> (ghosttyStringBytes =<< peek p)
+buildMetadata = liftIO linkedBuild

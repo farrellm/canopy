@@ -14,6 +14,9 @@ module Ghostty.FFI.BuildInfo
 
     -- * Calls
     ghosttyBuildInfo,
+
+    -- * The pin
+    ghosttyPinnedCommit,
   )
 where
 
@@ -30,3 +33,5 @@ import Ghostty.FFI.Types (GhosttyResult (..))
 -- | @ghostty_build_info@. @unsafe@: it does not call back into Haskell.
 foreign import capi unsafe "ghostty/vt.h ghostty_build_info"
   ghosttyBuildInfo :: GhosttyBuildInfo -> Ptr () -> IO GhosttyResult
+
+{{pin}}

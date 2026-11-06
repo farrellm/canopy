@@ -271,7 +271,8 @@ The rules, by module name across all packages:
 - **`effectful`, never an mtl stack or `ReaderT Env IO`.** Libraries use `effectful-core`; the
   application uses `effectful` (for `Concurrent`, `Process`, `FileSystem`). Each subsystem is a
   dynamically dispatched effect with at least two interpreters — a real one and a pure or scripted
-  one — which is what the test plan stands on (§11).
+  one — which is what the test plan stands on (§11). Operations are generated with `effectful-th`'s
+  `makeEffect`. `Ghostty` is the exception: static, with one interpreter (§4.2).
 - **`optics`, never `lens`.** Records get labels with `makeFieldLabelsNoPrefix`; external types that
   derive `Generic` get labels for free through `optics-core`'s generic-label instances. `lsp-types`'
   generated records all derive `Generic` (`deriving stock (Show, Eq, Ord, Generic)`), but their fields
@@ -529,6 +530,8 @@ requires `VERSION_BUILD` to equal `GHOSTTY_COMMIT` exactly, which is the precise
 
 At startup, `ghostty-effectful` performs the same version check once and refuses to run against a different
 library (§4.7); this is the one runtime check of the C boundary, and it runs before any handle exists.
+It compares with `ghosttyPinnedCommit`, which `gen-ghostty-ffi.py` writes from `GHOSTTY_COMMIT` into
+`Ghostty.FFI.BuildInfo` (`{{pin}}`), so a pin bump that is not regenerated fails `--check`.
 
 ---
 
@@ -545,7 +548,7 @@ library (§4.7); this is the one runtime check of the C boundary, and it runs be
 ### 4.2 The effect and scoped handles
 
 ```haskell
-data Ghostty :: Effect   -- static dispatch; the handle registry and allocator
+data Ghostty :: Effect   -- static dispatch; the owner thread and the open-handle count
 
 runGhostty :: IOE :> es => Eff (Ghostty : es) a -> Eff es (Either VersionMismatch a)
 
@@ -556,6 +559,20 @@ withTerminal
   -> (forall s. Terminal s -> Eff es a)
   -> Eff es a
 ```
+
+`Ghostty` is statically dispatched (`Static WithSideEffects`). Its operations are plain functions in
+the module of what they act on (`Ghostty.Effectful.Terminal`, `.Render`, `.Format`, …), each starting
+with the owner check, so no one module has to know every operation's types. The representations
+live in `Ghostty.Effectful.Internal.*`; the public modules export the types without constructors.
+Unlike §2.7's subsystems it has **one interpreter**: libghostty-vt is headless and deterministic, so
+the library itself is what tests run against, and a fake would test only the fake. That leaves
+dynamic dispatch nothing to buy but interposition (tracing every call), which nothing needs, at the
+cost of one GADT and one handler case per operation across M1.5–M1.9 (dynamic was tried in M1.4's
+first draft, through `makeEffect`). The representation holds the owner thread (§4.6) and the count
+of open handles (`openTerminals`, which is how release is tested); there is no allocator to hold,
+since the binding passes the library's default (§3.3). A grid's extent is an `Extent`, a `Word16` that is never
+zero (`extent :: Word16 -> Maybe Extent`), because `terminal_new` and `terminal_resize` refuse zero,
+so that refusal cannot be expressed and the remaining failure of each is out of memory.
 
 The rank-2 `s` makes a `Terminal s` unusable outside `withTerminal`, so the handle cannot outlive
 its `free`. `bracket`-style release runs on exceptions. The same pattern scopes formatters, encoders
@@ -663,7 +680,9 @@ one handle family must come from one thread. Two mechanisms, one static and one 
   call `forkIO`, so nothing can carry `Ghostty` to another thread. §2.6 rule 4 already keeps
   `Effectful.Concurrent.**` out of the core's imports.
 - **Dynamically, the handler checks its owner.** `runGhostty` records `myThreadId` and every
-  operation compares against it (one `myThreadId`, cheap next to an FFI call), throwing on mismatch.
+  operation compares against it (one `myThreadId`, cheap next to an FFI call), throwing
+  `WrongThread` on mismatch, before any C call. A static operation runs on its caller's thread, so
+  the check sees the caller.
   This is needed because effectful's own `forkIO` *clones* the environment
   (`Effectful.Internal.Env.cloneEnv`), so an effect in scope at a fork is usable in the child thread;
   only `withEffToIO SeqUnlift` checks the thread (`Effectful.Internal.Monad.seqUnliftIO`, effectful-core
@@ -673,18 +692,21 @@ one handle family must come from one thread. Two mechanisms, one static and one 
 ### 4.7 Errors
 
 ```haskell
-data GhosttyError
-  = OutOfMemory
-  | BufferTooSmall Int        -- handled internally by the *_alloc variants; never escapes
-  | Rejected RejectReason     -- unsafe paste: a value the caller must decide on (§8.5)
-  | LimitExceeded
-  | Invariant CallSite GhosttyResult   -- the library returned what the header says it cannot
+data GhosttyError                       -- thrown
+  = OutOfMemory CallSite
+  | WrongThread CallSite                -- §4.6
+  | Invariant CallSite ResultCode       -- the library returned what the header says it cannot
 ```
 
-`Rejected` is returned as `Either` from the one operation that can produce it (`paste`). Out of memory
-and invariant violations are thrown as exceptions, because no caller can do anything useful with
-them and threading them through every signature would hide the errors that matter. The version check
-in `runGhostty` returns `Either VersionMismatch` and is the only way to obtain the effect.
+`ResultCode` is `GhosttyResult` closed, with an unknown case (§3.3), so no `Ghostty.FFI` type
+escapes. `CallSite` names the C function, or the operation for `WrongThread`. Errors a caller can
+act on are not here: `Rejected` (unsafe paste, §8.5) is its own type, returned as `Either` from the
+one operation that can produce it (`paste`, M1.9), and `LimitExceeded` joins `GhosttyError` with the
+first bound call that can return it. A too-small buffer is handled inside the `*_alloc` variants and
+never escapes, so it has no constructor. Out of memory, wrong-thread use and invariant violations are
+thrown as exceptions, because no caller can do anything useful with them and threading them through
+every signature would hide the errors that matter. The version check in `runGhostty` returns
+`Either VersionMismatch` and is the only way to obtain the effect.
 
 ### 4.8 What else is exposed
 
