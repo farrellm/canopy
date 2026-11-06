@@ -43,12 +43,15 @@ type instance DispatchOf Ghostty = Static WithSideEffects
 
 newtype instance StaticRep Ghostty = GhosttyRep Handles
 
--- | What the interpreter holds.
+-- | What the interpreter holds: the owner, and counts of what is open, by
+-- which release is tested.
 data Handles = Handles
   { -- | the thread that ran 'runGhostty', the only one allowed to call (§4.6)
     owner :: ThreadId,
     -- | how many terminals are open
-    openCount :: IORef Int
+    openCount :: IORef Int,
+    -- | how many tracked grid references are live
+    refCount :: IORef Int
   }
 
 -- | The start of every operation: on the owner thread, the interpreter's
@@ -79,7 +82,8 @@ runGhosttyPinnedTo pin act = do
     else do
       owner <- liftIO myThreadId
       open <- newIORef 0
-      Right <$> evalStaticRep (GhosttyRep Handles {owner, openCount = open}) act
+      refs <- newIORef 0
+      Right <$> evalStaticRep (GhosttyRep Handles {owner, openCount = open, refCount = refs}) act
 
 -- | The linked library's build metadata (@VERSION_BUILD@), which
 -- @scripts/build-libghostty.sh@ stamps with the commit it built; 'Nothing' if

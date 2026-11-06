@@ -85,10 +85,16 @@ Exit: formatter goldens; every typed key exercised (§13).
 - Tracked grid refs in the high-level API (blocks need them in M3).
 - Test enumerates `[Some TerminalData]` (kept exhaustive by an incomplete-pattern match) and calls
   each on a fresh terminal. **Half of M1's exit condition.**
+- Every header row has a constructor except the callback options and `USERDATA` (M1.6),
+  `SELECTION` (M6.5) and `KITTY_GRAPHICS` (M6.15), and a test holds that list against the header.
+  `ModeKey r` is indexed by whether the library accepts a reset default for the mode. Tracked refs
+  are owned by the terminal's region, with an idempotent `untrack`. **Done.**
 
 ### M1.6 Events and `feed`
 
 - C callbacks installed by the binding that only append to the terminal's `IORef` buffer (§4.5).
+  The callback options and `USERDATA` stay out of `TerminalOption` (M1.5's key-coverage test lists
+  them); the query answers become `TerminalOption` constructors here.
 - `feed` over `vt_write_until … BOUNDARY_OSC_END`, attaching cursor position to each
   `SemanticPrompt`.
 - `TerminalConfig` answers queries (colour scheme, DA, ENQ, XTVERSION, size); updatable via `setT`.
@@ -486,6 +492,8 @@ Exit: feature table §8 complete. Steps are mostly independent of each other.
 
 ### M6.5 Blocks
 
+- The terminal's `SELECTION` data key and option, as `TerminalData`/`TerminalOption` constructors
+  over the selection API's value (left out of M1.5).
 - Alt-↑/↓ selection, copy input/output/both, re-insert and re-run, fold with "N more lines", timing
   and exit/exception markers (§8.3, §8.4).
 
@@ -532,6 +540,7 @@ Exit: feature table §8 complete. Steps are mostly independent of each other.
 
 ### M6.15 Rich output
 
+- The `KITTY_GRAPHICS` data key (a borrowed handle, left out of M1.5).
 - Kitty graphics placements (render-state FFI, `kitty_graphics.h`, and `sys.h`'s PNG decoder hook;
   passthrough when the host supports it), OSC 8
   hyperlinks end to end, opt-in output-as-code highlighting per profile (§8.3).
