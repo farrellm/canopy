@@ -43,7 +43,6 @@ library
     , base ^>=4.21.2.0
     , canopy-prelude
     , effectful-core ^>=2.7.1
-    , effectful-th ^>=1.0.0.4
     , ghostty-vt-ffi
 
   mixins:
