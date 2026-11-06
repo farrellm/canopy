@@ -47,7 +47,7 @@ module Ghostty.Effectful.Internal.Terminal
   )
 where
 
-import Control.Exception (onException, throwIO)
+import Control.Exception (onException, throwIO, try)
 import Data.ByteString.Unsafe qualified as BSU
 import Data.IntMap.Strict qualified as IntMap
 import Foreign.Marshal.Alloc (alloca)
@@ -62,6 +62,7 @@ import Ghostty.Effectful.Internal.Callbacks
     Pending,
     drain,
     installCallbacks,
+    joinWrites,
     releaseCallbacks,
     resolve,
   )
@@ -216,9 +217,14 @@ type Reader = forall a. TerminalData a -> IO a
 -- 2048).
 resizeTerminal :: Reader -> Terminal s -> GridSize -> CellPixels -> IO [TerminalEvent]
 resizeTerminal get t g px = do
-  modifyIORef' t.answers (\a -> a {grid = g, pixels = px})
-  expectSuccess (CallSite "ghostty_terminal_resize")
-    =<< ghosttyTerminalResize t.handle (fromExtent g.cols) (fromExtent g.rows) px.width px.height
+  -- The size callback runs inside the resize, so the answers change first,
+  -- and change back if the resize is refused.
+  old <- readIORef t.answers
+  writeIORef t.answers old {grid = g, pixels = px}
+  ( expectSuccess (CallSite "ghostty_terminal_resize")
+      =<< ghosttyTerminalResize t.handle (fromExtent g.cols) (fromExtent g.rows) px.width px.height
+    )
+    `onException` writeIORef t.answers old
   drainEvents get t
 
 -- | @ghostty_terminal_reset@: a full reset (RIS), keeping the size. Returns
@@ -236,25 +242,32 @@ drainEvents get t = resolve get =<< drain t.events
 -- | Write VT to the terminal, stopping after each OSC
 -- (@GHOSTTY_TERMINAL_BOUNDARY_OSC_END@) to resolve the events so far, so a
 -- prompt mark's cursor is read right after the mark (DESIGN.md §4.5).
--- Events buffered before the write come first.
+-- Events buffered before the write come first, and adjacent 'WritePty's are
+-- joined across stops. Every byte is written even if resolving throws (a
+-- callback's exception, an unnamed enum value): the first such exception is
+-- thrown after the whole write, so the terminal never stops part-way through
+-- the input.
 feedTerminal :: Reader -> Terminal s -> ByteString -> IO [TerminalEvent]
 feedTerminal get t bytes = do
-  before <- drainEvents get t
-  after <- BSU.unsafeUseAsCStringLen bytes $ \(p, n) -> alloca $ \stop -> go stop (castPtr p) n []
-  pure (before <> after)
+  before <- try (drainEvents get t)
+  (failure, after) <- BSU.unsafeUseAsCStringLen bytes $ \(p, n) -> alloca $ \stop -> go stop (castPtr p) n (leftToMaybe before) []
+  whenJust failure throwIO
+  pure (joinWrites (fromRight [] before <> after))
   where
-    go :: Ptr GhosttyTerminalWriteStop -> Ptr Word8 -> Int -> [[TerminalEvent]] -> IO [TerminalEvent]
-    go stop p n acc
-      | n <= 0 = pure (concat (reverse acc))
+    go :: Ptr GhosttyTerminalWriteStop -> Ptr Word8 -> Int -> Maybe SomeException -> [[TerminalEvent]] -> IO (Maybe SomeException, [TerminalEvent])
+    go stop p n failure acc
+      | n <= 0 = pure (failure, concat (reverse acc))
       | otherwise = do
           poke stop emptyStop
           r <- ghosttyTerminalVtWriteUntil t.handle p (fromIntegral n) boundary stop
-          evs <- drainEvents get t
+          resolved <- try (drainEvents get t)
+          let failure' = failure <|> leftToMaybe resolved
+              acc' = fromRight [] resolved : acc
           case resultCode r of
-            ResultNoValue -> pure (concat (reverse (evs : acc)))
+            ResultNoValue -> pure (failure', concat (reverse acc'))
             ResultSuccess -> do
               used <- fromIntegral . (.consumed) <$> peek stop
-              go stop (p `plusPtr` used) (n - used) (evs : acc)
+              go stop (p `plusPtr` used) (n - used) failure' acc'
             other -> throwIO (Invariant (CallSite "ghostty_terminal_vt_write_until") other)
 
     boundary = let GhosttyTerminalBoundary b = GhosttyTerminalBoundaryOscEnd in fromIntegral b

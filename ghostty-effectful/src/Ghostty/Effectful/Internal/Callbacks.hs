@@ -21,6 +21,7 @@ module Ghostty.Effectful.Internal.Callbacks
     Pending (..),
     drain,
     resolve,
+    joinWrites,
 
     -- * Answers
     Answers (..),
@@ -118,10 +119,12 @@ resolve getData ps = joinWrites <$> traverse event ps
       Unnamed site e n -> unknownEnum site e n
       Failed e -> throwIO e
 
-    joinWrites = \case
-      WritePty a : WritePty b : rest -> joinWrites (WritePty (a <> b) : rest)
-      e : rest -> e : joinWrites rest
-      [] -> []
+-- | Join adjacent 'WritePty's, so a reply goes to the PTY in one write.
+joinWrites :: [TerminalEvent] -> [TerminalEvent]
+joinWrites = \case
+  WritePty a : WritePty b : rest -> joinWrites (WritePty (a <> b) : rest)
+  e : rest -> e : joinWrites rest
+  [] -> []
 
 -- | What a terminal's query callbacks answer with, and the grid they report.
 data Answers = Answers
@@ -162,12 +165,11 @@ installCallbacks h buf answers enq xtv = do
         modifyIORef' made (castFunPtr fp :)
         setPtr opt (castFunPtrToPtr fp)
       setPtr opt p = expectSuccess (CallSite "ghostty_terminal_set") =<< ghosttyTerminalSet h opt p
-  ud <- mallocArray 2
-  poke ud emptyString
-  pokeElemOff ud 1 emptyString
+  ud <- mallocArray answerCount
+  traverse_ (\k -> pokeElemOff ud k emptyString) [0 .. answerCount - 1]
   let install = do
-        replaceAnswer ud 0 enq
-        replaceAnswer ud 1 xtv
+        replaceAnswer ud enquiryIndex enq
+        replaceAnswer ud xtversionIndex xtv
         setPtr GhosttyTerminalOptUserdata (castPtr ud)
         setPtr GhosttyTerminalOptEnquiry (castFunPtrToPtr gveffEnquiry)
         setPtr GhosttyTerminalOptXtversion (castFunPtrToPtr gveffXtversion)
@@ -196,16 +198,16 @@ installCallbacks h buf answers enq xtv = do
 releaseCallbacks :: Installed -> IO ()
 releaseCallbacks i = do
   traverse_ freeHaskellFunPtr i.funPtrs
-  traverse_ (peekElemOff i.userdata >=> freeString) [0, 1]
+  traverse_ (peekElemOff i.userdata >=> freeString) [0 .. answerCount - 1]
   free i.userdata
 
 -- | Set ENQ's reply; empty sends none.
 setEnquiryAnswer :: Installed -> ByteString -> IO ()
-setEnquiryAnswer i = replaceAnswer i.userdata 0
+setEnquiryAnswer i = replaceAnswer i.userdata enquiryIndex
 
 -- | Set XTVERSION's name; empty reports the library's own.
 setXtversionAnswer :: Installed -> ByteString -> IO ()
-setXtversionAnswer i = replaceAnswer i.userdata 1
+setXtversionAnswer i = replaceAnswer i.userdata xtversionIndex
 
 -- | Replace one of the @USERDATA@ strings with a copy of the bytes, and free
 -- the old one. No write is running, so no C callback is reading it.
@@ -221,6 +223,14 @@ replaceAnswer ud k bs = mask_ $ do
   old <- peekElemOff ud k
   pokeElemOff ud k new
   freeString old
+
+-- | Where ENQ's reply and XTVERSION's name sit in the @USERDATA@ array, and
+-- its length: @GVEFF_ANSWER_ENQUIRY@, @GVEFF_ANSWER_XTVERSION@ and
+-- @GVEFF_ANSWER_COUNT@ in @include/gveff_answers.h@.
+enquiryIndex, xtversionIndex, answerCount :: Int
+enquiryIndex = 0
+xtversionIndex = 1
+answerCount = 2
 
 -- | No bytes, at no address.
 emptyString :: GhosttyString
