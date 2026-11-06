@@ -251,7 +251,9 @@ The rules, by module name across all packages:
    import `Canopy.Child.**`, `Canopy.Lsp.Transport`, `Canopy.Syntax.GrammarStore`,
    `TreeSitter.Parse`, or any `Effectful.Concurrent.**`. It sees those subsystems only through their
    pure model modules. (It *may* import `TreeSitter.Tree`, `.Node` and `.Query`: their reads are pure
-   functions, §5B.2, and the model holds the current input's `Tree`.)
+   functions, §5B.2, and the model holds the current input's `Tree`.) The allow-list does not include
+   `Main`: every executable's and test suite's `Main` has that one name, so lint trusts it with
+   nothing, and canopy's `Main` reaches these only through `Canopy.Cli` and `Canopy.App.Run`.
 5. **`TreeSitter.FFI.**` is private to `TreeSitter.**`** (and `Test.TreeSitter.**`), as rule 1 does for
    ghostty. Nothing in canopy sees a `TSNode` or a raw pointer. `TreeSitter.Internal.Pure` (§5B.2) is
    private to `TreeSitter.**`.
@@ -337,10 +339,20 @@ Distribution packages do not exist yet, so:
 - **The commit is pinned** in `ghostty-vt-ffi/GHOSTTY_COMMIT`. Upgrading is one deliberate commit that
   changes the pin, regenerates the layout baseline (§3.4) and says why.
 - **`scripts/build-libghostty.sh`** fetches that commit and builds into `_deps/ghostty/<commit>/`,
-  printing the `PKG_CONFIG_PATH` to export. A `cabal.project.local` is never required.
+  printing the `PKG_CONFIG_PATH` to export. A `cabal.project.local` is never required. Zig's own
+  package fetcher is not relied on: in Zig 0.17.1 it fails inside `zig build` with
+  `TlsInitializationFailed` against `deps.files.ghostty.org` on some machines, every time, while curl
+  succeeds. So the script runs the build, and each package it fails to fetch, named by its `.url`, is
+  fetched with curl by `scripts/prefetch-zig-deps.py` into Zig's cache, in the layout `zig build`
+  writes; then the build runs again, until it stops asking (a lazy dependency is asked for only once
+  its parent is present). Only what `-Demit-lib-vt` asks for is fetched, not the app's lazy GTK,
+  imgui, fonts and so on: 9 of the 37 packages in `build.zig.zon.json`. `zig build --fetch` is not
+  enough to find them: it misses lazy dependencies the build steps ask for. `zig build` still checks
+  every hash. (A `zig fetch` entry is no substitute: it keeps the archive's top-level directory, so
+  the build reports a hash mismatch.)
 - **The package declares `pkgconfig-depends: libghostty-vt >=0.1 && <0.2`.** The pinned commit's
-  `libghostty-vt.pc` reports `Version: 0.1.0-dev` (`build.zig`'s `lib_version`), which that range
-  admits; cabal resolves the constraint against the pkg-config database, so a missing or wrong library
+  `libghostty-vt.pc` reports `Version: 0.1.0-dev+<commit>` (`build.zig`'s `lib_version`, stamped
+  with the commit, §3.4), which that range admits; cabal resolves the constraint against the pkg-config database, so a missing or wrong library
   fails at *configure* time, not link time and never at run time. (Checked with cabal 3.16.1.0: a
   range below the installed version is rejected at planning, and the wildcard form `==0.1.*` is *not*
   accepted in `pkgconfig-depends` — it is a parse error.)
@@ -396,7 +408,9 @@ from it:
   Haskell is a crash, and that cannot be checked by the compiler.
 - **Raw types only.** `Ptr`, `FunPtr`, `CSize`, `Word8`. No `ForeignPtr`, no exceptions, no `Text`.
   Everything that makes it safe is `ghostty-effectful`'s job; this package's job is to be complete and
-  exactly right.
+  exactly right. The one exception is `ghosttyStringBytes`, which copies a borrowed `GhosttyString`
+  out as a `ByteString` (a null pointer is empty): bytes, not `Text`, so that `ghostty-effectful` and
+  this package's own tests read the C boundary's strings through one function rather than two copies.
 
 ### 3.4 The layout test
 
@@ -406,9 +420,12 @@ from different places — the headers the binding was compiled against, and the 
 linked — so the test catches a header/library mismatch (a stale `_deps`, a distro `.so` at a
 different commit) that would otherwise be silent memory corruption. It also checks that
 `ghostty_build_info` reports the pinned build, and that every enum value the binding names exists.
-Note that build info reports the *Ghostty application* version (`GHOSTTY_BUILD_INFO_VERSION_STRING`,
-e.g. `1.4.1-dev+<commit>`), not the library's `0.1.0-dev`; the check compares its build metadata
-(`VERSION_BUILD`) with `GHOSTTY_COMMIT`, which is the precise identity anyway.
+Build info reports the *library's* version (`build.zig`'s `lib_version`, `0.1.0-dev`), and its
+build metadata (`VERSION_BUILD`) is empty unless the build is given one. So `build-libghostty.sh`
+stamps the pin in: it builds with `-Dlib-version-string=<lib_version>+<commit>`, and the check
+requires `VERSION_BUILD` to equal `GHOSTTY_COMMIT` exactly, which is the precise identity anyway.
+(Checked by M0's CI at the pinned commit; an earlier reading had expected the application version,
+`1.4.1-dev+<commit>`.)
 
 At startup, `ghostty-effectful` performs the same version check once and refuses to run against a different
 library (§4.7); this is the one runtime check of the C boundary, and it runs before any handle exists.
@@ -804,8 +821,9 @@ library ships a single-file amalgamation, `lib/src/lib.c`. So it is **vendored**
 tree-sitter's API passes small structs **by value**: `TSNode` (a 32-byte struct holding a context
 array, an id and a tree pointer), `TSPoint`, `TSRange`, `TSTreeCursor`, `TSParseOptions` and others,
 both as arguments and as results — `TSNode ts_node_child(TSNode self, uint32_t child_index)`.
-GHC's FFI cannot pass or return a struct by value. Every such function (46 of them in v0.27.1's
-`api.h`) gets a C shim that takes pointers instead:
+GHC's FFI cannot pass or return a struct by value. Every such function (56 of them in v0.27.1's
+`api.h`, counting every by-value `TSNode`, `TSPoint`, `TSRange`, `TSTreeCursor`, `TSInput`,
+`TSParseOptions` and `TSLogger`) gets a C shim that takes pointers instead:
 
 ```c
 void tsffi_node_child(const TSNode *self, uint32_t child_index, TSNode *out) {
@@ -816,7 +834,7 @@ void tsffi_node_child(const TSNode *self, uint32_t child_index, TSNode *out) {
 - **The shims are generated**, by `scripts/gen-ts-shims.py` from the vendored `api.h`, into
   `cbits/tsffi_shims.c` and `include/tsffi_shims.h`, and committed. CI runs the generator in
   `--check` mode (§2.8 step 3), so a bump that changes a prototype cannot leave a stale shim. Hand-
-  writing 46 near-identical wrappers is how one of them ends up dereferencing the wrong argument.
+  writing 56 near-identical wrappers is how one of them ends up dereferencing the wrong argument.
   (`hs-tree-sitter-capi` solves the same problem with `hsc2hs` `#{def}` blocks written by hand.)
 - **Every import is `capi`**, against `api.h` for the functions that take only scalars and pointers
   and against `tsffi_shims.h` for the rest, so the C compiler checks each Haskell signature against a
@@ -1091,7 +1109,7 @@ names, fallbacks from `function.builtin` to `function`) is the application's.
 | C1 engines | `Canopy.Child.Pty`, `Canopy.Child.Process`, `Canopy.Ffi.Pty`; `Canopy.Syntax.GrammarStore`, `Canopy.Syntax.Grammars` (the known grammars' splices); `Canopy.Lsp.Transport`, `.Client`, `.Capabilities`; `Canopy.Watch` | Talk to the outside world; each also exposes a pure model module |
 | C2 domain | `Canopy.Profile.*`, `Canopy.Session.Frame`, `.Block`, `.Transcript`, `.Projection`, `Canopy.Intel.*`; `Canopy.Syntax.Edit`, `.Highlight`, `.Complete`, `.Structure`, `.Indent` (over `tree-sitter-effectful`) | REPL-specific logic and canopy's use of tree-sitter, pure |
 | C3 app core | `Canopy.App.Model`, `.Event`, `.Command`, `.Update`, `.View` | The state machine and the view; pure (§2.6 rule 4) |
-| C4 shell | `Canopy.App.Run`, `Canopy.App.Interpret`, `Canopy.Cli`, `Main` | Wire effects, threads and interpreters |
+| C4 shell | `Canopy.App.Run`, `Canopy.App.Interpret`, `Canopy.Cli`, `Main` | Wire effects, threads and interpreters. `Main` only calls into `Canopy.Cli`: lint trusts no `Main` (§2.6) |
 
 ### 6.2 The PTY
 
@@ -1752,7 +1770,7 @@ reading the pinned sources. A ✗ changed the design, in the section named.
 | relude and optics coexist under the mixins prelude | ✓ no ambiguity | §2.3 |
 | `hs-tree-sitter` has incremental edit, byte-range query cursors, and loads current grammars | ✗ the API is there, but it is ABI 14 only and current grammars are ABI 15; own packages | §5A, §5B, D3 |
 | tree-sitter node reads never write the tree, so persistent trees can have pure, shareable reads | ✓ by source, v0.27.1: `node.c` writes only stack iterators; subtree ref counts are atomic; only `ts_tree_edit` and `ts_tree_delete` write. To be backed by §5B.7's concurrency test | §5B.2 |
-| GHC can call tree-sitter directly | ✗ 46 functions in `api.h` pass structs by value; generated pointer shims | §5A.2 |
+| GHC can call tree-sitter directly | ✗ 56 functions in `api.h` pass structs by value; generated pointer shims | §5A.2 |
 | `posix_spawn` + `POSIX_SPAWN_SETSID` + open slave by path gives a controlling terminal | ✓ glibc, run; musl ≥ 1.1.17, by source only | §6.2 |
 | Packet mode reports the child's termios changes | ✗ only with `EXTPROC`, which breaks echo, cooked reads and `^C`; poll `tcgetattr` on the master instead (✓ works) | §6.2 |
 | `PYTHON_BASIC_REPL=1` gives a cooked python child | ✗ the basic REPL still runs GNU readline, raw; a `code.interact` bootstrap with readline blocked is cooked (✓) | §7.2 |
@@ -1762,7 +1780,7 @@ reading the pinned sources. A ✗ changed the design, in the section named.
 | `SeqUnlift` refuses cross-thread use, so `Ghostty` cannot leak to another thread | ½: `SeqUnlift` does refuse (✓, exact error message observed), but effectful's `forkIO` clones the environment, so a fork inherits the effect; added the effect-row split and an owner-thread check | §4.6 |
 | `vt_write_until` can stop at each OSC 133 mark | ✓ `BOUNDARY_OSC_END`; the pre-scan fallback is gone | §4.5 |
 | `pkgconfig-depends: libghostty-vt ==0.1.*` | ✗ the wildcard does not parse there; `>=0.1 && <0.2` does and admits `0.1.0-dev`; static linking is a separate `libghostty-vt-static` package | §3.1 |
-| `ghostty_build_info` reports the library version | ✗ it reports the Ghostty app version (`1.4.1-dev+…`); the check uses build metadata vs the pinned commit | §3.4 |
+| `ghostty_build_info` identifies the pinned build | ✗ it reports the library's `0.1.0-dev` with empty build metadata (M0's CI, at the pin; first read as the app version `1.4.1-dev+…`); the build script stamps the commit in with `-Dlib-version-string`, and the check compares build metadata with the pin | §3.4 |
 | `text-rope` keeps UTF-16 metrics | ✓ `Data.Text.Mixed.Rope` | §5.3 |
 | `unicode-data` provides grapheme-break and width data | ✗ neither, in 0.9.0, and nothing else on Hackage does without ICU; tendril generates its own tables | §5.3 |
 

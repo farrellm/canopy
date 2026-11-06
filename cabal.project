@@ -1,0 +1,9 @@
+-- DESIGN.md §2.1: seven packages, each in a directory of its own name.
+packages:
+  canopy-prelude
+  ghostty-vt-ffi
+  ghostty-effectful
+  tendril
+  tree-sitter-ffi
+  tree-sitter-effectful
+  canopy

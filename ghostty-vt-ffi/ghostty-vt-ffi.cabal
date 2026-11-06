@@ -1,0 +1,88 @@
+cabal-version:      3.14
+name:               ghostty-vt-ffi
+version:            0.1.0.0
+synopsis:           Low-level bindings to libghostty-vt
+description:
+  Complete, unsafe-by-construction capi bindings to libghostty-vt, the
+  terminal emulator library from Ghostty (DESIGN.md §3). Raw types only;
+  ghostty-effectful is the safe interface.
+
+license:            BSD-3-Clause
+license-file:       LICENSE
+author:             Matthew Farrell
+maintainer:         farrellm@alum.mit.edu
+category:           Terminal
+build-type:         Simple
+tested-with:        GHC ==9.12.4
+extra-doc-files:    GHOSTTY_COMMIT
+
+-- DESIGN.md §3.1: development links the shared library; releases link the
+-- static one, which the libghostty-vt build installs as its own pkg-config
+-- package.
+flag static
+  description: Link libghostty-vt statically (libghostty-vt-static)
+  default:     False
+  manual:      True
+
+-- DESIGN.md §2.4. CI adds -Werror from the command line. The two common stanzas
+-- are copied into every package; scripts/check-common-stanzas.sh keeps them equal.
+common warnings
+  ghc-options:
+    -Wall -Wcompat -Widentities -Wincomplete-record-updates
+    -Wincomplete-uni-patterns -Wmissing-export-lists -Wpartial-fields
+    -Wredundant-constraints -Wmissing-deriving-strategies -Wunused-type-patterns
+
+common extensions
+  default-extensions:
+    OverloadedRecordDot
+    OverloadedStrings
+    OverloadedLabels
+
+library
+  import:           warnings, extensions
+  exposed-modules:
+    Ghostty.FFI.BuildInfo
+    Ghostty.FFI.Types
+
+  hs-source-dirs:   src
+  build-tool-depends: hsc2hs:hsc2hs
+  build-depends:
+    , base ^>=4.21.2.0
+    , bytestring ^>=0.12
+    , canopy-prelude
+
+  -- A missing or wrong library fails at configure time (§3.1). The range
+  -- admits the pinned commit's 0.1.0-dev; ==0.1.* does not parse here.
+  if flag(static)
+    pkgconfig-depends: libghostty-vt-static >=0.1 && <0.2
+
+  else
+    pkgconfig-depends: libghostty-vt >=0.1 && <0.2
+
+  mixins:
+    base hiding (Prelude),
+    canopy-prelude (Canopy.Prelude as Prelude)
+
+  default-language: GHC2024
+
+-- §3.4: the layout test. In M0, the build identity check alone.
+test-suite ghostty-vt-ffi-test
+  import:           warnings, extensions
+  type:             exitcode-stdio-1.0
+  hs-source-dirs:   test
+  main-is:          Main.hs
+  other-modules:    Test.Ghostty.FFI.BuildInfo
+  build-depends:
+    , base ^>=4.21.2.0
+    , canopy-prelude
+    , ghostty-vt-ffi
+    , tasty ^>=1.5
+    , tasty-hunit ^>=0.10.2
+    , template-haskell ^>=2.23
+    , text ^>=2.1
+
+  mixins:
+    base hiding (Prelude),
+    canopy-prelude (Canopy.Prelude as Prelude)
+
+  default-language: GHC2024

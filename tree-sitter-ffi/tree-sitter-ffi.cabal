@@ -1,0 +1,97 @@
+cabal-version:      3.14
+name:               tree-sitter-ffi
+version:            0.1.0.0
+synopsis:           Low-level bindings to a vendored tree-sitter runtime
+description:
+  capi bindings to tree-sitter, over a vendored and pinned runtime, with
+  generated pointer shims for its by-value API (DESIGN.md §5A).
+
+license:            BSD-3-Clause
+license-file:       LICENSE
+author:             Matthew Farrell
+maintainer:         farrellm@alum.mit.edu
+category:           Parsing
+build-type:         Simple
+tested-with:        GHC ==9.12.4
+extra-doc-files:    TREE_SITTER_VERSION
+extra-source-files:
+  include/tsffi_shims.h
+  vendor/tree-sitter/LICENSE
+  vendor/tree-sitter/lib/include/tree_sitter/*.h
+  vendor/tree-sitter/lib/src/**/*.c
+  vendor/tree-sitter/lib/src/**/*.h
+  vendor/tree-sitter/lib/src/unicode/LICENSE
+  vendor/tree-sitter/lib/src/wasm-stdlib/libc/LICENSE
+
+-- DESIGN.md §2.4. CI adds -Werror from the command line. The two common stanzas
+-- are copied into every package; scripts/check-common-stanzas.sh keeps them equal.
+common warnings
+  ghc-options:
+    -Wall -Wcompat -Widentities -Wincomplete-record-updates
+    -Wincomplete-uni-patterns -Wmissing-export-lists -Wpartial-fields
+    -Wredundant-constraints -Wmissing-deriving-strategies -Wunused-type-patterns
+
+common extensions
+  default-extensions:
+    OverloadedRecordDot
+    OverloadedStrings
+    OverloadedLabels
+
+library
+  import:           warnings, extensions
+  exposed-modules:
+    TreeSitter.FFI.Api
+    TreeSitter.FFI.Shims
+    TreeSitter.FFI.Types
+
+  hs-source-dirs:   src
+  build-tool-depends: hsc2hs:hsc2hs
+  build-depends:
+    , base ^>=4.21.2.0
+    , canopy-prelude
+
+  -- §5A.1: the runtime's amalgamation, and §5A.2's generated shims
+  -- (scripts/gen-ts-shims.py; CI checks they are current).
+  c-sources:
+    vendor/tree-sitter/lib/src/lib.c
+    cbits/tsffi_shims.c
+
+  include-dirs:
+    include
+    vendor/tree-sitter/lib/include
+    vendor/tree-sitter/lib/src
+
+  -- tsffi_shims.h includes <tree_sitter/api.h>, so both are installed.
+  install-includes:
+    tsffi_shims.h
+    tree_sitter/api.h
+
+  -- No -O here: cabal passes its own optimisation level to the C compiler,
+  -- and a fixed one would override --disable-optimization.
+  cc-options:
+    -std=c11 -D_POSIX_C_SOURCE=200112L -D_DEFAULT_SOURCE
+
+  mixins:
+    base hiding (Prelude),
+    canopy-prelude (Canopy.Prelude as Prelude)
+
+  default-language: GHC2024
+
+test-suite tree-sitter-ffi-test
+  import:           warnings, extensions
+  type:             exitcode-stdio-1.0
+  hs-source-dirs:   test
+  main-is:          Main.hs
+  other-modules:    Test.TreeSitter.FFI
+  build-depends:
+    , base ^>=4.21.2.0
+    , canopy-prelude
+    , tasty ^>=1.5
+    , tasty-hunit ^>=0.10.2
+    , tree-sitter-ffi
+
+  mixins:
+    base hiding (Prelude),
+    canopy-prelude (Canopy.Prelude as Prelude)
+
+  default-language: GHC2024

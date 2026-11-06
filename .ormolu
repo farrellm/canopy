@@ -1,0 +1,3 @@
+infixl 1 &
+module Optics.Core exports Optics.Optic
+module Optics.Core exports Optics.Operators
