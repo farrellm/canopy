@@ -21,7 +21,7 @@ two disagree, the design is the intent and the code is behind. Conventions are c
 | `cabal.project` | Lists the seven packages. |
 | `.ormolu` | ormolu's fixities and re-exports (§2.5). Copied from cassini. Not style config. |
 | `.hlint.yaml`, `lint/` | §2.6's layering rules, their fixtures, and `lint/check-layering.sh`. |
-| `scripts/` | `build-libghostty.sh` (with `prefetch-zig-deps.py`), `vendor-tree-sitter.sh`, `gen-ts-shims.py`, `check-common-stanzas.sh`, `check-haddock.py`. |
+| `scripts/` | `build-libghostty.sh` (with `prefetch-zig-deps.py`), `vendor-tree-sitter.sh`, `gen-ts-shims.py`, `check-common-stanzas.sh`, `check-haddock.py`, `check-layout-rows.py`. |
 | `_deps/` | Gitignored output of `build-libghostty.sh`: the Zig, the ghostty checkout, and the built library. |
 | `.github/workflows/ci.yml` | CI, §2.8 steps 1–7. Step 8 arrives with the first benchmark. |
 
@@ -65,7 +65,7 @@ root:
 - Test: `cabal test all`, and `python3 scripts/gen-ts-shims.py --check`
 - Doctest: `cabal repl --with-repl=doctest --repl-options=-Wno-missing-export-lists lib:<pkg>`, for
   `tendril`, `ghostty-effectful` and `tree-sitter-effectful`
-- Lint: `hlint --ignore-glob='lint/fixtures/**' .`, `lint/check-layering.sh` and
-  `scripts/check-common-stanzas.sh`
+- Lint: `hlint --ignore-glob='lint/fixtures/**' .`, `lint/check-layering.sh`,
+  `scripts/check-common-stanzas.sh` and `python3 scripts/check-layout-rows.py`
 - Format: `ormolu --mode check $(git ls-files '*.hs')`
 - Haddock: `cabal haddock all 2>&1 | python3 scripts/check-haddock.py`

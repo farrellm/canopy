@@ -1,6 +1,7 @@
 {-# LANGUAGE CApiFFI #-}
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE ViewPatterns #-}
 
 -- | @include/ghostty/vt/build_info.h@: compile-time facts about the linked
 -- library (DESIGN.md §3.4).
@@ -9,6 +10,7 @@ module Ghostty.FFI.BuildInfo
     GhosttyBuildInfo (..),
     pattern GhosttyBuildInfoVersionString,
     pattern GhosttyBuildInfoVersionBuild,
+    pattern GhosttyBuildInfoUnknown,
     ghosttyBuildInfoEnum,
 
     -- * Calls
@@ -40,8 +42,26 @@ pattern GhosttyBuildInfoVersionString = GhosttyBuildInfo (#const GHOSTTY_BUILD_I
 pattern GhosttyBuildInfoVersionBuild :: GhosttyBuildInfo
 pattern GhosttyBuildInfoVersionBuild = GhosttyBuildInfo (#const GHOSTTY_BUILD_INFO_VERSION_BUILD)
 
+-- | Any key this binding does not name: one it has not bound yet, or a newer
+-- library's.
+pattern GhosttyBuildInfoUnknown :: CInt -> GhosttyBuildInfo
+pattern GhosttyBuildInfoUnknown n <- (unknownBuildInfo -> Just n)
+  where
+    GhosttyBuildInfoUnknown n = GhosttyBuildInfo n
+
+unknownBuildInfo :: GhosttyBuildInfo -> Maybe CInt
+unknownBuildInfo (GhosttyBuildInfo n)
+  | toInteger n `elem` map snd ghosttyBuildInfoEnum.values = Nothing
+  | otherwise = Just n
+
+{-# COMPLETE
+  GhosttyBuildInfoVersionString,
+  GhosttyBuildInfoVersionBuild,
+  GhosttyBuildInfoUnknown
+  #-}
+
 -- | Every value of @GhosttyBuildInfo@ this binding names, for the layout test
--- (§3.4).
+-- (§3.4). It is also what 'GhosttyBuildInfoUnknown' excludes.
 ghosttyBuildInfoEnum :: CEnum
 ghosttyBuildInfoEnum =
   CEnum

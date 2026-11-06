@@ -143,6 +143,9 @@ jobs:
       - name: Common stanzas agree across packages (§2.4)
         run: scripts/check-common-stanzas.sh
 
+      - name: Every bound ghostty type has a layout-test row (§3.4)
+        run: python3 scripts/check-layout-rows.py
+
       # 6: ormolu reads default-extensions from the cabal file; never --no-cabal (§2.5)
       - name: ormolu
         run: ormolu --mode check $(git ls-files '*.hs')
