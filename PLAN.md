@@ -61,6 +61,8 @@ Exit: formatter goldens; every typed key exercised (§13).
   header's line leaves `ghostty-vt-ffi/coverage.txt` as it is bound.
 - Layout-test rows for each. May be split into two CRs (render+format, encoders+parsers+unicode) if
   it reviews too large.
+- Split: the first CR (PR #4) bound render.h, screen.h, selection.h and formatter.h whole, and
+  generated the by-value shims. `coverage.txt`'s `M1.3` lines are what the second CR binds.
 
 ### M1.4 `Ghostty` effect and scoped terminals
 

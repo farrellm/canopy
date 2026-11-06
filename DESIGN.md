@@ -401,23 +401,30 @@ from it:
   real prototype through the C compiler. A wrong argument type is a C compile error at build time,
   which `ccall` would let through to a crash. `static inline` helpers in the headers
   (`ghostty_mode_new`) are reachable only this way.
-- **Five functions take a struct by value**, which GHC's FFI cannot pass:
-  `ghostty_terminal_scroll_viewport`, `_grid_ref`, `_grid_ref_track`, `_continuation_write` and
-  `ghostty_tracked_grid_ref_set`. Each gets a `static inline` pointer shim in
-  `ghostty-vt-ffi/include/gvtffi_shims.h`, called through `capi` like any other function, so the
-  compiler still checks both prototypes. There are five, so they are written by hand, not generated
-  as tree-sitter's 56 are (§5A.2). Two callbacks *return* a struct by value (`ENQUIRY` and
-  `XTVERSION` return a `GhosttyString`), which a Haskell `wrapper` cannot. Their types are bound,
-  and a function for either has to be written in C (§4.5).
+- **Eighteen functions take a struct by value, and one returns one**, which GHC's FFI cannot do
+  (at the pin; `ghostty_mouse_event_get_position` is the one that returns). Each that the binding
+  binds gets a `static inline` pointer shim in `ghostty-vt-ffi/include/gvtffi_shims.h`, taking the
+  struct by pointer (and returning one through an out pointer), called through `capi` like any
+  other function, so the compiler still checks both prototypes. The shims are generated from the
+  header prototypes by `scripts/gen-ghostty-ffi.py`, one `{{shim}}` line each in that header's
+  template, added as each function is bound (eleven so far). M1.2 wrote its five by hand; M1.3's
+  first half more than doubled them, past the point where a hand list was the cheaper check, as
+  tree-sitter's 56 are generated (§5A.2). A function bound without its shim is a C compile error,
+  since `capi` checks the prototype. Two callbacks *return* a struct by value (`ENQUIRY` and
+  `XTVERSION` return a `GhosttyString`), and one *receives* structs by value (`io.h`'s
+  `GhosttyMimeReaderFn`, given a `GhosttyString` and a `GhosttyWriter`, which paste's MIME reader
+  uses), which a Haskell `wrapper` cannot make. Their types are bound, and a function of any of
+  them has to be written in C (§4.5).
 - **One module per header** (`terminal.h` → `Ghostty.FFI.Terminal`, with its callback half in
   `Ghostty.FFI.Terminal.Callbacks`). A header is bound in part where only part of it is needed yet,
   and the module says which part.
 - **The mechanical code is generated from the headers**, by `scripts/gen-ghostty-ffi.py`, and
   committed: each enum's patterns, `Unknown` view and descriptor, each plain struct's record,
-  `Storable` instance and descriptor, each callback type and its `wrapper`, the named modes, and the
-  layout test's enum rows. The input is a template per module (`ghostty-vt-ffi/gen/**.in`), the
-  module as written by hand with directive lines where generated code goes; tagged unions, arrays
-  and imports stay hand-written there. Docs are the header's own. CI runs it with `--check`, so a pin
+  `Storable` instance and descriptor, each callback type and its `wrapper`, the named modes, the
+  by-value pointer shims, and the layout test's enum rows. The input is a template per module
+  (`ghostty-vt-ffi/gen/**.in`, and one for the shim header), the module as written by hand with
+  directive lines where generated code goes; tagged unions, arrays, handles and imports stay
+  hand-written there. Docs are the header's own. CI runs it with `--check`, so a pin
   bump that changes a header cannot leave the binding behind, and an edit to generated code cannot
   survive.
 - **Coverage is checked against the headers.** `scripts/check-ghostty-coverage.py` lists every
@@ -445,8 +452,12 @@ from it:
   than the writes: `terminal_reset` and `terminal_resize` end a render hold through its callback
   (and resize sends an in-band size report), `continuation_write` calls its writer, and
   `terminal_set` is `safe` because the header does not promise that no option reports through a
-  callback. One call is `safe` for a different reason: `terminal_compress` calls nothing back, but a
-  full pass can stall, and an `unsafe` call would hold up every Haskell thread at the next GC.
+  callback. `formatter_format` calls its writer. Some calls are `safe` for a different reason:
+  they call nothing back, but can run long, and an `unsafe` call would hold up every Haskell thread
+  at the next GC. `terminal_compress` can stall on a full pass, and the formatter's
+  `format_buf`/`format_alloc` and selection formatting walk the whole screen including the
+  scrollback. `render_state_update` stays `unsafe`: it copies the viewport, not the scrollback, and
+  is on the per-frame path.
 - **Raw types only.** `Ptr`, `FunPtr`, `CSize`, `Word8`. No `ForeignPtr`, no exceptions, no `Text`.
   Everything that makes it safe is `ghostty-effectful`'s job; this package's job is to be complete and
   exactly right. The one exception is `ghosttyStringBytes`, which copies a borrowed `GhosttyString`
@@ -1843,7 +1854,7 @@ reading the pinned sources. A ✗ changed the design, in the section named.
 | ghci and python emit OSC 133 marks set through their prompt strings | ✓ both; PyREPL re-emits per redraw, hence the bootstrap | §7.2 |
 | ghci `:complete repl` and `:type` are usable as hidden queries | ✓ replies sit cleanly between marks | §9.3 |
 | `SeqUnlift` refuses cross-thread use, so `Ghostty` cannot leak to another thread | ½: `SeqUnlift` does refuse (✓, exact error message observed), but effectful's `forkIO` clones the environment, so a fork inherits the effect; added the effect-row split and an owner-thread check | §4.6 |
-| GHC can call libghostty-vt directly | ✗ 5 functions take a struct by value and 2 callbacks return one (M1.2, at the pin); hand-written pointer shims, and C for the two callbacks | §3.3, §4.5 |
+| GHC can call libghostty-vt directly | ✗ 18 functions take a struct by value, 1 returns one, 2 callbacks return one and 1 receives two (at the pin; M1.2 counted 5 and the callbacks in the headers it bound, M1.3 the rest); generated pointer shims, and C for the callbacks | §3.3, §4.5 |
 | `vt_write_until` can stop at each OSC 133 mark | ✓ `BOUNDARY_OSC_END`; the pre-scan fallback is gone | §4.5 |
 | `pkgconfig-depends: libghostty-vt ==0.1.*` | ✗ the wildcard does not parse there; `>=0.1 && <0.2` does and admits `0.1.0-dev`; static linking is a separate `libghostty-vt-static` package | §3.1 |
 | `ghostty_build_info` identifies the pinned build | ✗ it reports the library's `0.1.0-dev` with empty build metadata (M0's CI, at the pin; first read as the app version `1.4.1-dev+…`); the build script stamps the commit in with `-Dlib-version-string`, and the check compares build metadata with the pin | §3.4 |

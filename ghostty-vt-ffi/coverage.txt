@@ -6,12 +6,9 @@
 #
 # <header or symbol>   <step>   [why]
 
-# M1.3: render state, formatter, encoders, parsers, unicode, and the rest of
-# the headers M1.2 bound in part.
-render.h               M1.3
-screen.h               M1.3     cell and row data; the handles are bound
-formatter.h            M1.3
-selection.h            M1.3     the formatter takes a selection
+# M1.3's second half: encoders, parsers, unicode, and the rest of the headers
+# M1.2 bound in part. (Its first half bound render.h, screen.h, formatter.h and
+# selection.h.)
 key/encoder.h          M1.3
 key/event.h            M1.3
 mouse.h                M1.3     GhosttyMouseShape
@@ -26,8 +23,9 @@ color.h                M1.3     parsing and palettes; RGB is bound
 osc.h                  M1.3     the parser; the terminator is bound
 sgr.h                  M1.3
 unicode.h              M1.3
-io.h                   M1.3     readers; the writer is bound
-types.h                M1.3     the handles and value types of those headers
+io.h                   M1.3     readers; the writer is bound. GhosttyMimeReaderFn gets structs by value: C only
+types.h                M1.3     the parsers' handles
+GhosttyKittyGraphics   M1.3     a terminal key's output type, as a handle
 
 # Later steps.
 search.h               M6.6

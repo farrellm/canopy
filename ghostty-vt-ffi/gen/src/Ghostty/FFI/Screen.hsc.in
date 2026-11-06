@@ -1,0 +1,80 @@
+{-# LANGUAGE CApiFFI #-}
+{-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE ViewPatterns #-}
+
+-- | @include/ghostty/vt/screen.h@: packed cell and row values, and reading
+-- them by key.
+--
+-- A 'GhosttyCell' and a 'GhosttyRow' are plain 64-bit values, copied out of
+-- the terminal by grid references and the render state. The type behind each
+-- 'GhosttyCellData' and 'GhosttyRowData' key is documented on its pattern;
+-- nothing checks it here (§4.4). The bit layout of a cell is the library's,
+-- in @ghostty_type_json()@, and is not decoded by this binding.
+module Ghostty.FFI.Screen
+  ( -- * Values
+    GhosttyCell,
+    GhosttyRow,
+    {{xstruct screen.h GhosttyCellsView}}
+
+    -- * Cells
+    {{xenum screen.h GhosttyCellContentTag}}
+    {{xenum screen.h GhosttyCellWide}}
+    {{xenum screen.h GhosttyCellSemanticContent}}
+    {{xenum screen.h GhosttyCellData}}
+    ghosttyCellGet,
+    ghosttyCellGetMulti,
+
+    -- * Rows
+    {{xenum screen.h GhosttyRowSemanticPrompt}}
+    {{xenum screen.h GhosttyRowData}}
+    ghosttyRowGet,
+    ghosttyRowGetMulti,
+  )
+where
+
+import Foreign.C.Types (CInt (..), CSize (..))
+import Foreign.Ptr (Ptr)
+import Foreign.Storable (Storable (..))
+import Ghostty.FFI.Layout (CEnum (..), CField (..), CStruct (..), unnamed)
+import Ghostty.FFI.Types (GhosttyResult (..))
+
+#include <gvtffi_shims.h>
+
+-- | @GhosttyCell@: an opaque packed cell value. Read it with 'ghosttyCellGet'.
+type GhosttyCell = Word64
+
+-- | @GhosttyRow@: an opaque packed row value. Read it with 'ghosttyRowGet'.
+type GhosttyRow = Word64
+
+{{struct screen.h GhosttyCellsView}}
+-- * Cells
+
+{{enum screen.h GhosttyCellContentTag}}
+{{enum screen.h GhosttyCellWide}}
+{{enum screen.h GhosttyCellSemanticContent}}
+{{enumT screen.h GhosttyCellData}}
+-- | @ghostty_cell_get@: read one key of a cell into a pointer of its output
+-- type. @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_cell_get"
+  ghosttyCellGet :: GhosttyCell -> GhosttyCellData -> Ptr () -> IO GhosttyResult
+
+-- | @ghostty_cell_get_multi@: read several keys in one call, stopping at the
+-- first error; the out count is how many succeeded. @unsafe@: it does not call
+-- back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_cell_get_multi"
+  ghosttyCellGetMulti :: GhosttyCell -> CSize -> Ptr GhosttyCellData -> Ptr (Ptr ()) -> Ptr CSize -> IO GhosttyResult
+
+-- * Rows
+
+{{enum screen.h GhosttyRowSemanticPrompt}}
+{{enumT screen.h GhosttyRowData}}
+-- | @ghostty_row_get@: read one key of a row into a pointer of its output
+-- type. @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_row_get"
+  ghosttyRowGet :: GhosttyRow -> GhosttyRowData -> Ptr () -> IO GhosttyResult
+
+-- | @ghostty_row_get_multi@: read several keys in one call, as
+-- 'ghosttyCellGetMulti'. @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_row_get_multi"
+  ghosttyRowGetMulti :: GhosttyRow -> CSize -> Ptr GhosttyRowData -> Ptr (Ptr ()) -> Ptr CSize -> IO GhosttyResult

@@ -46,13 +46,16 @@ library
     Ghostty.FFI.BuildInfo
     Ghostty.FFI.Color
     Ghostty.FFI.Device
+    Ghostty.FFI.Formatter
     Ghostty.FFI.GridRef
     Ghostty.FFI.Io
     Ghostty.FFI.Layout
     Ghostty.FFI.Modes
     Ghostty.FFI.Osc
     Ghostty.FFI.Point
+    Ghostty.FFI.Render
     Ghostty.FFI.Screen
+    Ghostty.FFI.Selection
     Ghostty.FFI.SizeReport
     Ghostty.FFI.Style
     Ghostty.FFI.Terminal
@@ -94,7 +97,10 @@ test-suite ghostty-vt-ffi-test
   main-is:          Main.hs
   other-modules:
     Test.Ghostty.FFI.BuildInfo
+    Test.Ghostty.FFI.Formatter
     Test.Ghostty.FFI.Layout
+    Test.Ghostty.FFI.Render
+    Test.Ghostty.FFI.Support
     Test.Ghostty.FFI.Terminal
 
   build-depends:

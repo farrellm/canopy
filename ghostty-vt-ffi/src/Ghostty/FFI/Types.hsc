@@ -4,8 +4,14 @@
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE ViewPatterns #-}
 
--- | Types shared by every libghostty-vt header: the result code and the
--- borrowed string (@include/ghostty/vt/types.h@, DESIGN.md §3.2).
+-- | Types shared by every libghostty-vt header (@include/ghostty/vt/types.h@,
+-- DESIGN.md §3.2): the result code, borrowed strings and codepoint lists,
+-- caller buffers, surface positions and the formatter's output format.
+--
+-- The header's opaque handles are bound in the module of the header that
+-- uses each: @GhosttyRenderState@ in "Ghostty.FFI.Render",
+-- and so on. Those of the parsers, kitty graphics, search and snapshots arrive
+-- with the steps that bind them.
 --
 -- C enums are open, so each is a newtype over the C integer with pattern
 -- synonyms and an @Unknown@ view (§3.3).
@@ -27,6 +33,24 @@ module Ghostty.FFI.Types
     GhosttyString (..),
     ghosttyStringBytes,
     ghosttyStringLayout,
+    GhosttyCodepoints (..),
+    ghosttyCodepointsLayout,
+
+    -- * Buffers
+    GhosttyBuffer (..),
+    ghosttyBufferLayout,
+
+    -- * Surface positions
+    GhosttySurfacePosition (..),
+    ghosttySurfacePositionLayout,
+
+    -- * Formatter output
+    GhosttyFormatterFormat (..),
+    pattern GhosttyFormatterFormatPlain,
+    pattern GhosttyFormatterFormatVt,
+    pattern GhosttyFormatterFormatHtml,
+    pattern GhosttyFormatterFormatUnknown,
+    ghosttyFormatterFormatEnum,
 
     -- * Type manifest
     ghosttyTypeJson,
@@ -35,7 +59,7 @@ where
 
 import Data.ByteString qualified as BS
 import Foreign.C.ConstPtr (ConstPtr (..))
-import Foreign.C.Types (CChar, CInt (..), CSize (..))
+import Foreign.C.Types (CChar, CDouble (..), CInt (..), CSize (..))
 import Foreign.Ptr (Ptr, castPtr, nullPtr)
 import Foreign.Storable (Storable (..))
 import Ghostty.FFI.Layout (CEnum (..), CField (..), CStruct (..), unnamed)
@@ -156,6 +180,154 @@ ghosttyStringLayout =
       fields =
         [ CField "ptr" (#offset GhosttyString, ptr) (#const GVTFFI_FIELD_SIZE(GhosttyString, ptr)),
           CField "len" (#offset GhosttyString, len) (#const GVTFFI_FIELD_SIZE(GhosttyString, len))
+        ]
+    }
+
+-- | @GhosttyCodepoints@: A borrowed list of Unicode scalar values.
+data GhosttyCodepoints = GhosttyCodepoints
+  { -- | @ptr@: Pointer to Unicode scalar values.
+    ptr :: Ptr Word32,
+    -- | @len@: Number of entries in ptr.
+    len :: CSize
+  }
+  deriving stock (Eq, Show)
+
+instance Storable GhosttyCodepoints where
+  sizeOf _ = (#size GhosttyCodepoints)
+  alignment _ = (#alignment GhosttyCodepoints)
+  peek p =
+    GhosttyCodepoints
+      <$> (#peek GhosttyCodepoints, ptr) p
+      <*> (#peek GhosttyCodepoints, len) p
+  poke p s = do
+    (#poke GhosttyCodepoints, ptr) p s.ptr
+    (#poke GhosttyCodepoints, len) p s.len
+
+-- | The layout of @GhosttyCodepoints@ as compiled, for the layout test (§3.4).
+ghosttyCodepointsLayout :: CStruct
+ghosttyCodepointsLayout =
+  CStruct
+    { name = "GhosttyCodepoints",
+      size = (#size GhosttyCodepoints),
+      align = (#alignment GhosttyCodepoints),
+      fields =
+        [ CField "ptr" (#offset GhosttyCodepoints, ptr) (#const GVTFFI_FIELD_SIZE(GhosttyCodepoints, ptr)),
+          CField "len" (#offset GhosttyCodepoints, len) (#const GVTFFI_FIELD_SIZE(GhosttyCodepoints, len))
+        ]
+    }
+
+-- | @GhosttyBuffer@: A caller-provided byte buffer.
+data GhosttyBuffer = GhosttyBuffer
+  { -- | @ptr@: Destination buffer for bytes. May be NULL when cap is 0 to query required size.
+    ptr :: Ptr Word8,
+    -- | @cap@: Capacity of ptr in bytes.
+    cap :: CSize,
+    -- | @len@: Bytes written on success, or required byte capacity on GHOSTTY\_OUT\_OF\_SPACE.
+    len :: CSize
+  }
+  deriving stock (Eq, Show)
+
+instance Storable GhosttyBuffer where
+  sizeOf _ = (#size GhosttyBuffer)
+  alignment _ = (#alignment GhosttyBuffer)
+  peek p =
+    GhosttyBuffer
+      <$> (#peek GhosttyBuffer, ptr) p
+      <*> (#peek GhosttyBuffer, cap) p
+      <*> (#peek GhosttyBuffer, len) p
+  poke p s = do
+    (#poke GhosttyBuffer, ptr) p s.ptr
+    (#poke GhosttyBuffer, cap) p s.cap
+    (#poke GhosttyBuffer, len) p s.len
+
+-- | The layout of @GhosttyBuffer@ as compiled, for the layout test (§3.4).
+ghosttyBufferLayout :: CStruct
+ghosttyBufferLayout =
+  CStruct
+    { name = "GhosttyBuffer",
+      size = (#size GhosttyBuffer),
+      align = (#alignment GhosttyBuffer),
+      fields =
+        [ CField "ptr" (#offset GhosttyBuffer, ptr) (#const GVTFFI_FIELD_SIZE(GhosttyBuffer, ptr)),
+          CField "cap" (#offset GhosttyBuffer, cap) (#const GVTFFI_FIELD_SIZE(GhosttyBuffer, cap)),
+          CField "len" (#offset GhosttyBuffer, len) (#const GVTFFI_FIELD_SIZE(GhosttyBuffer, len))
+        ]
+    }
+
+-- | @GhosttySurfacePosition@: A surface-space position in pixels.
+data GhosttySurfacePosition = GhosttySurfacePosition
+  { -- | @x@: X position in surface pixels.
+    x :: CDouble,
+    -- | @y@: Y position in surface pixels.
+    y :: CDouble
+  }
+  deriving stock (Eq, Show)
+
+instance Storable GhosttySurfacePosition where
+  sizeOf _ = (#size GhosttySurfacePosition)
+  alignment _ = (#alignment GhosttySurfacePosition)
+  peek p =
+    GhosttySurfacePosition
+      <$> (#peek GhosttySurfacePosition, x) p
+      <*> (#peek GhosttySurfacePosition, y) p
+  poke p s = do
+    (#poke GhosttySurfacePosition, x) p s.x
+    (#poke GhosttySurfacePosition, y) p s.y
+
+-- | The layout of @GhosttySurfacePosition@ as compiled, for the layout test (§3.4).
+ghosttySurfacePositionLayout :: CStruct
+ghosttySurfacePositionLayout =
+  CStruct
+    { name = "GhosttySurfacePosition",
+      size = (#size GhosttySurfacePosition),
+      align = (#alignment GhosttySurfacePosition),
+      fields =
+        [ CField "x" (#offset GhosttySurfacePosition, x) (#const GVTFFI_FIELD_SIZE(GhosttySurfacePosition, x)),
+          CField "y" (#offset GhosttySurfacePosition, y) (#const GVTFFI_FIELD_SIZE(GhosttySurfacePosition, y))
+        ]
+    }
+
+-- | @GhosttyFormatterFormat@: Terminal content output format.
+newtype GhosttyFormatterFormat = GhosttyFormatterFormat CInt
+  deriving stock (Eq, Show)
+  deriving newtype (Storable)
+
+-- | @GHOSTTY_FORMATTER_FORMAT_PLAIN@: Plain text (no escape sequences).
+pattern GhosttyFormatterFormatPlain :: GhosttyFormatterFormat
+pattern GhosttyFormatterFormatPlain = GhosttyFormatterFormat (#const GHOSTTY_FORMATTER_FORMAT_PLAIN)
+
+-- | @GHOSTTY_FORMATTER_FORMAT_VT@: VT sequences preserving colors, styles, URLs, etc.
+pattern GhosttyFormatterFormatVt :: GhosttyFormatterFormat
+pattern GhosttyFormatterFormatVt = GhosttyFormatterFormat (#const GHOSTTY_FORMATTER_FORMAT_VT)
+
+-- | @GHOSTTY_FORMATTER_FORMAT_HTML@: HTML with inline styles.
+pattern GhosttyFormatterFormatHtml :: GhosttyFormatterFormat
+pattern GhosttyFormatterFormatHtml = GhosttyFormatterFormat (#const GHOSTTY_FORMATTER_FORMAT_HTML)
+
+-- | Any value this binding does not name: a newer library's.
+pattern GhosttyFormatterFormatUnknown :: CInt -> GhosttyFormatterFormat
+pattern GhosttyFormatterFormatUnknown n <- GhosttyFormatterFormat (unnamed ghosttyFormatterFormatEnum -> Just n)
+  where
+    GhosttyFormatterFormatUnknown n = GhosttyFormatterFormat n
+
+{-# COMPLETE
+  GhosttyFormatterFormatPlain,
+  GhosttyFormatterFormatVt,
+  GhosttyFormatterFormatHtml,
+  GhosttyFormatterFormatUnknown
+  #-}
+
+-- | Every value of @GhosttyFormatterFormat@, for the layout test (§3.4). It is also what
+-- 'GhosttyFormatterFormatUnknown' excludes.
+ghosttyFormatterFormatEnum :: CEnum
+ghosttyFormatterFormatEnum =
+  CEnum
+    { name = "GhosttyFormatterFormat",
+      size = (#size GhosttyFormatterFormat),
+      values =
+        [ ("GHOSTTY_FORMATTER_FORMAT_PLAIN", (#const GHOSTTY_FORMATTER_FORMAT_PLAIN)),
+          ("GHOSTTY_FORMATTER_FORMAT_VT", (#const GHOSTTY_FORMATTER_FORMAT_VT)),
+          ("GHOSTTY_FORMATTER_FORMAT_HTML", (#const GHOSTTY_FORMATTER_FORMAT_HTML))
         ]
     }
 

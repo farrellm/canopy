@@ -1,0 +1,43 @@
+/*
+ * gvtffi_shims.h: what ghostty-vt-ffi needs from C besides the library's own
+ * headers (DESIGN.md §3.3).
+ *
+ * GHC's FFI cannot pass or return a struct by value, and some libghostty-vt
+ * functions do. Each one the binding binds gets a static inline shim here that
+ * takes a pointer instead and passes the struct on unchanged (or, for a
+ * returned struct, writes it through an out pointer). The bindings call them
+ * with `foreign import capi`, so the C compiler still checks each Haskell
+ * signature against these prototypes, and these against the library's.
+ *
+ * The shims are generated from the header prototypes by
+ * scripts/gen-ghostty-ffi.py, one {{shim}} line each, added when the function
+ * is bound. The generator refuses a {{shim}} for a function that passes no
+ * struct by value, and a by-value function bound directly fails to compile,
+ * since capi checks the prototype.
+ */
+
+#ifndef GVTFFI_SHIMS_H
+#define GVTFFI_SHIMS_H
+
+#include <ghostty/vt.h>
+
+/* hsc2hs helpers: a field's size, and the length of an array field. */
+#define GVTFFI_FIELD_SIZE(t, f) sizeof(((t *)0)->f)
+#define GVTFFI_ARRAY_LEN(t, f) (sizeof(((t *)0)->f) / sizeof(((t *)0)->f[0]))
+
+/* terminal.h, grid_ref_tracked.h (M1.2) */
+
+{{shim ghostty_terminal_scroll_viewport}}
+{{shim ghostty_terminal_grid_ref}}
+{{shim ghostty_terminal_grid_ref_track}}
+{{shim ghostty_tracked_grid_ref_set}}
+{{shim ghostty_terminal_continuation_write}}
+/* formatter.h, selection.h (M1.3) */
+
+{{shim ghostty_formatter_terminal_new}}
+{{shim ghostty_formatter_format}}
+{{shim ghostty_terminal_select_output}}
+{{shim ghostty_terminal_selection_format_buf}}
+{{shim ghostty_terminal_selection_format_alloc}}
+{{shim ghostty_terminal_selection_contains}}
+#endif /* GVTFFI_SHIMS_H */

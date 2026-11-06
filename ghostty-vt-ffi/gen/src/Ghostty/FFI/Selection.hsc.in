@@ -1,0 +1,257 @@
+{-# LANGUAGE CApiFFI #-}
+{-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE ViewPatterns #-}
+
+-- | @include/ghostty/vt/selection.h@: selections of a terminal's content,
+-- deriving them (word, line, command output, all), adjusting and comparing
+-- them, formatting one in a single call, and the gesture state machine that
+-- turns pointer events into selections.
+--
+-- A 'GhosttySelection' holds two untracked grid references, so it is valid
+-- only until the next call that mutates its terminal ("Ghostty.FFI.GridRef").
+--
+-- __@safe@ and @unsafe@.__ No call here runs a callback. The two formatting
+-- calls are @safe@ anyway, as the formatter's are ("Ghostty.FFI.Formatter"):
+-- a selection may span the whole scrollback, and an @unsafe@ call that long
+-- would hold up every other Haskell thread at the next garbage collection.
+-- The rest are @unsafe@.
+module Ghostty.FFI.Selection
+  ( -- * Selections
+    {{xstruct selection.h GhosttySelection}}
+    {{xstruct selection.h GhosttySelectionBuffer}}
+
+    -- * Deriving selections
+    {{xstruct selection.h GhosttyTerminalSelectWordOptions}}
+    ghosttyTerminalSelectWord,
+    {{xstruct selection.h GhosttyTerminalSelectWordBetweenOptions}}
+    ghosttyTerminalSelectWordBetween,
+    {{xstruct selection.h GhosttyTerminalSelectLineOptions}}
+    ghosttyTerminalSelectLine,
+    ghosttyTerminalSelectAll,
+    ghosttyTerminalSelectOutput,
+
+    -- * Adjusting and comparing
+    {{xenum selection.h GhosttySelectionAdjust}}
+    ghosttyTerminalSelectionAdjust,
+    {{xenum selection.h GhosttySelectionOrder}}
+    ghosttyTerminalSelectionOrder,
+    ghosttyTerminalSelectionOrdered,
+    ghosttyTerminalSelectionContains,
+    ghosttyTerminalSelectionEqual,
+
+    -- * Formatting
+    {{xstruct selection.h GhosttyTerminalSelectionFormatOptions}}
+    ghosttyTerminalSelectionFormatBuf,
+    ghosttyTerminalSelectionFormatAlloc,
+
+    -- * Gestures
+    GhosttySelectionGesture (..),
+    GhosttySelectionGestureImpl,
+    ghosttySelectionGestureNew,
+    ghosttySelectionGestureFree,
+    ghosttySelectionGestureReset,
+    {{xenum selection.h GhosttySelectionGestureData}}
+    ghosttySelectionGestureGet,
+    ghosttySelectionGestureGetMulti,
+    {{xenum selection.h GhosttySelectionGestureBehavior}}
+    {{xstruct selection.h GhosttySelectionGestureBehaviors}}
+    {{xstruct selection.h GhosttySelectionGestureGeometry}}
+    {{xenum selection.h GhosttySelectionGestureAutoscroll}}
+
+    -- * Gesture events
+    GhosttySelectionGestureEvent (..),
+    GhosttySelectionGestureEventImpl,
+    {{xenum selection.h GhosttySelectionGestureEventType}}
+    ghosttySelectionGestureEventNew,
+    ghosttySelectionGestureEventFree,
+    {{xenum selection.h GhosttySelectionGestureEventOption}}
+    ghosttySelectionGestureEventSet,
+    ghosttySelectionGestureEvent,
+  )
+where
+
+import Foreign.C.Types (CBool (..), CInt (..), CSize (..))
+import Foreign.Ptr (Ptr)
+import Foreign.Storable (Storable (..))
+import Ghostty.FFI.Allocator (GhosttyAllocator)
+import Ghostty.FFI.GridRef (GhosttyGridRef (..))
+import Ghostty.FFI.Layout (CEnum (..), CField (..), CStruct (..), unnamed)
+import Ghostty.FFI.Point (GhosttyPoint)
+import Ghostty.FFI.Terminal.Handle (GhosttyTerminal (..))
+import Ghostty.FFI.Types (GhosttyFormatterFormat (..), GhosttyResult (..))
+
+#include <gvtffi_shims.h>
+
+-- * Selections
+
+{{struct selection.h GhosttySelection}}
+{{struct selection.h GhosttySelectionBuffer}}
+-- * Deriving selections
+
+{{struct selection.h GhosttyTerminalSelectWordOptions}}
+-- | @ghostty_terminal_select_word@: the word under a grid reference, as a
+-- selection the terminal does not install. @GHOSTTY_NO_VALUE@ when there is
+-- no word there. @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_terminal_select_word"
+  ghosttyTerminalSelectWord :: GhosttyTerminal -> Ptr GhosttyTerminalSelectWordOptions -> Ptr GhosttySelection -> IO GhosttyResult
+
+{{struct selection.h GhosttyTerminalSelectWordBetweenOptions}}
+-- | @ghostty_terminal_select_word_between@: the first word found from the
+-- options' @start@ toward @end@, inclusive. @GHOSTTY_NO_VALUE@ when there is
+-- none. @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_terminal_select_word_between"
+  ghosttyTerminalSelectWordBetween :: GhosttyTerminal -> Ptr GhosttyTerminalSelectWordBetweenOptions -> Ptr GhosttySelection -> IO GhosttyResult
+
+{{struct selection.h GhosttyTerminalSelectLineOptions}}
+-- | @ghostty_terminal_select_line@: the line under a grid reference.
+-- @GHOSTTY_NO_VALUE@ when it has no selectable content. @unsafe@: it does not
+-- call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_terminal_select_line"
+  ghosttyTerminalSelectLine :: GhosttyTerminal -> Ptr GhosttyTerminalSelectLineOptions -> Ptr GhosttySelection -> IO GhosttyResult
+
+-- | @ghostty_terminal_select_all@: all selectable content.
+-- @GHOSTTY_NO_VALUE@ when there is none. @unsafe@: it does not call back into
+-- Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_terminal_select_all"
+  ghosttyTerminalSelectAll :: GhosttyTerminal -> Ptr GhosttySelection -> IO GhosttyResult
+
+-- | @ghostty_terminal_select_output@: the command output (OSC 133) under a
+-- grid reference. @GHOSTTY_NO_VALUE@ when it is not in command output. The C
+-- function takes the reference by value, so this calls a pointer shim
+-- (@gvtffi_shims.h@, §3.3). @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "gvtffi_shims.h gvtffi_terminal_select_output"
+  ghosttyTerminalSelectOutput :: GhosttyTerminal -> Ptr GhosttyGridRef -> Ptr GhosttySelection -> IO GhosttyResult
+
+-- * Adjusting and comparing
+
+{{enum selection.h GhosttySelectionAdjust}}
+-- | @ghostty_terminal_selection_adjust@: move a selection's logical end, in
+-- place. @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_terminal_selection_adjust"
+  ghosttyTerminalSelectionAdjust :: GhosttyTerminal -> Ptr GhosttySelection -> GhosttySelectionAdjust -> IO GhosttyResult
+
+{{enum selection.h GhosttySelectionOrder}}
+-- | @ghostty_terminal_selection_order@: how a selection's endpoints are
+-- ordered. @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_terminal_selection_order"
+  ghosttyTerminalSelectionOrder :: GhosttyTerminal -> Ptr GhosttySelection -> Ptr GhosttySelectionOrder -> IO GhosttyResult
+
+-- | @ghostty_terminal_selection_ordered@: a selection with its endpoints in the
+-- order asked for (mirrored orders count as forward). @unsafe@: it does not
+-- call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_terminal_selection_ordered"
+  ghosttyTerminalSelectionOrdered :: GhosttyTerminal -> Ptr GhosttySelection -> GhosttySelectionOrder -> Ptr GhosttySelection -> IO GhosttyResult
+
+-- | @ghostty_terminal_selection_contains@: whether a point is in a selection.
+-- The C function takes the point by value, so this calls a pointer shim
+-- (@gvtffi_shims.h@, §3.3). @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "gvtffi_shims.h gvtffi_terminal_selection_contains"
+  ghosttyTerminalSelectionContains :: GhosttyTerminal -> Ptr GhosttySelection -> Ptr GhosttyPoint -> Ptr CBool -> IO GhosttyResult
+
+-- | @ghostty_terminal_selection_equal@: whether two selections are the same,
+-- by the terminal's semantics rather than the bytes of their references.
+-- @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_terminal_selection_equal"
+  ghosttyTerminalSelectionEqual :: GhosttyTerminal -> Ptr GhosttySelection -> Ptr GhosttySelection -> Ptr CBool -> IO GhosttyResult
+
+-- * Formatting
+
+{{struct selection.h GhosttyTerminalSelectionFormatOptions}}
+-- | @ghostty_terminal_selection_format_buf@: format a selection (the options'
+-- or, when that is null, the terminal's) into a buffer;
+-- @GHOSTTY_OUT_OF_SPACE@ reports the size needed, and @GHOSTTY_NO_VALUE@ that
+-- there is no selection. The C function takes the options by value, so this
+-- calls a pointer shim (@gvtffi_shims.h@, §3.3). @safe@: it calls nothing
+-- back, but a selection can span the whole scrollback.
+foreign import capi safe "gvtffi_shims.h gvtffi_terminal_selection_format_buf"
+  ghosttyTerminalSelectionFormatBuf :: GhosttyTerminal -> Ptr GhosttyTerminalSelectionFormatOptions -> Ptr Word8 -> CSize -> Ptr CSize -> IO GhosttyResult
+
+-- | @ghostty_terminal_selection_format_alloc@: format a selection into an
+-- allocated buffer, to be released with 'Ghostty.FFI.Allocator.ghosttyFree';
+-- empty output is a null pointer. Through a pointer shim, as
+-- 'ghosttyTerminalSelectionFormatBuf'. @safe@: as
+-- 'ghosttyTerminalSelectionFormatBuf'.
+foreign import capi safe "gvtffi_shims.h gvtffi_terminal_selection_format_alloc"
+  ghosttyTerminalSelectionFormatAlloc :: GhosttyTerminal -> Ptr GhosttyAllocator -> Ptr GhosttyTerminalSelectionFormatOptions -> Ptr (Ptr Word8) -> Ptr CSize -> IO GhosttyResult
+
+-- * Gestures
+
+-- | The C side of a 'GhosttySelectionGesture'. Never dereferenced.
+data GhosttySelectionGestureImpl
+
+-- | @GhosttySelectionGesture@: the state of one stream of pointer gestures.
+-- From 'ghosttySelectionGestureNew', released by 'ghosttySelectionGestureFree'.
+newtype GhosttySelectionGesture = GhosttySelectionGesture (Ptr GhosttySelectionGestureImpl)
+  deriving stock (Eq, Show)
+  deriving newtype (Storable)
+
+-- | @ghostty_selection_gesture_new@: a gesture, not yet bound to a terminal,
+-- with the allocator (null for the default). @unsafe@: it does not call back
+-- into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_selection_gesture_new"
+  ghosttySelectionGestureNew :: Ptr GhosttyAllocator -> Ptr GhosttySelectionGesture -> IO GhosttyResult
+
+-- | @ghostty_selection_gesture_free@: release the gesture's tracked references
+-- through the terminal it last used (null once that terminal is freed), then
+-- the gesture. Null is a no-op. @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_selection_gesture_free"
+  ghosttySelectionGestureFree :: GhosttySelectionGesture -> GhosttyTerminal -> IO ()
+
+-- | @ghostty_selection_gesture_reset@: cancel the active click sequence.
+-- @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_selection_gesture_reset"
+  ghosttySelectionGestureReset :: GhosttySelectionGesture -> GhosttyTerminal -> IO ()
+
+{{enum selection.h GhosttySelectionGestureData}}
+-- | @ghostty_selection_gesture_get@: read one key into a pointer of its type.
+-- @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_selection_gesture_get"
+  ghosttySelectionGestureGet :: GhosttySelectionGesture -> GhosttyTerminal -> GhosttySelectionGestureData -> Ptr () -> IO GhosttyResult
+
+-- | @ghostty_selection_gesture_get_multi@: read several keys in one call,
+-- stopping at the first error; the out count is how many succeeded. @unsafe@:
+-- it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_selection_gesture_get_multi"
+  ghosttySelectionGestureGetMulti :: GhosttySelectionGesture -> GhosttyTerminal -> CSize -> Ptr GhosttySelectionGestureData -> Ptr (Ptr ()) -> Ptr CSize -> IO GhosttyResult
+
+{{enum selection.h GhosttySelectionGestureBehavior}}
+{{struct selection.h GhosttySelectionGestureBehaviors}}
+{{struct selection.h GhosttySelectionGestureGeometry}}
+{{enum selection.h GhosttySelectionGestureAutoscroll}}
+-- * Gesture events
+
+-- | The C side of a 'GhosttySelectionGestureEvent'. Never dereferenced.
+data GhosttySelectionGestureEventImpl
+
+-- | @GhosttySelectionGestureEvent@: a reusable pointer event of a fixed type.
+-- From 'ghosttySelectionGestureEventNew', released by
+-- 'ghosttySelectionGestureEventFree'.
+newtype GhosttySelectionGestureEvent = GhosttySelectionGestureEvent (Ptr GhosttySelectionGestureEventImpl)
+  deriving stock (Eq, Show)
+  deriving newtype (Storable)
+
+{{enum selection.h GhosttySelectionGestureEventType}}
+-- | @ghostty_selection_gesture_event_new@: an event of a type, fixed for its
+-- life, with the allocator (null for the default). @unsafe@: it does not call
+-- back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_selection_gesture_event_new"
+  ghosttySelectionGestureEventNew :: Ptr GhosttyAllocator -> Ptr GhosttySelectionGestureEvent -> GhosttySelectionGestureEventType -> IO GhosttyResult
+
+-- | @ghostty_selection_gesture_event_free@ (null is a no-op). @unsafe@: it does
+-- not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_selection_gesture_event_free"
+  ghosttySelectionGestureEventFree :: GhosttySelectionGestureEvent -> IO ()
+
+{{enum selection.h GhosttySelectionGestureEventOption}}
+-- | @ghostty_selection_gesture_event_set@: set an option from a pointer to its
+-- value; null clears it. @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_selection_gesture_event_set"
+  ghosttySelectionGestureEventSet :: GhosttySelectionGestureEvent -> GhosttySelectionGestureEventOption -> Ptr () -> IO GhosttyResult
+
+-- | @ghostty_selection_gesture_event@: apply an event to a gesture, writing
+-- the resulting selection (which the terminal does not install) when the out
+-- pointer is not null. @GHOSTTY_NO_VALUE@ when the event makes no selection,
+-- as a release never does. @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_selection_gesture_event"
+  ghosttySelectionGestureEvent :: GhosttySelectionGesture -> GhosttyTerminal -> GhosttySelectionGestureEvent -> Ptr GhosttySelection -> IO GhosttyResult
