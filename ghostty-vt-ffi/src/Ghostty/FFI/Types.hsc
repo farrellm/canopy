@@ -37,11 +37,9 @@ import Foreign.C.ConstPtr (ConstPtr (..))
 import Foreign.C.Types (CChar, CInt (..), CSize (..))
 import Foreign.Ptr (Ptr, castPtr, nullPtr)
 import Foreign.Storable (Storable (..))
-import Ghostty.FFI.Layout (CEnum (..), CField (..), CStruct (..))
+import Ghostty.FFI.Layout (CEnum (..), CField (..), CStruct (..), unnamed)
 
-#include <ghostty/vt.h>
-
-#define FIELD_SIZE(t, f) sizeof(((t *)0)->f)
+#include <gvtffi_shims.h>
 
 -- | @GhosttyResult@: the return value of every fallible call.
 newtype GhosttyResult = GhosttyResult CInt
@@ -82,14 +80,9 @@ pattern GhosttyRejected = GhosttyResult (#const GHOSTTY_REJECTED)
 
 -- | Any value this binding does not name: a newer library's result code.
 pattern GhosttyResultUnknown :: CInt -> GhosttyResult
-pattern GhosttyResultUnknown n <- (unknownResult -> Just n)
+pattern GhosttyResultUnknown n <- GhosttyResult (unnamed ghosttyResultEnum -> Just n)
   where
     GhosttyResultUnknown n = GhosttyResult n
-
-unknownResult :: GhosttyResult -> Maybe CInt
-unknownResult (GhosttyResult n)
-  | toInteger n `elem` map snd ghosttyResultEnum.values = Nothing
-  | otherwise = Just n
 
 -- | Every value of @GhosttyResult@ this binding names, for the layout test
 -- (§3.4). It is also what 'GhosttyResultUnknown' excludes, so a pattern above
@@ -162,8 +155,8 @@ ghosttyStringLayout =
       size = (#size GhosttyString),
       align = (#alignment GhosttyString),
       fields =
-        [ CField "ptr" (#offset GhosttyString, ptr) (#const FIELD_SIZE(GhosttyString, ptr)),
-          CField "len" (#offset GhosttyString, len) (#const FIELD_SIZE(GhosttyString, len))
+        [ CField "ptr" (#offset GhosttyString, ptr) (#const GVTFFI_FIELD_SIZE(GhosttyString, ptr)),
+          CField "len" (#offset GhosttyString, len) (#const GVTFFI_FIELD_SIZE(GhosttyString, len))
         ]
     }
 

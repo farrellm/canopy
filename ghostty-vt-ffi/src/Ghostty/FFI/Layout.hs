@@ -12,8 +12,11 @@ module Ghostty.FFI.Layout
   ( CStruct (..),
     CField (..),
     CEnum (..),
+    unnamed,
   )
 where
+
+import Foreign.C.Types (CInt)
 
 -- | A C struct as the binding sees it.
 data CStruct = CStruct
@@ -50,3 +53,11 @@ data CEnum = CEnum
     values :: [(Text, Integer)]
   }
   deriving stock (Eq, Show)
+
+-- | A value the enum does not name, or 'Nothing' for one it does. Every enum's
+-- @Unknown@ view (§3.3) is this over its descriptor, so the view and the
+-- descriptor cannot disagree.
+unnamed :: CEnum -> CInt -> Maybe CInt
+unnamed e n
+  | toInteger n `elem` map snd e.values = Nothing
+  | otherwise = Just n

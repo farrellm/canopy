@@ -54,6 +54,10 @@ Exit: formatter goldens; every typed key exercised (§13).
 
 - `Ghostty.FFI.Render` (render state, row and cell iterators, dirty iteration), `.Format`,
   `.Encode` (key, mouse, focus, paste, size report, mode report), `.Parse` (OSC, SGR), `.Unicode`.
+- The rest of the headers M1.2 bound in part (`screen.h`, `color.h`, `modes.h`, `osc.h`,
+  `size_report.h`, `io.h`), and the output types of terminal keys that live in these headers:
+  `GhosttySelection`, `GhosttyMouseShape`, `GhosttyKittyKeyFlags`, the `GhosttyKittyGraphics`
+  handle, and `GhosttySgrUnderline` (the `int` in `GhosttyStyle`). M1.5 needs all of them.
 - Layout-test rows for each. May be split into two CRs (render+format, encoders+parsers+unicode) if
   it reviews too large.
 

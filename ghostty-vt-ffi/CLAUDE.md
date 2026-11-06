@@ -18,6 +18,20 @@ Only `Ghostty.Effectful.**` and `Test.Ghostty.**` may import it (§2.6 rule 1).
   (§3.4). A struct descriptor lists every field, because the test requires the library's field names
   exactly. An enum's `Unknown` view is built from its descriptor. `scripts/check-layout-rows.py`
   fails if a type has no descriptor or no row.
+- **One module per header**, partially bound when only part is needed yet; the module header says
+  which part. `terminal.h`'s callbacks are in `Ghostty.FFI.Terminal.Callbacks`, and its handle in
+  `Ghostty.FFI.Terminal.Handle` (so `GridRef` can name it without a cycle).
+- Names: a pattern is its C name in CamelCase (`GHOSTTY_TERMINAL_OPT_BELL` →
+  `GhosttyTerminalOptBell`), and a record field is the C field in camelCase (`data` → `data_`).
+  Where a pattern's name is already a struct's, it takes a `Tag` suffix
+  (`GhosttyTerminalResizeWindowGridTag`) and its doc says so.
+- **A tagged union is a sum** (§3.3), with arms named after the union's members without the
+  `Ghostty` prefix (`ScrollViewportDelta`) and an `…Other tag` arm. C `bool` is `CBool`.
+- **A function that takes a struct by value calls a shim** in `include/gvtffi_shims.h` (`static
+  inline`, `gvtffi_` prefix). The header also holds hsc2hs's `GVTFFI_FIELD_SIZE` and
+  `GVTFFI_ARRAY_LEN`, so every `.hsc` includes it rather than `<ghostty/vt.h>`.
+- Callback types are `FunPtr` synonyms, each with a `mk…` `wrapper`; the library's own function
+  pointers handed to a callback (clipboard `reply`) have a `call…` `dynamic` import.
 - Write hsc2hs directives inside expressions parenthesised, `(#const X)`: a bare one takes the rest
   of the line.
 - `ghostty-vt-ffi-test` compiles `GHOSTTY_COMMIT` in (Template Haskell, `makeRelativeToProject`), so

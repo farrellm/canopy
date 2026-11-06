@@ -1,0 +1,224 @@
+{-# LANGUAGE CApiFFI #-}
+{-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE ViewPatterns #-}
+
+-- | @include/ghostty/vt/device.h@: what the terminal's query callbacks answer
+-- with, the colour scheme and the device attributes (DA1, DA2, DA3).
+module Ghostty.FFI.Device
+  ( -- * Colour scheme
+    GhosttyColorScheme (..),
+    pattern GhosttyColorSchemeLight,
+    pattern GhosttyColorSchemeDark,
+    pattern GhosttyColorSchemeUnknown,
+    ghosttyColorSchemeEnum,
+
+    -- * Device attributes
+    GhosttyDeviceAttributesPrimary (..),
+    ghosttyDeviceAttributesPrimaryLayout,
+    GhosttyDeviceAttributesSecondary (..),
+    ghosttyDeviceAttributesSecondaryLayout,
+    GhosttyDeviceAttributesTertiary (..),
+    ghosttyDeviceAttributesTertiaryLayout,
+    GhosttyDeviceAttributes (..),
+    ghosttyDeviceAttributesLayout,
+  )
+where
+
+import Foreign.C.Types (CInt (..), CSize (..))
+import Foreign.Marshal.Array (peekArray, pokeArray)
+import Foreign.Ptr (plusPtr)
+import Foreign.Storable (Storable (..))
+import Ghostty.FFI.Layout (CEnum (..), CField (..), CStruct (..), unnamed)
+
+#include <gvtffi_shims.h>
+
+-- | @GhosttyColorScheme@: Color scheme reported in response to a CSI ? 996 n query.
+newtype GhosttyColorScheme = GhosttyColorScheme CInt
+  deriving stock (Eq, Show)
+  deriving newtype (Storable)
+
+-- | @GHOSTTY_COLOR_SCHEME_LIGHT@.
+pattern GhosttyColorSchemeLight :: GhosttyColorScheme
+pattern GhosttyColorSchemeLight = GhosttyColorScheme (#const GHOSTTY_COLOR_SCHEME_LIGHT)
+
+-- | @GHOSTTY_COLOR_SCHEME_DARK@.
+pattern GhosttyColorSchemeDark :: GhosttyColorScheme
+pattern GhosttyColorSchemeDark = GhosttyColorScheme (#const GHOSTTY_COLOR_SCHEME_DARK)
+
+-- | Any value this binding does not name: a newer library's.
+pattern GhosttyColorSchemeUnknown :: CInt -> GhosttyColorScheme
+pattern GhosttyColorSchemeUnknown n <- GhosttyColorScheme (unnamed ghosttyColorSchemeEnum -> Just n)
+  where
+    GhosttyColorSchemeUnknown n = GhosttyColorScheme n
+
+{-# COMPLETE
+  GhosttyColorSchemeLight,
+  GhosttyColorSchemeDark,
+  GhosttyColorSchemeUnknown
+  #-}
+
+-- | Every value of @GhosttyColorScheme@ this binding names, for the layout test (§3.4).
+-- It is also what 'GhosttyColorSchemeUnknown' excludes.
+ghosttyColorSchemeEnum :: CEnum
+ghosttyColorSchemeEnum =
+  CEnum
+    { name = "GhosttyColorScheme",
+      size = (#size GhosttyColorScheme),
+      values =
+        [ ("GHOSTTY_COLOR_SCHEME_LIGHT", (#const GHOSTTY_COLOR_SCHEME_LIGHT)),
+          ("GHOSTTY_COLOR_SCHEME_DARK", (#const GHOSTTY_COLOR_SCHEME_DARK))
+        ]
+    }
+
+-- | @GhosttyDeviceAttributesPrimary@: the DA1 reply.
+data GhosttyDeviceAttributesPrimary = GhosttyDeviceAttributesPrimary
+  { -- | @conformance_level@: the conformance level (Pp), one of the header's
+    -- @GHOSTTY_DA_CONFORMANCE_*@ values.
+    conformanceLevel :: Word16,
+    -- | @features@: the whole fixed-size array of feature codes (Ps), of which
+    -- the first @num_features@ are reported. A 'peek' reads every element; a
+    -- 'poke' writes the list's first elements and zeroes the rest.
+    features :: [Word16],
+    -- | @num_features@: how many of @features@ are reported.
+    numFeatures :: CSize
+  }
+  deriving stock (Eq, Show)
+
+-- | How many elements @features@ has in C.
+featuresLen :: Int
+featuresLen = (#const GVTFFI_ARRAY_LEN(GhosttyDeviceAttributesPrimary, features))
+
+instance Storable GhosttyDeviceAttributesPrimary where
+  sizeOf _ = (#size GhosttyDeviceAttributesPrimary)
+  alignment _ = (#alignment GhosttyDeviceAttributesPrimary)
+  peek p =
+    GhosttyDeviceAttributesPrimary
+      <$> (#peek GhosttyDeviceAttributesPrimary, conformance_level) p
+      <*> peekArray featuresLen ((#ptr GhosttyDeviceAttributesPrimary, features) p)
+      <*> (#peek GhosttyDeviceAttributesPrimary, num_features) p
+  poke p s = do
+    (#poke GhosttyDeviceAttributesPrimary, conformance_level) p s.conformanceLevel
+    pokeArray
+      ((#ptr GhosttyDeviceAttributesPrimary, features) p)
+      (take featuresLen (s.features <> repeat 0))
+    (#poke GhosttyDeviceAttributesPrimary, num_features) p s.numFeatures
+
+-- | The layout of @GhosttyDeviceAttributesPrimary@ as compiled, for the layout test (§3.4).
+ghosttyDeviceAttributesPrimaryLayout :: CStruct
+ghosttyDeviceAttributesPrimaryLayout =
+  CStruct
+    { name = "GhosttyDeviceAttributesPrimary",
+      size = (#size GhosttyDeviceAttributesPrimary),
+      align = (#alignment GhosttyDeviceAttributesPrimary),
+      fields =
+        [ CField "conformance_level" (#offset GhosttyDeviceAttributesPrimary, conformance_level) (#const GVTFFI_FIELD_SIZE(GhosttyDeviceAttributesPrimary, conformance_level)),
+          CField "features" (#offset GhosttyDeviceAttributesPrimary, features) (#const GVTFFI_FIELD_SIZE(GhosttyDeviceAttributesPrimary, features)),
+          CField "num_features" (#offset GhosttyDeviceAttributesPrimary, num_features) (#const GVTFFI_FIELD_SIZE(GhosttyDeviceAttributesPrimary, num_features))
+        ]
+    }
+
+-- | @GhosttyDeviceAttributesSecondary@: Secondary device attributes (DA2) response data.
+data GhosttyDeviceAttributesSecondary = GhosttyDeviceAttributesSecondary
+  { -- | @device_type@: Terminal type identifier (Pp). E.g. 1 for VT220.
+    deviceType :: Word16,
+    -- | @firmware_version@: Firmware\/patch version number (Pv).
+    firmwareVersion :: Word16,
+    -- | @rom_cartridge@: ROM cartridge registration number (Pc). Always 0 for emulators.
+    romCartridge :: Word16
+  }
+  deriving stock (Eq, Show)
+
+instance Storable GhosttyDeviceAttributesSecondary where
+  sizeOf _ = (#size GhosttyDeviceAttributesSecondary)
+  alignment _ = (#alignment GhosttyDeviceAttributesSecondary)
+  peek p =
+    GhosttyDeviceAttributesSecondary
+      <$> (#peek GhosttyDeviceAttributesSecondary, device_type) p
+      <*> (#peek GhosttyDeviceAttributesSecondary, firmware_version) p
+      <*> (#peek GhosttyDeviceAttributesSecondary, rom_cartridge) p
+  poke p s = do
+    (#poke GhosttyDeviceAttributesSecondary, device_type) p s.deviceType
+    (#poke GhosttyDeviceAttributesSecondary, firmware_version) p s.firmwareVersion
+    (#poke GhosttyDeviceAttributesSecondary, rom_cartridge) p s.romCartridge
+
+-- | The layout of @GhosttyDeviceAttributesSecondary@ as compiled, for the layout test (§3.4).
+ghosttyDeviceAttributesSecondaryLayout :: CStruct
+ghosttyDeviceAttributesSecondaryLayout =
+  CStruct
+    { name = "GhosttyDeviceAttributesSecondary",
+      size = (#size GhosttyDeviceAttributesSecondary),
+      align = (#alignment GhosttyDeviceAttributesSecondary),
+      fields =
+        [ CField "device_type" (#offset GhosttyDeviceAttributesSecondary, device_type) (#const GVTFFI_FIELD_SIZE(GhosttyDeviceAttributesSecondary, device_type)),
+          CField "firmware_version" (#offset GhosttyDeviceAttributesSecondary, firmware_version) (#const GVTFFI_FIELD_SIZE(GhosttyDeviceAttributesSecondary, firmware_version)),
+          CField "rom_cartridge" (#offset GhosttyDeviceAttributesSecondary, rom_cartridge) (#const GVTFFI_FIELD_SIZE(GhosttyDeviceAttributesSecondary, rom_cartridge))
+        ]
+    }
+
+-- | @GhosttyDeviceAttributesTertiary@: Tertiary device attributes (DA3) response data.
+data GhosttyDeviceAttributesTertiary = GhosttyDeviceAttributesTertiary
+  { -- | @unit_id@: Unit ID encoded as 8 uppercase hex digits in the response.
+    unitId :: Word32
+  }
+  deriving stock (Eq, Show)
+
+instance Storable GhosttyDeviceAttributesTertiary where
+  sizeOf _ = (#size GhosttyDeviceAttributesTertiary)
+  alignment _ = (#alignment GhosttyDeviceAttributesTertiary)
+  peek p =
+    GhosttyDeviceAttributesTertiary
+      <$> (#peek GhosttyDeviceAttributesTertiary, unit_id) p
+  poke p s = do
+    (#poke GhosttyDeviceAttributesTertiary, unit_id) p s.unitId
+
+-- | The layout of @GhosttyDeviceAttributesTertiary@ as compiled, for the layout test (§3.4).
+ghosttyDeviceAttributesTertiaryLayout :: CStruct
+ghosttyDeviceAttributesTertiaryLayout =
+  CStruct
+    { name = "GhosttyDeviceAttributesTertiary",
+      size = (#size GhosttyDeviceAttributesTertiary),
+      align = (#alignment GhosttyDeviceAttributesTertiary),
+      fields =
+        [ CField "unit_id" (#offset GhosttyDeviceAttributesTertiary, unit_id) (#const GVTFFI_FIELD_SIZE(GhosttyDeviceAttributesTertiary, unit_id))
+        ]
+    }
+
+-- | @GhosttyDeviceAttributes@: Device attributes response data for all three DA levels.
+data GhosttyDeviceAttributes = GhosttyDeviceAttributes
+  { -- | @primary@.
+    primary :: GhosttyDeviceAttributesPrimary,
+    -- | @secondary@.
+    secondary :: GhosttyDeviceAttributesSecondary,
+    -- | @tertiary@.
+    tertiary :: GhosttyDeviceAttributesTertiary
+  }
+  deriving stock (Eq, Show)
+
+instance Storable GhosttyDeviceAttributes where
+  sizeOf _ = (#size GhosttyDeviceAttributes)
+  alignment _ = (#alignment GhosttyDeviceAttributes)
+  peek p =
+    GhosttyDeviceAttributes
+      <$> (#peek GhosttyDeviceAttributes, primary) p
+      <*> (#peek GhosttyDeviceAttributes, secondary) p
+      <*> (#peek GhosttyDeviceAttributes, tertiary) p
+  poke p s = do
+    (#poke GhosttyDeviceAttributes, primary) p s.primary
+    (#poke GhosttyDeviceAttributes, secondary) p s.secondary
+    (#poke GhosttyDeviceAttributes, tertiary) p s.tertiary
+
+-- | The layout of @GhosttyDeviceAttributes@ as compiled, for the layout test (§3.4).
+ghosttyDeviceAttributesLayout :: CStruct
+ghosttyDeviceAttributesLayout =
+  CStruct
+    { name = "GhosttyDeviceAttributes",
+      size = (#size GhosttyDeviceAttributes),
+      align = (#alignment GhosttyDeviceAttributes),
+      fields =
+        [ CField "primary" (#offset GhosttyDeviceAttributes, primary) (#const GVTFFI_FIELD_SIZE(GhosttyDeviceAttributes, primary)),
+          CField "secondary" (#offset GhosttyDeviceAttributes, secondary) (#const GVTFFI_FIELD_SIZE(GhosttyDeviceAttributes, secondary)),
+          CField "tertiary" (#offset GhosttyDeviceAttributes, tertiary) (#const GVTFFI_FIELD_SIZE(GhosttyDeviceAttributes, tertiary))
+        ]
+    }
+

@@ -20,10 +20,10 @@ where
 
 import Foreign.C.Types (CInt (..))
 import Foreign.Ptr (Ptr)
-import Ghostty.FFI.Layout (CEnum (..))
+import Ghostty.FFI.Layout (CEnum (..), unnamed)
 import Ghostty.FFI.Types (GhosttyResult (..))
 
-#include <ghostty/vt.h>
+#include <gvtffi_shims.h>
 
 -- | @GhosttyBuildInfo@: which fact to read. The out type depends on the key
 -- and is given on each pattern.
@@ -45,14 +45,9 @@ pattern GhosttyBuildInfoVersionBuild = GhosttyBuildInfo (#const GHOSTTY_BUILD_IN
 -- | Any key this binding does not name: one it has not bound yet, or a newer
 -- library's.
 pattern GhosttyBuildInfoUnknown :: CInt -> GhosttyBuildInfo
-pattern GhosttyBuildInfoUnknown n <- (unknownBuildInfo -> Just n)
+pattern GhosttyBuildInfoUnknown n <- GhosttyBuildInfo (unnamed ghosttyBuildInfoEnum -> Just n)
   where
     GhosttyBuildInfoUnknown n = GhosttyBuildInfo n
-
-unknownBuildInfo :: GhosttyBuildInfo -> Maybe CInt
-unknownBuildInfo (GhosttyBuildInfo n)
-  | toInteger n `elem` map snd ghosttyBuildInfoEnum.values = Nothing
-  | otherwise = Just n
 
 {-# COMPLETE
   GhosttyBuildInfoVersionString,

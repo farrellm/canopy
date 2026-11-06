@@ -1,0 +1,60 @@
+{-# LANGUAGE CApiFFI #-}
+{-# LANGUAGE DuplicateRecordFields #-}
+
+-- | @include/ghostty/vt/size_report.h@, the part the terminal's size callback
+-- needs: the geometry it reports. The size-report encoder arrives with M1.3.
+module Ghostty.FFI.SizeReport
+  ( -- * Sizes
+    GhosttySizeReportSize (..),
+    ghosttySizeReportSizeLayout,
+  )
+where
+
+import Foreign.Storable (Storable (..))
+import Ghostty.FFI.Layout (CField (..), CStruct (..))
+
+#include <gvtffi_shims.h>
+
+-- | @GhosttySizeReportSize@: Terminal size information for encoding size reports.
+data GhosttySizeReportSize = GhosttySizeReportSize
+  { -- | @rows@: Terminal row count in cells.
+    rows :: Word16,
+    -- | @columns@: Terminal column count in cells.
+    columns :: Word16,
+    -- | @cell_width@: Width of a single terminal cell in pixels.
+    cellWidth :: Word32,
+    -- | @cell_height@: Height of a single terminal cell in pixels.
+    cellHeight :: Word32
+  }
+  deriving stock (Eq, Show)
+
+instance Storable GhosttySizeReportSize where
+  sizeOf _ = (#size GhosttySizeReportSize)
+  alignment _ = (#alignment GhosttySizeReportSize)
+  peek p =
+    GhosttySizeReportSize
+      <$> (#peek GhosttySizeReportSize, rows) p
+      <*> (#peek GhosttySizeReportSize, columns) p
+      <*> (#peek GhosttySizeReportSize, cell_width) p
+      <*> (#peek GhosttySizeReportSize, cell_height) p
+  poke p s = do
+    (#poke GhosttySizeReportSize, rows) p s.rows
+    (#poke GhosttySizeReportSize, columns) p s.columns
+    (#poke GhosttySizeReportSize, cell_width) p s.cellWidth
+    (#poke GhosttySizeReportSize, cell_height) p s.cellHeight
+
+-- | The layout of @GhosttySizeReportSize@ as compiled, for the layout test (§3.4).
+ghosttySizeReportSizeLayout :: CStruct
+ghosttySizeReportSizeLayout =
+  CStruct
+    { name = "GhosttySizeReportSize",
+      size = (#size GhosttySizeReportSize),
+      align = (#alignment GhosttySizeReportSize),
+      fields =
+        [ CField "rows" (#offset GhosttySizeReportSize, rows) (#const GVTFFI_FIELD_SIZE(GhosttySizeReportSize, rows)),
+          CField "columns" (#offset GhosttySizeReportSize, columns) (#const GVTFFI_FIELD_SIZE(GhosttySizeReportSize, columns)),
+          CField "cell_width" (#offset GhosttySizeReportSize, cell_width) (#const GVTFFI_FIELD_SIZE(GhosttySizeReportSize, cell_width)),
+          CField "cell_height" (#offset GhosttySizeReportSize, cell_height) (#const GVTFFI_FIELD_SIZE(GhosttySizeReportSize, cell_height))
+        ]
+    }
+

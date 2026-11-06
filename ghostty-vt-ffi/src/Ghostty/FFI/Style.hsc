@@ -1,0 +1,227 @@
+{-# LANGUAGE CApiFFI #-}
+{-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE ViewPatterns #-}
+
+-- | @include/ghostty/vt/style.h@: a cell's SGR style, as grid references and
+-- the cursor report it.
+module Ghostty.FFI.Style
+  ( -- * Colours
+    GhosttyStyleColorTag (..),
+    pattern GhosttyStyleColorNone,
+    pattern GhosttyStyleColorPalette,
+    pattern GhosttyStyleColorRgb,
+    pattern GhosttyStyleColorTagUnknown,
+    ghosttyStyleColorTagEnum,
+    GhosttyStyleColor (..),
+    ghosttyStyleColorLayout,
+
+    -- * Styles
+    GhosttyStyle (..),
+    ghosttyStyleLayout,
+    GhosttyStyleId,
+
+    -- * Calls
+    ghosttyStyleDefault,
+    ghosttyStyleIsDefault,
+  )
+where
+
+import Foreign.C.Types (CBool (..), CInt (..), CSize (..))
+import Foreign.Ptr (Ptr)
+import Foreign.Storable (Storable (..))
+import Ghostty.FFI.Color (GhosttyColorPaletteIndex, GhosttyColorRgb)
+import Ghostty.FFI.Layout (CEnum (..), CField (..), CStruct (..), unnamed)
+
+#include <gvtffi_shims.h>
+
+-- | @GhosttyStyleId@: a style's index in its page.
+type GhosttyStyleId = Word16
+
+-- | @GhosttyStyleColorTag@: Style color tags.
+newtype GhosttyStyleColorTag = GhosttyStyleColorTag CInt
+  deriving stock (Eq, Show)
+  deriving newtype (Storable)
+
+-- | @GHOSTTY_STYLE_COLOR_NONE@.
+pattern GhosttyStyleColorNone :: GhosttyStyleColorTag
+pattern GhosttyStyleColorNone = GhosttyStyleColorTag (#const GHOSTTY_STYLE_COLOR_NONE)
+
+-- | @GHOSTTY_STYLE_COLOR_PALETTE@.
+pattern GhosttyStyleColorPalette :: GhosttyStyleColorTag
+pattern GhosttyStyleColorPalette = GhosttyStyleColorTag (#const GHOSTTY_STYLE_COLOR_PALETTE)
+
+-- | @GHOSTTY_STYLE_COLOR_RGB@.
+pattern GhosttyStyleColorRgb :: GhosttyStyleColorTag
+pattern GhosttyStyleColorRgb = GhosttyStyleColorTag (#const GHOSTTY_STYLE_COLOR_RGB)
+
+-- | Any value this binding does not name: a newer library's.
+pattern GhosttyStyleColorTagUnknown :: CInt -> GhosttyStyleColorTag
+pattern GhosttyStyleColorTagUnknown n <- GhosttyStyleColorTag (unnamed ghosttyStyleColorTagEnum -> Just n)
+  where
+    GhosttyStyleColorTagUnknown n = GhosttyStyleColorTag n
+
+{-# COMPLETE
+  GhosttyStyleColorNone,
+  GhosttyStyleColorPalette,
+  GhosttyStyleColorRgb,
+  GhosttyStyleColorTagUnknown
+  #-}
+
+-- | Every value of @GhosttyStyleColorTag@ this binding names, for the layout test (§3.4).
+-- It is also what 'GhosttyStyleColorTagUnknown' excludes.
+ghosttyStyleColorTagEnum :: CEnum
+ghosttyStyleColorTagEnum =
+  CEnum
+    { name = "GhosttyStyleColorTag",
+      size = (#size GhosttyStyleColorTag),
+      values =
+        [ ("GHOSTTY_STYLE_COLOR_NONE", (#const GHOSTTY_STYLE_COLOR_NONE)),
+          ("GHOSTTY_STYLE_COLOR_PALETTE", (#const GHOSTTY_STYLE_COLOR_PALETTE)),
+          ("GHOSTTY_STYLE_COLOR_RGB", (#const GHOSTTY_STYLE_COLOR_RGB))
+        ]
+    }
+
+-- | @GhosttyStyleColor@: a colour in a style. A tagged union in C, so a sum
+-- here with an arm per tag (§3.3).
+data GhosttyStyleColor
+  = -- | @GHOSTTY_STYLE_COLOR_NONE@: no colour, the default.
+    StyleColorNone
+  | -- | @GHOSTTY_STYLE_COLOR_PALETTE@: @value.palette@.
+    StyleColorPalette GhosttyColorPaletteIndex
+  | -- | @GHOSTTY_STYLE_COLOR_RGB@: @value.rgb@.
+    StyleColorRgb GhosttyColorRgb
+  | -- | A tag this binding does not name, whose value it cannot read.
+    StyleColorOther GhosttyStyleColorTag
+  deriving stock (Eq, Show)
+
+instance Storable GhosttyStyleColor where
+  sizeOf _ = (#size GhosttyStyleColor)
+  alignment _ = (#alignment GhosttyStyleColor)
+  peek p =
+    (#peek GhosttyStyleColor, tag) p >>= \case
+      GhosttyStyleColorNone -> pure StyleColorNone
+      GhosttyStyleColorPalette -> StyleColorPalette <$> (#peek GhosttyStyleColor, value.palette) p
+      GhosttyStyleColorRgb -> StyleColorRgb <$> (#peek GhosttyStyleColor, value.rgb) p
+      tag@(GhosttyStyleColorTagUnknown _) -> pure (StyleColorOther tag)
+  poke p = \case
+    StyleColorNone -> (#poke GhosttyStyleColor, tag) p GhosttyStyleColorNone
+    StyleColorPalette i -> do
+      (#poke GhosttyStyleColor, tag) p GhosttyStyleColorPalette
+      (#poke GhosttyStyleColor, value.palette) p i
+    StyleColorRgb c -> do
+      (#poke GhosttyStyleColor, tag) p GhosttyStyleColorRgb
+      (#poke GhosttyStyleColor, value.rgb) p c
+    StyleColorOther tag -> (#poke GhosttyStyleColor, tag) p tag
+
+-- | The layout of @GhosttyStyleColor@ as compiled, for the layout test (§3.4).
+ghosttyStyleColorLayout :: CStruct
+ghosttyStyleColorLayout =
+  CStruct
+    { name = "GhosttyStyleColor",
+      size = (#size GhosttyStyleColor),
+      align = (#alignment GhosttyStyleColor),
+      fields =
+        [ CField "tag" (#offset GhosttyStyleColor, tag) (#const GVTFFI_FIELD_SIZE(GhosttyStyleColor, tag)),
+          CField "value" (#offset GhosttyStyleColor, value) (#const GVTFFI_FIELD_SIZE(GhosttyStyleColor, value))
+        ]
+    }
+
+-- | @GhosttyStyle@: Terminal cell style.
+data GhosttyStyle = GhosttyStyle
+  { -- | @size@.
+    size :: CSize,
+    -- | @fg_color@.
+    fgColor :: GhosttyStyleColor,
+    -- | @bg_color@.
+    bgColor :: GhosttyStyleColor,
+    -- | @underline_color@.
+    underlineColor :: GhosttyStyleColor,
+    -- | @bold@.
+    bold :: CBool,
+    -- | @italic@.
+    italic :: CBool,
+    -- | @faint@.
+    faint :: CBool,
+    -- | @blink@.
+    blink :: CBool,
+    -- | @inverse@.
+    inverse :: CBool,
+    -- | @invisible@.
+    invisible :: CBool,
+    -- | @strikethrough@.
+    strikethrough :: CBool,
+    -- | @overline@.
+    overline :: CBool,
+    -- | @underline@: One of GHOSTTY\_SGR\_UNDERLINE\_\* values.
+    underline :: CInt
+  }
+  deriving stock (Eq, Show)
+
+instance Storable GhosttyStyle where
+  sizeOf _ = (#size GhosttyStyle)
+  alignment _ = (#alignment GhosttyStyle)
+  peek p =
+    GhosttyStyle
+      <$> (#peek GhosttyStyle, size) p
+      <*> (#peek GhosttyStyle, fg_color) p
+      <*> (#peek GhosttyStyle, bg_color) p
+      <*> (#peek GhosttyStyle, underline_color) p
+      <*> (#peek GhosttyStyle, bold) p
+      <*> (#peek GhosttyStyle, italic) p
+      <*> (#peek GhosttyStyle, faint) p
+      <*> (#peek GhosttyStyle, blink) p
+      <*> (#peek GhosttyStyle, inverse) p
+      <*> (#peek GhosttyStyle, invisible) p
+      <*> (#peek GhosttyStyle, strikethrough) p
+      <*> (#peek GhosttyStyle, overline) p
+      <*> (#peek GhosttyStyle, underline) p
+  poke p s = do
+    (#poke GhosttyStyle, size) p s.size
+    (#poke GhosttyStyle, fg_color) p s.fgColor
+    (#poke GhosttyStyle, bg_color) p s.bgColor
+    (#poke GhosttyStyle, underline_color) p s.underlineColor
+    (#poke GhosttyStyle, bold) p s.bold
+    (#poke GhosttyStyle, italic) p s.italic
+    (#poke GhosttyStyle, faint) p s.faint
+    (#poke GhosttyStyle, blink) p s.blink
+    (#poke GhosttyStyle, inverse) p s.inverse
+    (#poke GhosttyStyle, invisible) p s.invisible
+    (#poke GhosttyStyle, strikethrough) p s.strikethrough
+    (#poke GhosttyStyle, overline) p s.overline
+    (#poke GhosttyStyle, underline) p s.underline
+
+-- | The layout of @GhosttyStyle@ as compiled, for the layout test (§3.4).
+ghosttyStyleLayout :: CStruct
+ghosttyStyleLayout =
+  CStruct
+    { name = "GhosttyStyle",
+      size = (#size GhosttyStyle),
+      align = (#alignment GhosttyStyle),
+      fields =
+        [ CField "size" (#offset GhosttyStyle, size) (#const GVTFFI_FIELD_SIZE(GhosttyStyle, size)),
+          CField "fg_color" (#offset GhosttyStyle, fg_color) (#const GVTFFI_FIELD_SIZE(GhosttyStyle, fg_color)),
+          CField "bg_color" (#offset GhosttyStyle, bg_color) (#const GVTFFI_FIELD_SIZE(GhosttyStyle, bg_color)),
+          CField "underline_color" (#offset GhosttyStyle, underline_color) (#const GVTFFI_FIELD_SIZE(GhosttyStyle, underline_color)),
+          CField "bold" (#offset GhosttyStyle, bold) (#const GVTFFI_FIELD_SIZE(GhosttyStyle, bold)),
+          CField "italic" (#offset GhosttyStyle, italic) (#const GVTFFI_FIELD_SIZE(GhosttyStyle, italic)),
+          CField "faint" (#offset GhosttyStyle, faint) (#const GVTFFI_FIELD_SIZE(GhosttyStyle, faint)),
+          CField "blink" (#offset GhosttyStyle, blink) (#const GVTFFI_FIELD_SIZE(GhosttyStyle, blink)),
+          CField "inverse" (#offset GhosttyStyle, inverse) (#const GVTFFI_FIELD_SIZE(GhosttyStyle, inverse)),
+          CField "invisible" (#offset GhosttyStyle, invisible) (#const GVTFFI_FIELD_SIZE(GhosttyStyle, invisible)),
+          CField "strikethrough" (#offset GhosttyStyle, strikethrough) (#const GVTFFI_FIELD_SIZE(GhosttyStyle, strikethrough)),
+          CField "overline" (#offset GhosttyStyle, overline) (#const GVTFFI_FIELD_SIZE(GhosttyStyle, overline)),
+          CField "underline" (#offset GhosttyStyle, underline) (#const GVTFFI_FIELD_SIZE(GhosttyStyle, underline))
+        ]
+    }
+
+-- | @ghostty_style_default@: write the default style (every colour none, every
+-- flag off) to the pointer, @size@ included. @unsafe@: it does not call back
+-- into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_style_default"
+  ghosttyStyleDefault :: Ptr GhosttyStyle -> IO ()
+
+-- | @ghostty_style_is_default@: whether a style is the default one. @unsafe@:
+-- it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_style_is_default"
+  ghosttyStyleIsDefault :: Ptr GhosttyStyle -> IO CBool

@@ -15,6 +15,7 @@ category:           Terminal
 build-type:         Simple
 tested-with:        GHC ==9.12.4
 extra-doc-files:    GHOSTTY_COMMIT
+extra-source-files: include/gvtffi_shims.h
 
 -- DESIGN.md §3.1: development links the shared library; releases link the
 -- static one, which the libghostty-vt build installs as its own pkg-config
@@ -41,11 +42,30 @@ common extensions
 library
   import:           warnings, extensions
   exposed-modules:
+    Ghostty.FFI.Allocator
     Ghostty.FFI.BuildInfo
+    Ghostty.FFI.Color
+    Ghostty.FFI.Device
+    Ghostty.FFI.GridRef
+    Ghostty.FFI.Io
     Ghostty.FFI.Layout
+    Ghostty.FFI.Modes
+    Ghostty.FFI.Osc
+    Ghostty.FFI.Point
+    Ghostty.FFI.Screen
+    Ghostty.FFI.SizeReport
+    Ghostty.FFI.Style
+    Ghostty.FFI.Terminal
+    Ghostty.FFI.Terminal.Callbacks
+    Ghostty.FFI.Terminal.Handle
     Ghostty.FFI.Types
 
   hs-source-dirs:   src
+
+  -- §3.3: pointer shims for the functions that take a struct by value, and
+  -- hsc2hs's helper macros. static inline, so there is no C source to compile;
+  -- capi calls them through the header.
+  include-dirs:     include
   build-tool-depends: hsc2hs:hsc2hs
   build-depends:
     , base ^>=4.21.2.0
@@ -75,6 +95,7 @@ test-suite ghostty-vt-ffi-test
   other-modules:
     Test.Ghostty.FFI.BuildInfo
     Test.Ghostty.FFI.Layout
+    Test.Ghostty.FFI.Terminal
 
   build-depends:
     , aeson ^>=2.3
