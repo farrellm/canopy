@@ -32,16 +32,26 @@ library
   import:           warnings, extensions
   exposed-modules:
     Ghostty.Effectful
+    Ghostty.Effectful.Color
     Ghostty.Effectful.Error
+    Ghostty.Effectful.Internal.Convert
     Ghostty.Effectful.Internal.Effect
     Ghostty.Effectful.Internal.Error
+    Ghostty.Effectful.Internal.Keys
     Ghostty.Effectful.Internal.Terminal
+    Ghostty.Effectful.Mode
+    Ghostty.Effectful.Point
+    Ghostty.Effectful.Style
     Ghostty.Effectful.Terminal
+    Ghostty.Effectful.Terminal.Keys
 
   hs-source-dirs:   src
   build-depends:
+    , array ^>=0.5.8
     , base ^>=4.21.2.0
+    , bytestring ^>=0.12
     , canopy-prelude
+    , containers ^>=0.7
     , effectful-core ^>=2.7.1
     , ghostty-vt-ffi
 
@@ -58,13 +68,17 @@ test-suite ghostty-effectful-test
   main-is:          Main.hs
   other-modules:
     Test.Ghostty.Effectful
+    Test.Ghostty.Effectful.Keys
     Test.Ghostty.Effectful.Terminal
+    Test.Ghostty.Effectful.TrackedRef
 
   build-depends:
     , base ^>=4.21.2.0
+    , bytestring ^>=0.12
     , canopy-prelude
     , effectful-core ^>=2.7.1
     , ghostty-effectful
+    , ghostty-vt-ffi
     , tasty ^>=1.5
     , tasty-hunit ^>=0.10.2
     , text ^>=2.1

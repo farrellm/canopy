@@ -460,8 +460,12 @@ from it:
   the C compiler, never from hand-copied numbers.
 - **Enums are newtypes over the C integer with pattern synonyms**, `COMPLETE`-annotated, plus an
   `Unknown` view. C enums are open (`GHOSTTY_ENUM_MAX_VALUE` padding exists to allow growth), so a
-  closed Haskell sum here would turn a library upgrade into undefined behaviour; the high level
-  (§4) closes them, with an explicit unknown case.
+  closed Haskell sum here would turn a library upgrade into undefined behaviour. The high level
+  (§4) closes them, and a value outside the closed set is the thrown `UnknownEnum` (§4.7), not a
+  constructor: the version check (§3.4) makes the linked library the pinned one, and the layout
+  test makes the binding name every value the pinned one has, so no caller could meet it. (M1.5;
+  this sentence first read "with an explicit unknown case". `ResultCode` keeps its unknown case,
+  because it is what `Invariant` carries, not what an operation returns.)
 - **`unsafe` FFI calls by default**, `safe` only for calls that can call back into Haskell
   (`vt_write`, `vt_write_until`, `paste`, `render_state_update` if it ever gains callbacks). This is
   a per-import decision recorded in the import's comment, because an `unsafe` call that re-enters
@@ -603,33 +607,77 @@ Data that leaves the frame is **copied** into plain Haskell values (`Cell`, `Sty
 
 ### 4.4 Typed keys
 
-The header's tables become GADTs:
+The header's tables become GADTs (`Ghostty.Effectful.Terminal.Keys`):
 
 ```haskell
 data TerminalData a where
   Cols            :: TerminalData Word16
-  Rows            :: TerminalData Word16
-  CursorPos       :: TerminalData (Point 'Active)
-  Title           :: TerminalData (Maybe Text)
-  Pwd             :: TerminalData (Maybe Text)
-  ActiveScreen    :: TerminalData Screen          -- Primary | Alternate
-  Mode            :: ModeKey m -> TerminalData Bool
-  ColorForeground :: TerminalData Rgb
-  KittyKeyboard   :: TerminalData KittyFlags
+  CursorX         :: TerminalData Word16
+  CursorY         :: TerminalData Word16
+  Title           :: TerminalData Text           -- empty when unset; the header never says NO_VALUE
+  ActiveScreen    :: TerminalData Screen         -- Primary | Alternate
+  Mode            :: ModeKey r -> TerminalData Bool
+  ColorForeground :: TerminalData (Maybe Rgb)    -- NO_VALUE when none is set
+  KittyKeyboardFlags :: TerminalData KittyFlags
   -- …one constructor per header row
 
+data TerminalOption a where
+  SetTitle        :: TerminalOption Text
+  SetColorForeground :: TerminalOption (Maybe Rgb)  -- Nothing is the header's NULL: unset
+  SetMode         :: ModeKey r -> TerminalOption Bool
+  SetModeDefault  :: ModeKey 'Configurable -> TerminalOption Bool
+  -- …
+
 getT :: Ghostty :> es => Terminal s -> TerminalData a -> Eff es a
+setT :: Ghostty :> es => Terminal s -> TerminalOption a -> a -> Eff es ()
 ```
 
 `NO_VALUE` is not an error: for keys where the header says a value may be absent, the GADT's index is
 `Maybe`, and the marshalling for that constructor maps `NO_VALUE` to `Nothing`. For keys where it
 cannot happen, it is an internal invariant violation (§4.7). `INVALID_VALUE` for a key cannot happen
-at all: the constructors are the only keys. The same treatment applies to options
-(`TerminalOption a`), render-state data, row and cell data.
+at all: the constructors are the only keys. An option takes a `Maybe` exactly where the header's
+null pointer means something no value of the type says (unset a colour, remove a limit, restore the
+built-in palette); where null only equals some value (`DEFAULT_CURSOR_BLINK`'s null is "not
+blinking"), the option takes the plain type.
+
+What a write would refuse is kept out by the value's type, as `Extent` does for zero (§4.2):
+
+- **`ModeKey r`** names the modes the library recognises (`Ghostty.Effectful.Mode`), indexed by
+  whether `MODE_DEFAULT` accepts them. The library refuses a reset default for modes whose set or
+  reset does more than flip a bit (the alternate screens, the mouse protocols, synchronized output,
+  origin, …); those are `ModeKey 'Fixed` and `SetModeDefault` cannot take them. The test suite
+  checks the index of every mode against the linked library through the raw call, and that the
+  list is every mode the library answers a `MODE` read for, by asking about all 2¹⁶ mode numbers.
+- **`TerminfoName`** is at most 128 bytes (`terminfoName :: Text -> Maybe TerminfoName`), and
+  **`ChecksumExtension`** is a record of the five XTCHECKSUM bits, so a value above 31 is
+  unrepresentable.
+
+Three groups of header rows have no constructor, each for a reason: the callback options and
+`USERDATA`, which the binding installs itself and never lets a caller (§4.5); `SELECTION` both ways,
+whose value is a pair of grid references and arrives with the selection API (M6.5); and the
+`KITTY_GRAPHICS` data key, a borrowed handle, with image placements (M6.15). A test holds the
+constructors plus this list against the header's enums, so a row a pin bump adds fails it. A
+constructor is named for its row (`CursorX` for `GHOSTTY_TERMINAL_DATA_CURSOR_X`, `SetTitle` for
+`GHOSTTY_TERMINAL_OPT_TITLE`), and a test holds each name against the number its marshalling sends,
+so two keys of the same type and fresh value cannot be swapped unnoticed.
 
 The marshalling for each constructor is a `Storable`-level `peek` at the right type, written once per
-constructor. A test enumerates the constructors (`[Some TerminalData]`, kept exhaustive by a
-`-Wincomplete-patterns` match in the test) and calls each on a fresh terminal.
+constructor (`Ghostty.Effectful.Internal.Keys`). The values are plain Haskell types in their own
+modules, so that §4.3's frames reuse them: `Rgb` and `Palette` (`.Color`; a palette has a colour at
+every `Word8`), `Style` (`.Style`), `Point (c :: Coord)` (`.Point`). A test enumerates the
+constructors (`[Some TerminalData]`, kept exhaustive by a `-Wincomplete-patterns` match in the test)
+and calls each on a fresh terminal against its expected value; another writes every option and
+reads it back where a key reads the same setting. The same treatment applies to render-state data,
+row and cell data (M1.7).
+
+**Tracked grid references** (`TrackedRef s`) follow a cell as the terminal scrolls, prunes and
+reflows; blocks are pairs of them (§7.3). A terminal owns the references made from it in a registry,
+and `withTerminal` frees whichever are left when its region ends. A reference names its registry
+entry, not the C handle, so `untrack` is idempotent, and a reference that was untracked reports no
+point and cannot be moved: it is never passed to the library again. `untrack` exists because each
+live reference costs the terminal work on every scroll, and a session's blocks accumulate. Points
+carry their coordinate system in their type (`refPoint @'Grid`), and a point outside it is
+`Nothing`, which the header documents as `INVALID_VALUE` for a valid terminal.
 
 ### 4.5 Callbacks become events
 
@@ -696,6 +744,7 @@ data GhosttyError                       -- thrown
   = OutOfMemory CallSite
   | WrongThread CallSite                -- §4.6
   | Invariant CallSite ResultCode       -- the library returned what the header says it cannot
+  | UnknownEnum CallSite Text Integer   -- a C enum value the binding does not name (§3.3)
 ```
 
 `ResultCode` is `GhosttyResult` closed, with an unknown case (§3.3), so no `Ghostty.FFI` type
@@ -720,6 +769,7 @@ every signature would hide the errors that matter. The version check in `runGhos
 | `Ghostty.Effectful.Search` | incremental scrollback search with viewport matches |
 | `Ghostty.Effectful.Snapshot` | encode and restore terminal state (session resume, §8.7) |
 | `Ghostty.Effectful.Unicode` | codepoint and grapheme widths |
+| `Ghostty.Effectful.Color`, `.Style`, `.Point`, `.Mode` | the plain values keys and frames return: `Rgb`, `Palette`, `Style`, `Point c`, `ModeKey r` (§4.4) |
 
 Each is an effectful API over `Ghostty`, and none exports a pointer.
 

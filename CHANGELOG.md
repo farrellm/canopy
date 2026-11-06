@@ -105,6 +105,29 @@ Written as changes land, not at release (DESIGN.md §2.9).
   would put every operation's constructor in one GADT. `GhosttyError` gains `WrongThread`
   and drops `BufferTooSmall` (it never escapes), and `Rejected` and `LimitExceeded` arrive with
   the calls that return them.
+- `ghostty-effectful` has typed keys (M1.5). `TerminalData a` and `TerminalOption a`
+  (`Ghostty.Effectful.Terminal.Keys`) have a constructor per header row, read with `getT` and
+  written with `setT`. A read the header says may have no value is a `Maybe`, and an option takes a
+  `Maybe` where the header's null means unset or default. The values are plain types:
+  `Ghostty.Effectful.Color` (`Rgb`, a total `Palette`), `.Style`, `.Point` (`Point c`, the coordinate
+  system in the type), and `.Mode`, whose `ModeKey r` is indexed by whether the library accepts a
+  reset default for the mode, so `SetModeDefault` cannot take one it refuses. `TerminfoName` and
+  `ChecksumExtension` make the other two refusable writes unrepresentable. The callback options,
+  `SELECTION` and `KITTY_GRAPHICS` are left to M1.6, M6.5 and M6.15.
+  A constructor is named for its header row, and a test checks that its marshalling sends that
+  row's number.
+- Tracked grid references (`TrackedRef s`: `track`, `refPoint`, `moveRef`, `refAlive`, `untrack`,
+  `openTrackedRefs`) are owned by their terminal's region and freed with it. `untrack` is
+  idempotent, and an untracked reference is never passed to the library again.
+- Tests: every data key on a fresh terminal against its expected value; every option written and
+  read back where a key reads it; the constructors plus the deferred rows equal the header's enums;
+  the mode list equals the modes the library answers for, out of all 2¹⁶ mode numbers, and each
+  mode's index matches what the library accepts; references follow their cell into the scrollback,
+  refuse points outside the grid, and are freed by `untrack` or with their terminal.
+- DESIGN.md §3.3, §4.4, §4.7 and §4.8: the high level closes C enums without an unknown case, and a
+  value outside the set throws the new `GhosttyError` constructor `UnknownEnum`. The version check
+  and the layout test together rule that value out. §4.4 gains the option rules, the mode index,
+  the deferred rows and tracked references.
 
 ### M0: infrastructure
 

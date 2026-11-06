@@ -48,6 +48,11 @@ data GhosttyError
   | -- | The library returned what its header says it cannot, for the
     -- arguments the binding's types allow.
     Invariant CallSite ResultCode
+  | -- | The library returned a value of a C enum (named by the 'Text') that
+    -- the binding does not name. The version check and the layout test
+    -- together rule this out: the linked library is the pinned one, and the
+    -- binding names every value the pinned one has (DESIGN.md §3.3, §3.4).
+    UnknownEnum CallSite Text Integer
   deriving stock (Eq, Show)
   deriving anyclass (Exception)
 

@@ -13,6 +13,13 @@ events instead of callbacks. No export may expose a pointer.
 - **Results become `GhosttyError` through `Ghostty.Effectful.Internal.Error`**: a result the header
   says cannot happen for the arguments the types allow is `Invariant`. Make the bad argument
   unrepresentable (as `Extent` does for zero) rather than returning the refusal.
+- **A header row is a GADT constructor named for it** (`Ghostty.Effectful.Terminal.Keys`, §4.4):
+  `CURSOR_X` is `CursorX`, and an option's name gets `Set`; a test checks it. Marshalled in
+  `Internal.Keys`. Adding one means a case in `dataKey`/`optionKey`, `getData`/`setOption`, and
+  the test's `allData`/`allOptions` and its total `fresh`/`written` match. A row deliberately left
+  out goes in the test's `deferredData`/`deferredOptions` with its PLAN.md step.
+- **A C enum is closed at this level, with no unknown case**: an unnamed value is `UnknownEnum`
+  (`Internal.Convert.unknownEnum`), because the version check and the layout test rule it out.
 - Tests may import `Internal` (to build values or reach `runGhosttyPinnedTo`).
 
 Its doctest runs the real library, so `LD_LIBRARY_PATH` must come from `build-libghostty.sh`.
