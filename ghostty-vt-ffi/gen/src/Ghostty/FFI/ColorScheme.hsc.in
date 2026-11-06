@@ -1,0 +1,24 @@
+{-# LANGUAGE CApiFFI #-}
+
+-- | @include/ghostty/vt/color_scheme.h@: encoding a colour-scheme report
+-- (@CSI ? 997 ; 1 n@ for dark, @2@ for light), the reply to @CSI ? 996 n@
+-- and what a program that set mode 2031 is sent unasked when the scheme
+-- changes. The scheme is "Ghostty.FFI.Device"'s 'GhosttyColorScheme'.
+module Ghostty.FFI.ColorScheme
+  ( -- * Reports
+    ghosttyColorSchemeReportEncode,
+  )
+where
+
+import Foreign.C.Types (CChar, CInt (..), CSize (..))
+import Foreign.Ptr (Ptr)
+import Ghostty.FFI.Device (GhosttyColorScheme (..))
+import Ghostty.FFI.Types (GhosttyResult (..))
+
+#include <gvtffi_shims.h>
+
+-- | @ghostty_color_scheme_report_encode@: encode a colour-scheme report into a
+-- buffer. A null buffer, or one too small, returns @GHOSTTY_OUT_OF_SPACE@
+-- with the size needed. @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_color_scheme_report_encode"
+  ghosttyColorSchemeReportEncode :: GhosttyColorScheme -> Ptr CChar -> CSize -> Ptr CSize -> IO GhosttyResult

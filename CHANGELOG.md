@@ -66,6 +66,28 @@ Written as changes land, not at release (DESIGN.md §2.9).
   the function's header doc and prototype (`ghostty-vt-ffi/safety.txt`), so a pin bump that changes
   what a bound function documents fails until it is re-read and recorded with `--update`. The 94
   decisions were recorded as they stand; no header doc of an `unsafe` call mentions a callback.
+- `ghostty-vt-ffi` binds encoders, parsers and unicode (M1.3's second half), completing M1.3:
+  `key/event.h` and `key/encoder.h` (`Ghostty.FFI.Key.Event`, `.Key.Encoder`: key events,
+  `GhosttyMods`, every `GhosttyKey`, the encoder and its options, `GhosttyKittyKeyFlags`);
+  `mouse.h`, `mouse/event.h` and `mouse/encoder.h` (`Ghostty.FFI.Mouse`, `.Mouse.Event`,
+  `.Mouse.Encoder`, with `GhosttyMouseShape`); `focus.h`, `paste.h` (including
+  `ghostty_terminal_paste`), `color_scheme.h`, `sgr.h` (the SGR parser, `GhosttySgrAttribute` as a
+  sum, `GhosttySgrUnderline`) and `unicode.h` whole; and the rest of `color.h` (parsing, palettes,
+  the X11 table, luminance), `osc.h` (the OSC parser), `modes.h` (DECRPM), `size_report.h` (the
+  encoder) and `io.h` (readers and the MIME reader). `GhosttyKittyGraphics` is bound as a handle
+  (`Ghostty.FFI.KittyGraphics`); the rest of `kitty_graphics.h` stays with M6.15. 357 symbols
+  bound, 70 deferred, all to M6 or never. 133 descriptors, each with a layout-test row, and
+  behavioural tests of every encoder against the sequence it is specified to produce, the six new
+  shims, both parsers, the width tables, the colour calls, and a paste into a terminal through a C
+  MIME reader (`test/cbits/gvtffi_test.c`) and a Haskell `WRITE_PTY` callback (403 tests).
+- DESIGN.md §3.3: seventeen of the nineteen by-value functions now have shims. `ghostty_terminal_paste`
+  is `safe` (it runs the MIME reader and `WRITE_PTY`); every other new call is `unsafe`, including
+  `paste_is_safe` and `paste_encode`, one pass over a caller's buffer. `gen-ghostty-ffi.py` gains
+  `{{defines}}`, for constants a header spells as `#define`s over a scalar typedef (`GhosttyMods`,
+  `GhosttyKittyKeyFlags`, the named palette colours), `float`, and callback types that receive a
+  struct by value (no `wrapper`). A value pattern that would be its enum's `Unknown` view
+  (`GHOSTTY_MOUSE_BUTTON_UNKNOWN`) takes a `Value` suffix. 169 imports, 24 callback types and 56
+  struct records pass the signature check, and 169 `safe`/`unsafe` decisions are recorded.
 
 
 ### M0: infrastructure

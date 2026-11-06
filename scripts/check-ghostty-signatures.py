@@ -53,6 +53,7 @@ PRIM = {
     "CInt": "int",
     "CChar": "char",
     "CDouble": "double",
+    "CFloat": "float",
     "CIntPtr": "intptr_t",
     "()": "void",
 }

@@ -1,0 +1,167 @@
+{-# LANGUAGE CApiFFI #-}
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE ViewPatterns #-}
+
+-- | @include/ghostty/vt/key/event.h@: a key event, the input to the key
+-- encoder ("Ghostty.FFI.Key.Encoder"). An event is a mutable handle, set
+-- field by field and reusable across encodes.
+--
+-- Every call here is @unsafe@: none calls back into Haskell, and each is a
+-- field read or write.
+module Ghostty.FFI.Key.Event
+  ( -- * Handles
+    GhosttyKeyEvent (..),
+    GhosttyKeyEventImpl,
+
+    -- * Actions
+    {{xenum key/event.h GhosttyKeyAction}}
+
+    -- * Modifiers
+    GhosttyMods,
+    {{xdefines key/event.h GhosttyMods GHOSTTY_MODS_}}
+
+    -- * Keys
+    {{xenum key/event.h GhosttyKey}}
+
+    -- * Events
+    ghosttyKeyEventNew,
+    ghosttyKeyEventFree,
+    ghosttyKeyEventSetAction,
+    ghosttyKeyEventGetAction,
+    ghosttyKeyEventSetKey,
+    ghosttyKeyEventGetKey,
+    ghosttyKeyEventSetMods,
+    ghosttyKeyEventGetMods,
+    ghosttyKeyEventSetConsumedMods,
+    ghosttyKeyEventGetConsumedMods,
+    ghosttyKeyEventSetComposing,
+    ghosttyKeyEventGetComposing,
+    ghosttyKeyEventSetUtf8,
+    ghosttyKeyEventGetUtf8,
+    ghosttyKeyEventSetUnshiftedCodepoint,
+    ghosttyKeyEventGetUnshiftedCodepoint,
+  )
+where
+
+import Foreign.C.ConstPtr (ConstPtr (..))
+import Foreign.C.Types (CBool (..), CChar, CInt (..), CSize (..))
+import Foreign.Ptr (Ptr)
+import Foreign.Storable (Storable (..))
+import Ghostty.FFI.Allocator (GhosttyAllocator)
+import Ghostty.FFI.Layout (CEnum (..), unnamed)
+import Ghostty.FFI.Types (GhosttyResult (..))
+
+#include <gvtffi_shims.h>
+
+-- * Handles
+
+-- | The C side of a 'GhosttyKeyEvent'. Never dereferenced.
+data GhosttyKeyEventImpl
+
+-- | @GhosttyKeyEvent@: a key event, from 'ghosttyKeyEventNew' and released by
+-- 'ghosttyKeyEventFree'.
+newtype GhosttyKeyEvent = GhosttyKeyEvent (Ptr GhosttyKeyEventImpl)
+  deriving stock (Eq, Show)
+  deriving newtype (Storable)
+
+-- * Actions
+
+{{enum key/event.h GhosttyKeyAction}}
+-- * Modifiers
+
+-- | @GhosttyMods@: a bit set of modifier keys, the @GHOSTTY_MODS_*@ flags
+-- below. A side bit says which of a pair is pressed (set for the right one),
+-- and means something only with its modifier's bit and where the platform
+-- reports sides.
+type GhosttyMods = Word16
+
+{{defines key/event.h GhosttyMods GHOSTTY_MODS_}}
+-- * Keys
+
+{{enum key/event.h GhosttyKey}}
+-- * Events
+
+-- | @ghostty_key_event_new@: a key event with every field at its default, with
+-- the allocator (null for the default). @unsafe@: it does not call back into
+-- Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_key_event_new"
+  ghosttyKeyEventNew :: Ptr GhosttyAllocator -> Ptr GhosttyKeyEvent -> IO GhosttyResult
+
+-- | @ghostty_key_event_free@ (null is a no-op). @unsafe@: it does not call
+-- back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_key_event_free"
+  ghosttyKeyEventFree :: GhosttyKeyEvent -> IO ()
+
+-- | @ghostty_key_event_set_action@: press, release or repeat. @unsafe@: it does
+-- not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_key_event_set_action"
+  ghosttyKeyEventSetAction :: GhosttyKeyEvent -> GhosttyKeyAction -> IO ()
+
+-- | @ghostty_key_event_get_action@. @unsafe@: it does not call back into
+-- Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_key_event_get_action"
+  ghosttyKeyEventGetAction :: GhosttyKeyEvent -> IO GhosttyKeyAction
+
+-- | @ghostty_key_event_set_key@: the physical key. @unsafe@: it does not call
+-- back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_key_event_set_key"
+  ghosttyKeyEventSetKey :: GhosttyKeyEvent -> GhosttyKey -> IO ()
+
+-- | @ghostty_key_event_get_key@. @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_key_event_get_key"
+  ghosttyKeyEventGetKey :: GhosttyKeyEvent -> IO GhosttyKey
+
+-- | @ghostty_key_event_set_mods@: the modifiers held. @unsafe@: it does not
+-- call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_key_event_set_mods"
+  ghosttyKeyEventSetMods :: GhosttyKeyEvent -> GhosttyMods -> IO ()
+
+-- | @ghostty_key_event_get_mods@. @unsafe@: it does not call back into
+-- Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_key_event_get_mods"
+  ghosttyKeyEventGetMods :: GhosttyKeyEvent -> IO GhosttyMods
+
+-- | @ghostty_key_event_set_consumed_mods@: the modifiers consumed in
+-- producing the key's text. @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_key_event_set_consumed_mods"
+  ghosttyKeyEventSetConsumedMods :: GhosttyKeyEvent -> GhosttyMods -> IO ()
+
+-- | @ghostty_key_event_get_consumed_mods@. @unsafe@: it does not call back
+-- into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_key_event_get_consumed_mods"
+  ghosttyKeyEventGetConsumedMods :: GhosttyKeyEvent -> IO GhosttyMods
+
+-- | @ghostty_key_event_set_composing@: whether the key is part of an input
+-- method's composition. @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_key_event_set_composing"
+  ghosttyKeyEventSetComposing :: GhosttyKeyEvent -> CBool -> IO ()
+
+-- | @ghostty_key_event_get_composing@. @unsafe@: it does not call back into
+-- Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_key_event_get_composing"
+  ghosttyKeyEventGetComposing :: GhosttyKeyEvent -> IO CBool
+
+-- | @ghostty_key_event_set_utf8@: the text the key produces in the current
+-- layout, before any Ctrl or Meta transformation; null, not a C0 control or a
+-- platform function-key code, when there is none. The event borrows the
+-- bytes, which must stay valid while it is used. @unsafe@: it does not call
+-- back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_key_event_set_utf8"
+  ghosttyKeyEventSetUtf8 :: GhosttyKeyEvent -> Ptr CChar -> CSize -> IO ()
+
+-- | @ghostty_key_event_get_utf8@: the text and its length (the out pointer may
+-- be null); null when there is none. Valid until the event is freed or its
+-- text set again. @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_key_event_get_utf8"
+  ghosttyKeyEventGetUtf8 :: GhosttyKeyEvent -> Ptr CSize -> IO (ConstPtr CChar)
+
+-- | @ghostty_key_event_set_unshifted_codepoint@: the codepoint the key
+-- produces with no modifiers, which the Kitty protocol reports. @unsafe@: it
+-- does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_key_event_set_unshifted_codepoint"
+  ghosttyKeyEventSetUnshiftedCodepoint :: GhosttyKeyEvent -> Word32 -> IO ()
+
+-- | @ghostty_key_event_get_unshifted_codepoint@. @unsafe@: it does not call
+-- back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_key_event_get_unshifted_codepoint"
+  ghosttyKeyEventGetUnshiftedCodepoint :: GhosttyKeyEvent -> IO Word32

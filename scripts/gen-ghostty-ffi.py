@@ -19,18 +19,24 @@ in place. Each directive is alone on its line, as `{{kind args}}`:
                            (no wrapper when it returns a struct by value)
     {{fn dynamic H T}}     a library function pointer: synonym and callT import
     {{modes}}              modes.h's named modes, as patterns
+    {{defines H T P}}      each `#define P…` constant in header H (not a
+                           function-like macro), as a pattern of type T: the
+                           bit flags and named values a header spells as
+                           macros over a scalar typedef
     {{enumrows}}           the layout test's list of EnumRows, one per enum
                            rendered before it
     {{shim F}}             in the C shim header: a static inline pointer shim
                            for function F, which takes or returns a struct by
                            value (DESIGN.md §3.3)
 
-    {{xenum H T}}, {{xstruct H T}}, {{xfn wrapper|dynamic H T}}, {{xmodes}}
+    {{xenum H T}}, {{xstruct H T}}, {{xfn wrapper|dynamic H T}}, {{xmodes}},
+    {{xdefines H T P}}
                            the export-list lines for the matching directive
 
 Names: a pattern is its C name in CamelCase. When that is already a type's
 name (GHOSTTY_TERMINAL_RESIZE_WINDOW_GRID vs GhosttyTerminalResizeWindowGrid),
-it gets a Tag suffix and a note saying why. A field is the C field in
+it gets a Tag suffix and a note saying why; when it is its enum's Unknown view
+(GHOSTTY_MOUSE_BUTTON_UNKNOWN), a Value suffix. A field is the C field in
 camelCase, `data` becoming `data_`.
 
 Run from the repository root. The headers are read from
@@ -178,6 +184,7 @@ CTYPE = {
     "int": "CInt",
     "char": "CChar",
     "double": "CDouble",
+    "float": "CFloat",
 }
 
 
@@ -218,9 +225,13 @@ class Gen:
                 values.append((vm.group(2), clean_doc(vm.group(1)) if vm.group(1) else []))
         return doc_before(text, m.start()), values
 
-    def pattern_name(self, cname):
+    def pattern_name(self, cname, enum=None):
         p = camel(cname)
-        return (p + "Tag", True) if p in self.h.types else (p, False)
+        if p in self.h.types:
+            return p + "Tag", "the struct"
+        if enum and p == enum + "Unknown":
+            return p + "Value", "the view of values this binding does not name"
+        return p, None
 
     def enum(self, header, name, with_types=False):
         tdoc, values = self.parse_enum(header, name)
@@ -234,7 +245,7 @@ class Gen:
         ]
         pats = []
         for cname, doc in values:
-            p, renamed = self.pattern_name(cname)
+            p, renamed = self.pattern_name(cname, name)
             pats.append(p)
             d = escape(sentence(first_para(doc)))
             out.append(f"-- | @{cname}@" + (f": {d}" if d else "."))
@@ -242,7 +253,8 @@ class Gen:
             if tl:
                 out += ["--", f"-- {escape(tl)}"]
             if renamed:
-                out += ["--", "-- Named with a @Tag@ suffix: the plain name is the struct", f"-- '{camel(cname)}'."]
+                suffix = p[len(camel(cname)) :]
+                out += ["--", f"-- Named with a @{suffix}@ suffix: the plain name is {renamed}", f"-- '{camel(cname)}'."]
             out += [f"pattern {p} :: {name}", f"pattern {p} = {name} (#const {cname})", ""]
         out += [
             "-- | Any value this binding does not name: a newer library's.",
@@ -354,7 +366,7 @@ class Gen:
         for p in m.group(2).split(","):
             p = " ".join(p.split())
             pm = re.match(r"(.*?)\b(\w+)$", p)
-            params.append(htype(pm.group(1)))
+            params.append(pm.group(1).replace("const ", "").strip())
         return doc_before(text, m.start()), m.group(1).strip(), params
 
     def option_for(self, fn_name):
@@ -366,8 +378,10 @@ class Gen:
         return None
 
     def fn(self, mode, header, name):
-        doc, ret, params = self.parse_fn(header, name)
+        doc, ret, cparams = self.parse_fn(header, name)
         by_value = ret not in CTYPE and ret != "void" and not ret.endswith("*")
+        by_value_params = [t for t in cparams if t in self.h.structs]
+        params = [htype(t) for t in cparams]
         hs = " -> ".join(params + [f"IO {paren(htype(ret))}"])
         paras = [p for p in doc if not p.startswith(("@", "#", "|"))][:2]
         text = " ".join(escape(sentence(" ".join(p.split()))) for p in paras)
@@ -381,9 +395,16 @@ class Gen:
                 f"-- It returns a @{ret}@ by value, which a @wrapper@ cannot make, so a",
                 "-- function of this type has to be written in C (§3.3).",
             ]
+        if by_value_params:
+            what = " and a ".join(f"@{t}@" for t in dict.fromkeys(by_value_params))
+            out += [
+                "--",
+                f"-- It receives a {what} by value, which a @wrapper@ cannot",
+                "-- take, so a function of this type has to be written in C (§3.3).",
+            ]
         out += [f"type {name} = FunPtr ({hs})", ""]
         exports = [name]
-        if mode == "wrapper" and not by_value:
+        if mode == "wrapper" and not by_value and not by_value_params:
             out += [
                 f"-- | Make a '{name}' from a Haskell function. Free it with",
                 "-- 'Foreign.Ptr.freeHaskellFunPtr' once nothing can call it. A call that",
@@ -419,6 +440,31 @@ class Gen:
             out += [
                 f"-- | @{cname}@: {escape(doc)} ({kind} mode {value}).",
                 f"pattern {p} :: GhosttyMode",
+                f"pattern {p} = (#const {cname})",
+                "",
+            ]
+            exports.append(f"pattern {p}")
+        return out, exports
+
+    # * Defines
+
+    def defines(self, header, typ, prefix):
+        text = self.h.get(header)
+        ds = re.findall(
+            r"(?:/\*\*((?:(?!\*/).)*)\*/\s*)?#define (" + prefix + r"\w+)[ \t]+(\S[^\n]*)", text, re.S
+        )
+        if not ds:
+            sys.exit(f"gen-ghostty-ffi: no #define {prefix}… in {header}")
+        out, exports = [], []
+        for doc, cname, _ in ds:
+            p, renamed = self.pattern_name(cname)
+            if renamed:
+                sys.exit(f"gen-ghostty-ffi: {cname} names a type; a #define cannot take a Tag")
+            d = re.sub(r"\s*@ingroup \w+", "", " ".join(" ".join(clean_doc("/**" + doc + "*/")).split()))
+            d = escape(sentence(d)) if d else ""
+            out += [
+                f"-- | @{cname}@" + (f": {d}" if d else "."),
+                f"pattern {p} :: {typ}",
                 f"pattern {p} = (#const {cname})",
                 "",
             ]
@@ -488,6 +534,10 @@ class Gen:
             return self.modes()[0]
         if kind == "xmodes":
             return self.modes()[1]
+        if kind == "defines":
+            return self.defines(*rest)[0]
+        if kind == "xdefines":
+            return self.defines(*rest)[1]
         if kind == "shim":
             return self.shim(rest[0])
         if kind == "enumrows":

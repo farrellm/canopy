@@ -22,16 +22,24 @@ import Foreign.Storable (Storable (..))
 import Ghostty.FFI.BuildInfo
 import Ghostty.FFI.Color
 import Ghostty.FFI.Device
+import Ghostty.FFI.Focus
 import Ghostty.FFI.Formatter
 import Ghostty.FFI.GridRef
 import Ghostty.FFI.Io
+import Ghostty.FFI.Key.Encoder
+import Ghostty.FFI.Key.Event
 import Ghostty.FFI.Layout (CEnum (..), CField (..), CStruct (..))
 import Ghostty.FFI.Modes
+import Ghostty.FFI.Mouse
+import Ghostty.FFI.Mouse.Encoder
+import Ghostty.FFI.Mouse.Event
 import Ghostty.FFI.Osc
+import Ghostty.FFI.Paste
 import Ghostty.FFI.Point
 import Ghostty.FFI.Render
 import Ghostty.FFI.Screen
 import Ghostty.FFI.Selection
+import Ghostty.FFI.Sgr
 import Ghostty.FFI.SizeReport
 import Ghostty.FFI.Style
 import Ghostty.FFI.Terminal
@@ -190,7 +198,32 @@ structs =
     StructRow ghosttyFormatterScreenExtraLayout aScreenExtra,
     StructRow ghosttyFormatterTerminalExtraLayout aTerminalExtra,
     StructRow ghosttyFormatterTerminalOptionsLayout $
-      GhosttyFormatterTerminalOptions 0x40 GhosttyFormatterFormatVt 1 1 aTerminalExtra (addr 0x0102030405)
+      GhosttyFormatterTerminalOptions 0x40 GhosttyFormatterFormatVt 1 1 aTerminalExtra (addr 0x0102030405),
+    -- color.h
+    StructRow ghosttyColorPaletteMaskLayout (GhosttyColorPaletteMask [0x0102030405, 0x0607, 0x08, 0x090a0b0c0d0e0f10]),
+    StructRow ghosttyColorX11EntryLayout (GhosttyColorX11Entry (addr 0x0102030405) aRgb),
+    -- io.h, paste.h
+    StructRow ghosttyReaderLayout (GhosttyReader (funAddr 0x0102030405) (addr 0x060708090a)),
+    StructRow ghosttyMimeReaderLayout aMimeReader,
+    StructRow ghosttyPasteLayout $
+      GhosttyPaste
+        0x38
+        GhosttyClipboardLocationPrimary
+        GhosttyPasteSourceText
+        (addr 0x0102030405)
+        3
+        aMimeReader
+        1,
+    -- mouse/event.h, mouse/encoder.h
+    StructRow ghosttyMousePositionLayout (GhosttyMousePosition 12.5 (-3.25)),
+    StructRow ghosttyMouseEncoderSizeLayout (GhosttyMouseEncoderSize 0x28 1920 1080 9 18 1 2 3 4),
+    -- sgr.h
+    StructRow ghosttySgrUnknownLayout anSgrUnknown,
+    StructRow ghosttySgrAttributeLayout (SgrAttrUnknown anSgrUnknown),
+    StructRow ghosttySgrAttributeLayout (SgrAttrUnderline GhosttySgrUnderlineCurly),
+    StructRow ghosttySgrAttributeLayout (SgrAttrDirectColorBg aRgb),
+    StructRow ghosttySgrAttributeLayout (SgrAttrFg256 0x0a),
+    StructRow ghosttySgrAttributeLayout SgrAttrStrikethrough
   ]
   where
     aRgb = GhosttyColorRgb 1 2 3
@@ -207,6 +240,8 @@ structs =
     aSelection = GhosttySelection 0x40 aGridRef anotherGridRef 1
     aScreenExtra = GhosttyFormatterScreenExtra 0x10 1 1 1 1 1 1
     aTerminalExtra = GhosttyFormatterTerminalExtra 0x28 1 1 1 1 1 1 aScreenExtra
+    aMimeReader = GhosttyMimeReader (funAddr 0x0b0c0d0e0f) (addr 0x1011121314)
+    anSgrUnknown = GhosttySgrUnknown (addr 0x0102030405) 3 (addr 0x060708090a) 2
 
 -- | A pointer sample: an address no field could hold by accident.
 addr :: Int -> Ptr a

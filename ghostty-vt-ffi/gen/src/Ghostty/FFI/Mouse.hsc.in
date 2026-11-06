@@ -1,0 +1,21 @@
+{-# LANGUAGE CApiFFI #-}
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE ViewPatterns #-}
+
+-- | @include/ghostty/vt/mouse.h@: the mouse pointer shapes a program can ask
+-- for (OSC 22), which a terminal reports through
+-- @GHOSTTY_TERMINAL_DATA_MOUSE_SHAPE@. The header's events and encoder are
+-- "Ghostty.FFI.Mouse.Event" and "Ghostty.FFI.Mouse.Encoder".
+module Ghostty.FFI.Mouse
+  ( -- * Shapes
+    {{xenum mouse.h GhosttyMouseShape}}
+  )
+where
+
+import Foreign.C.Types (CInt (..))
+import Foreign.Storable (Storable (..))
+import Ghostty.FFI.Layout (CEnum (..), unnamed)
+
+#include <gvtffi_shims.h>
+
+{{enum mouse.h GhosttyMouseShape}}

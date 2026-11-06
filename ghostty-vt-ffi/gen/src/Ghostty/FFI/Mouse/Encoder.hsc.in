@@ -1,0 +1,96 @@
+{-# LANGUAGE CApiFFI #-}
+{-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE ViewPatterns #-}
+
+-- | @include/ghostty/vt/mouse/encoder.h@: encoding a mouse event
+-- ("Ghostty.FFI.Mouse.Event") as the bytes a terminal program reads, in the
+-- tracking mode and format the encoder's options (or a terminal's modes) say.
+--
+-- Every call here is @unsafe@: none calls back into Haskell, and an encode
+-- writes one short sequence.
+module Ghostty.FFI.Mouse.Encoder
+  ( -- * Handles
+    GhosttyMouseEncoder (..),
+    GhosttyMouseEncoderImpl,
+
+    -- * Options
+    {{xenum mouse/encoder.h GhosttyMouseTrackingMode}}
+    {{xenum mouse/encoder.h GhosttyMouseFormat}}
+    {{xstruct mouse/encoder.h GhosttyMouseEncoderSize}}
+    {{xenum mouse/encoder.h GhosttyMouseEncoderOption}}
+
+    -- * Encoders
+    ghosttyMouseEncoderNew,
+    ghosttyMouseEncoderFree,
+    ghosttyMouseEncoderSetopt,
+    ghosttyMouseEncoderSetoptFromTerminal,
+    ghosttyMouseEncoderReset,
+    ghosttyMouseEncoderEncode,
+  )
+where
+
+import Foreign.C.Types (CChar, CInt (..), CSize (..))
+import Foreign.Ptr (Ptr)
+import Foreign.Storable (Storable (..))
+import Ghostty.FFI.Allocator (GhosttyAllocator)
+import Ghostty.FFI.Layout (CEnum (..), CField (..), CStruct (..), unnamed)
+import Ghostty.FFI.Mouse.Event (GhosttyMouseEvent (..))
+import Ghostty.FFI.Terminal.Handle (GhosttyTerminal (..))
+import Ghostty.FFI.Types (GhosttyResult (..))
+
+#include <gvtffi_shims.h>
+
+-- * Handles
+
+-- | The C side of a 'GhosttyMouseEncoder'. Never dereferenced.
+data GhosttyMouseEncoderImpl
+
+-- | @GhosttyMouseEncoder@: a mouse encoder, from 'ghosttyMouseEncoderNew' and
+-- released by 'ghosttyMouseEncoderFree'.
+newtype GhosttyMouseEncoder = GhosttyMouseEncoder (Ptr GhosttyMouseEncoderImpl)
+  deriving stock (Eq, Show)
+  deriving newtype (Storable)
+
+-- * Options
+
+{{enum mouse/encoder.h GhosttyMouseTrackingMode}}
+{{enum mouse/encoder.h GhosttyMouseFormat}}
+{{struct mouse/encoder.h GhosttyMouseEncoderSize}}
+{{enum mouse/encoder.h GhosttyMouseEncoderOption}}
+-- * Encoders
+
+-- | @ghostty_mouse_encoder_new@: an encoder with default options, with the
+-- allocator (null for the default). @unsafe@: it does not call back into
+-- Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_mouse_encoder_new"
+  ghosttyMouseEncoderNew :: Ptr GhosttyAllocator -> Ptr GhosttyMouseEncoder -> IO GhosttyResult
+
+-- | @ghostty_mouse_encoder_free@ (null is a no-op). @unsafe@: it does not call
+-- back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_mouse_encoder_free"
+  ghosttyMouseEncoderFree :: GhosttyMouseEncoder -> IO ()
+
+-- | @ghostty_mouse_encoder_setopt@: set an option, the value's type depending
+-- on the option ('GhosttyMouseEncoderOption' says which). @unsafe@: it does
+-- not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_mouse_encoder_setopt"
+  ghosttyMouseEncoderSetopt :: GhosttyMouseEncoder -> GhosttyMouseEncoderOption -> Ptr () -> IO ()
+
+-- | @ghostty_mouse_encoder_setopt_from_terminal@: set the tracking mode and
+-- format from a terminal's modes; the size and the any-button state are left
+-- as they are. @unsafe@: it reads the terminal and calls nothing back.
+foreign import capi unsafe "ghostty/vt.h ghostty_mouse_encoder_setopt_from_terminal"
+  ghosttyMouseEncoderSetoptFromTerminal :: GhosttyMouseEncoder -> GhosttyTerminal -> IO ()
+
+-- | @ghostty_mouse_encoder_reset@: forget the last cell motion was reported
+-- for (null is a no-op). @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_mouse_encoder_reset"
+  ghosttyMouseEncoderReset :: GhosttyMouseEncoder -> IO ()
+
+-- | @ghostty_mouse_encoder_encode@: encode an event into a buffer. An event the
+-- tracking mode does not report encodes to nothing, with success. A null
+-- buffer, or one too small, returns @GHOSTTY_OUT_OF_SPACE@ with the size
+-- needed. @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_mouse_encoder_encode"
+  ghosttyMouseEncoderEncode :: GhosttyMouseEncoder -> GhosttyMouseEvent -> Ptr CChar -> CSize -> Ptr CSize -> IO GhosttyResult

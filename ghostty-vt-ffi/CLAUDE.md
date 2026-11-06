@@ -8,7 +8,8 @@ Only `Ghostty.Effectful.**` and `Test.Ghostty.**` may import it (§2.6 rule 1).
   `python3 scripts/gen-ghostty-ffi.py` renders every template (the module by hand, with
   `{{directive}}` lines for the mechanical parts; the script's docstring lists them), and CI's
   `--check` fails on a stale or hand-edited output. A generated file says so on its first line.
-  `Layout.hs`, `Allocator.hs` and `Terminal/Handle.hs` are hand-written. So is everything in a
+  `Layout.hs`, `Allocator.hs`, `Terminal/Handle.hs`, `KittyGraphics.hs` and `Unicode.hs` are
+  hand-written (they have nothing to generate). So is everything in a
   template outside its directives: imports, handles, tagged unions and structs with arrays.
 - **Every function and type in the pinned headers is bound or listed in `coverage.txt`** with the
   PLAN.md step that binds it (`scripts/check-ghostty-coverage.py`). Binding a header's last symbol
@@ -38,11 +39,17 @@ Only `Ghostty.Effectful.**` and `Test.Ghostty.**` may import it (§2.6 rule 1).
 - **One module per header**, partially bound when only part is needed yet; the module header says
   which part. `terminal.h`'s callbacks are in `Ghostty.FFI.Terminal.Callbacks`.
 - Behavioural tests share `Test.Ghostty.FFI.Support` (a terminal per test, sized structs, the
-  `…_buf` size protocol). Each shim has a test that it does what the call it wraps does.
+  `…_buf` size protocol). Each shim has a test that it does what the call it wraps does. An
+  encoder's test expects the sequence its spec gives, worked out before running it. A callback that
+  receives a struct by value (`GhosttyMimeReaderFn`) can only be C: the test's is in
+  `test/cbits/gvtffi_test.c`.
 - Names (the generator's rules): a pattern is its C name in CamelCase (`GHOSTTY_TERMINAL_OPT_BELL`
   → `GhosttyTerminalOptBell`), and a record field is the C field in camelCase (`data` → `data_`).
   Where a pattern's name is already a type's, it takes a `Tag` suffix
-  (`GhosttyTerminalResizeWindowGridTag`) and its doc says so.
+  (`GhosttyTerminalResizeWindowGridTag`), and where it is its enum's `Unknown` view, a `Value`
+  suffix (`GhosttyMouseButtonUnknownValue`); its doc says so. Constants a header `#define`s over a
+  scalar typedef (`GhosttyMods`, `GhosttyKittyKeyFlags`) are patterns of that synonym, from
+  `{{defines}}`; they are not enums, so they have no `COMPLETE` set or descriptor.
 - **A tagged union is a sum** (§3.3), with arms named after the union's members without the
   `Ghostty` prefix (`ScrollViewportDelta`) and an `…Other tag` arm. C `bool` is `CBool`.
 - **A function that takes or returns a struct by value calls a shim** in
@@ -53,7 +60,8 @@ Only `Ghostty.Effectful.**` and `Test.Ghostty.**` may import it (§2.6 rule 1).
 - **Handles are bound where their header is used**, not in `Types` though `types.h` declares them:
   a newtype over `Ptr` to an empty `…Impl` type, with a derived `Storable` (`GhosttyRenderState` in
   `Render`). `GhosttyTerminal` is the exception, in `Terminal.Handle`, so `GridRef` and `Selection`
-  can name it without a cycle.
+  can name it without a cycle. `GhosttyKittyGraphics` is in `KittyGraphics`, the header that uses
+  it, though only the handle is bound there yet.
 - **`safe` for long calls too.** A call that runs no callback is still `safe` when it can walk the
   scrollback (`terminal_compress`, the formatter's and selection's format calls): an `unsafe` one
   holds up every Haskell thread at the next GC.

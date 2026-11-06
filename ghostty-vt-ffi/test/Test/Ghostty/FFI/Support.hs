@@ -15,8 +15,7 @@ import Control.Exception (bracket, finally)
 import Data.ByteString qualified as BS
 import Data.ByteString.Unsafe qualified as BSU
 import Foreign.C.Types (CSize)
-import Foreign.Marshal.Alloc (alloca, allocaBytesAligned)
-import Foreign.Marshal.Array (allocaArray)
+import Foreign.Marshal.Alloc (alloca, allocaBytes, allocaBytesAligned)
 import Foreign.Marshal.Utils (fillBytes)
 import Foreign.Ptr (FunPtr, Ptr, castPtr, freeHaskellFunPtr, nullPtr)
 import Foreign.Storable (Storable (..))
@@ -55,13 +54,16 @@ withSized l act = allocaBytesAligned l.size l.align $ \p -> pokeSized l p >> act
 -- | Call a @…_buf@ function twice, as its protocol says: with a null buffer
 -- for the size, which must be @GHOSTTY_OUT_OF_SPACE@ (or success when the
 -- output is empty), then with a buffer of that size.
-bytesVia :: (Ptr Word8 -> CSize -> Ptr CSize -> IO GhosttyResult) -> IO ByteString
+--
+-- The buffer's element type is the header's (@uint8_t@ or @char@), so it is
+-- left open.
+bytesVia :: (Ptr c -> CSize -> Ptr CSize -> IO GhosttyResult) -> IO ByteString
 bytesVia call = alloca $ \np -> do
   call nullPtr 0 np >>= \case
     GhosttySuccess -> pure BS.empty
     GhosttyOutOfSpace -> do
       n <- peek np
-      allocaArray (fromIntegral n) $ \buf -> do
+      allocaBytes (fromIntegral n) $ \buf -> do
         call buf n np >>= (@?= GhosttySuccess)
         written <- peek np
         BS.packCStringLen (castPtr buf, fromIntegral written)

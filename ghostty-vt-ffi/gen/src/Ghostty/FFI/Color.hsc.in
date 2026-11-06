@@ -1,21 +1,152 @@
 {-# LANGUAGE CApiFFI #-}
 {-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE PatternSynonyms #-}
 
--- | @include/ghostty/vt/color.h@, the part terminals and styles need: an RGB
--- colour and a palette index. Colour parsing and palette generation arrive
--- with M1.3.
+-- | @include/ghostty/vt/color.h@: RGB colours and palette indices; parsing
+-- colours in Ghostty's syntax and X11 names; the default palette and a
+-- palette generated from base colours; luminance and contrast.
+--
+-- Every call here is @unsafe@: none calls back into Haskell, and the longest,
+-- palette generation, is a fixed 256 entries.
 module Ghostty.FFI.Color
   ( -- * Colours
     {{xstruct color.h GhosttyColorRgb}}
+    ghosttyColorRgbGet,
+
+    -- * Palettes
     GhosttyColorPaletteIndex,
+    {{xdefines color.h GhosttyColorPaletteIndex GHOSTTY_COLOR_NAMED_}}
+    GhosttyColorPaletteMask (..),
+    ghosttyColorPaletteMaskLayout,
+    ghosttyColorPaletteDefault,
+    ghosttyColorPaletteGenerate,
+
+    -- * Parsing
+    ghosttyColorParse,
+    ghosttyColorParseX11,
+    ghosttyColorParsePaletteEntry,
+
+    -- * X11 names
+    {{xstruct color.h GhosttyColorX11Entry}}
+    ghosttyColorX11Names,
+    ghosttyColorX11NameCount,
+
+    -- * Luminance and contrast
+    ghosttyColorLuminance,
+    ghosttyColorPerceivedLuminance,
+    ghosttyColorContrast,
   )
 where
 
+import Foreign.C.ConstPtr (ConstPtr (..))
+import Foreign.C.Types (CBool (..), CChar, CDouble (..), CInt (..), CSize (..))
+import Foreign.Marshal.Array (peekArray, pokeArray)
+import Foreign.Ptr (Ptr, plusPtr)
 import Foreign.Storable (Storable (..))
 import Ghostty.FFI.Layout (CField (..), CStruct (..))
+import Ghostty.FFI.Types (GhosttyResult (..))
 
 #include <gvtffi_shims.h>
 
+-- * Colours
+
 {{struct color.h GhosttyColorRgb}}
--- | @GhosttyColorPaletteIndex@: an index into the 256-colour palette.
+-- | @ghostty_color_rgb_get@: a colour's components through three out pointers.
+-- For a binding that cannot read struct fields; this one can. @unsafe@: it
+-- does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_color_rgb_get"
+  ghosttyColorRgbGet :: Ptr GhosttyColorRgb -> Ptr Word8 -> Ptr Word8 -> Ptr Word8 -> IO ()
+
+-- * Palettes
+
+-- | @GhosttyColorPaletteIndex@: an index into the 256-colour palette. The
+-- sixteen named ones are the patterns below.
 type GhosttyColorPaletteIndex = Word8
+
+{{defines color.h GhosttyColorPaletteIndex GHOSTTY_COLOR_NAMED_}}
+-- | @GhosttyColorPaletteMask@: a set of palette indices, 256 bits. Index @i@ is
+-- in it when bit @i mod 64@ of word @i div 64@ is set.
+newtype GhosttyColorPaletteMask = GhosttyColorPaletteMask
+  { -- | @bits@: the whole fixed-size array of words. A 'peek' reads every
+    -- element; a 'poke' writes the list's first elements and zeroes the rest.
+    bits :: [Word64]
+  }
+  deriving stock (Eq, Show)
+
+-- | How many elements @bits@ has in C.
+bitsLen :: Int
+bitsLen = (#const GVTFFI_ARRAY_LEN(GhosttyColorPaletteMask, bits))
+
+instance Storable GhosttyColorPaletteMask where
+  sizeOf _ = (#size GhosttyColorPaletteMask)
+  alignment _ = (#alignment GhosttyColorPaletteMask)
+  peek p = GhosttyColorPaletteMask <$> peekArray bitsLen ((#ptr GhosttyColorPaletteMask, bits) p)
+  poke p m = pokeArray ((#ptr GhosttyColorPaletteMask, bits) p) (take bitsLen (m.bits <> repeat 0))
+
+{{layout GhosttyColorPaletteMask bits}}
+-- | @ghostty_color_palette_default@: write Ghostty's default 256-colour palette
+-- to an array of exactly 256 colours. @unsafe@: it does not call back into
+-- Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_color_palette_default"
+  ghosttyColorPaletteDefault :: Ptr GhosttyColorRgb -> IO ()
+
+-- | @ghostty_color_palette_generate@: a 256-colour palette from a base one
+-- (null for the default), keeping indices 0–15 and those in the mask (null
+-- for none), generating the colour cube and the grey ramp from the background
+-- and foreground. For a light theme, the flag (@harmonious@) keeps the
+-- background-to-foreground order. The output may be the base. @unsafe@: it
+-- does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_color_palette_generate"
+  ghosttyColorPaletteGenerate :: Ptr GhosttyColorRgb -> Ptr GhosttyColorPaletteMask -> Ptr GhosttyColorRgb -> Ptr GhosttyColorRgb -> CBool -> Ptr GhosttyColorRgb -> IO ()
+
+-- * Parsing
+
+-- | @ghostty_color_parse@: parse a colour in Ghostty's syntax: an X11 name,
+-- hex in 3, 6, 9 or 12 digits, or @rgb:@ / @rgbi:@. @GHOSTTY_INVALID_VALUE@ if
+-- it does not parse. @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_color_parse"
+  ghosttyColorParse :: Ptr CChar -> CSize -> Ptr GhosttyColorRgb -> IO GhosttyResult
+
+-- | @ghostty_color_parse_x11@: parse an X11 colour name, case-insensitively;
+-- not hex. @GHOSTTY_INVALID_VALUE@ if no colour has the name. @unsafe@: it
+-- does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_color_parse_x11"
+  ghosttyColorParseX11 :: Ptr CChar -> CSize -> Ptr GhosttyColorRgb -> IO GhosttyResult
+
+-- | @ghostty_color_parse_palette_entry@: parse a palette entry, @N=COLOR@, into
+-- its index and colour. @GHOSTTY_INVALID_VALUE@ on any failure. @unsafe@: it
+-- does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_color_parse_palette_entry"
+  ghosttyColorParsePaletteEntry :: Ptr CChar -> CSize -> Ptr Word8 -> Ptr GhosttyColorRgb -> IO GhosttyResult
+
+-- * X11 names
+
+{{struct color.h GhosttyColorX11Entry}}
+-- | @ghostty_color_x11_names@: Ghostty's X11 colour table, static, in @rgb.txt@
+-- order, ended by an entry whose name is null. @unsafe@: it does not call
+-- back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_color_x11_names"
+  ghosttyColorX11Names :: IO (ConstPtr GhosttyColorX11Entry)
+
+-- | @ghostty_color_x11_name_count@: the table's entries, not counting the end.
+-- @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_color_x11_name_count"
+  ghosttyColorX11NameCount :: IO CSize
+
+-- * Luminance and contrast
+
+-- | @ghostty_color_luminance@: W3C relative luminance, 0 to 1. @unsafe@: it
+-- does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_color_luminance"
+  ghosttyColorLuminance :: Ptr GhosttyColorRgb -> IO CDouble
+
+-- | @ghostty_color_perceived_luminance@: perceived luminance, 0 to 1; Ghostty
+-- takes a background above 0.5 as light. @unsafe@: it does not call back into
+-- Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_color_perceived_luminance"
+  ghosttyColorPerceivedLuminance :: Ptr GhosttyColorRgb -> IO CDouble
+
+-- | @ghostty_color_contrast@: the WCAG contrast ratio of two colours, 1 to 21.
+-- @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_color_contrast"
+  ghosttyColorContrast :: Ptr GhosttyColorRgb -> Ptr GhosttyColorRgb -> IO CDouble

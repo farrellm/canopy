@@ -1,9 +1,9 @@
 {-# LANGUAGE CApiFFI #-}
 {-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE ViewPatterns #-}
 
--- | @include/ghostty/vt/modes.h@, the part the terminal's mode keys need:
--- the packed mode type, its helpers, and the named modes. Mode reports arrive
--- with M1.3's encoders.
+-- | @include/ghostty/vt/modes.h@: the packed mode type, its helpers, the
+-- named modes, and encoding a mode report (DECRPM).
 --
 -- A mode is not a C enum but a @uint16_t@ the header builds with a macro, so
 -- the named modes are patterns over a plain number and have no @COMPLETE@
@@ -17,10 +17,18 @@ module Ghostty.FFI.Modes
 
     -- * Named modes
     {{xmodes}}
+
+    -- * Mode reports
+    {{xenum modes.h GhosttyModeReportState}}
+    ghosttyModeReportEncode,
   )
 where
 
-import Foreign.C.Types (CBool (..))
+import Foreign.C.Types (CBool (..), CChar, CInt (..), CSize (..))
+import Foreign.Ptr (Ptr)
+import Foreign.Storable (Storable (..))
+import Ghostty.FFI.Layout (CEnum (..), unnamed)
+import Ghostty.FFI.Types (GhosttyResult (..))
 
 #include <gvtffi_shims.h>
 
@@ -45,3 +53,12 @@ foreign import capi unsafe "ghostty/vt.h ghostty_mode_ansi"
   ghosttyModeAnsi :: GhosttyMode -> CBool
 
 {{modes}}
+-- * Mode reports
+
+{{enum modes.h GhosttyModeReportState}}
+-- | @ghostty_mode_report_encode@: encode a DECRPM reply (@CSI ? Ps1 ; Ps2 $ y@
+-- for a DEC private mode, without the @?@ for an ANSI one) into a buffer. A
+-- null buffer, or one too small, returns @GHOSTTY_OUT_OF_SPACE@ with the size
+-- needed. @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_mode_report_encode"
+  ghosttyModeReportEncode :: GhosttyMode -> GhosttyModeReportState -> Ptr CChar -> CSize -> Ptr CSize -> IO GhosttyResult

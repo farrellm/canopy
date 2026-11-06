@@ -2,15 +2,32 @@
 {-# LANGUAGE CApiFFI #-}
 {-# LANGUAGE DuplicateRecordFields #-}
 
--- | @include/ghostty/vt/io.h@, the part the terminal needs: the writer that
--- @ghostty_terminal_continuation_write@ calls. Readers arrive with the step
--- that first needs one.
+-- | @include/ghostty/vt/io.h@: the byte-stream callbacks the library's
+-- streaming calls take, each a function pointer with its userdata. A writer
+-- receives output (@ghostty_terminal_continuation_write@, the formatter); a
+-- MIME reader produces a paste's data on demand ("Ghostty.FFI.Paste"); a
+-- reader is a byte source (snapshot restore, PLAN.md's M6.10).
+--
+-- A 'GhosttyMimeReaderFn' receives a 'GhosttyString' and a 'GhosttyWriter' by
+-- value, which no Haskell function can, so it has no @wrapper@ and has to be
+-- written in C (DESIGN.md §3.3).
 module Ghostty.FFI.Io
-  ( -- * Writers
+  ( -- * Readers
+    GhosttyReader (..),
+    ghosttyReaderLayout,
+    GhosttyReaderFn,
+    mkGhosttyReaderFn,
+
+    -- * Writers
     GhosttyWriter (..),
     ghosttyWriterLayout,
     GhosttyWriterFn,
     mkGhosttyWriterFn,
+
+    -- * MIME readers
+    GhosttyMimeReader (..),
+    ghosttyMimeReaderLayout,
+    GhosttyMimeReaderFn,
   )
 where
 
@@ -18,8 +35,51 @@ import Foreign.C.Types (CBool (..), CSize (..))
 import Foreign.Ptr (FunPtr, Ptr)
 import Foreign.Storable (Storable (..))
 import Ghostty.FFI.Layout (CField (..), CStruct (..))
+import Ghostty.FFI.Types (GhosttyString)
 
 #include <gvtffi_shims.h>
+
+-- | @GhosttyReaderFn@: Read bytes from a source. The callback must set @out_read@ to a value no greater than @capacity@ when returning true. A positive value reports progress; it may be less than capacity and does not indicate end-of-file. A zero value is definitive end-of-file. It must not be used to report temporary input starvation or a would-block condition.
+type GhosttyReaderFn = FunPtr (Ptr () -> Ptr Word8 -> CSize -> Ptr CSize -> IO CBool)
+
+-- | Make a 'GhosttyReaderFn' from a Haskell function. Free it with
+-- 'Foreign.Ptr.freeHaskellFunPtr' once nothing can call it. A call that
+-- runs it must be @safe@ (§3.3).
+foreign import ccall "wrapper"
+  mkGhosttyReaderFn :: (Ptr () -> Ptr Word8 -> CSize -> Ptr CSize -> IO CBool) -> IO GhosttyReaderFn
+
+-- | @GhosttyReader@: A byte source callback and its opaque context.
+data GhosttyReader = GhosttyReader
+  { -- | @read@.
+    read :: GhosttyReaderFn,
+    -- | @userdata@.
+    userdata :: Ptr ()
+  }
+  deriving stock (Eq, Show)
+
+instance Storable GhosttyReader where
+  sizeOf _ = (#size GhosttyReader)
+  alignment _ = (#alignment GhosttyReader)
+  peek p =
+    GhosttyReader
+      <$> (#peek GhosttyReader, read) p
+      <*> (#peek GhosttyReader, userdata) p
+  poke p s = do
+    (#poke GhosttyReader, read) p s.read
+    (#poke GhosttyReader, userdata) p s.userdata
+
+-- | The layout of @GhosttyReader@ as compiled, for the layout test (§3.4).
+ghosttyReaderLayout :: CStruct
+ghosttyReaderLayout =
+  CStruct
+    { name = "GhosttyReader",
+      size = (#size GhosttyReader),
+      align = (#alignment GhosttyReader),
+      fields =
+        [ CField "read" (#offset GhosttyReader, read) (#const GVTFFI_FIELD_SIZE(GhosttyReader, read)),
+          CField "userdata" (#offset GhosttyReader, userdata) (#const GVTFFI_FIELD_SIZE(GhosttyReader, userdata))
+        ]
+    }
 
 -- | @GhosttyWriterFn@: Write bytes to a destination. Returning true means all @len@ bytes were accepted. Returning false reports a fatal write error. A callback wrapping an interface that permits partial writes must retry internally until the full slice is accepted or an error occurs.
 type GhosttyWriterFn = FunPtr (Ptr () -> Ptr Word8 -> CSize -> IO CBool)
@@ -60,6 +120,45 @@ ghosttyWriterLayout =
       fields =
         [ CField "write" (#offset GhosttyWriter, write) (#const GVTFFI_FIELD_SIZE(GhosttyWriter, write)),
           CField "userdata" (#offset GhosttyWriter, userdata) (#const GVTFFI_FIELD_SIZE(GhosttyWriter, userdata))
+        ]
+    }
+
+-- | @GhosttyMimeReaderFn@: Read one MIME-typed representation of some content, streaming its bytes to a writer. The library calls this with the MIME type of the representation it needs. The callback writes all of that representation\'s data to @writer@, in as many calls to @writer.write(writer.userdata, data, len)@ as is convenient (one call with everything or many small pieces both work), and returns true. Nothing written is retained beyond each write call, so the data may be borrowed from anywhere: a pasteboard item, a file being read, a stream.
+--
+-- It receives a @GhosttyString@ and a @GhosttyWriter@ by value, which a @wrapper@ cannot
+-- take, so a function of this type has to be written in C (§3.3).
+type GhosttyMimeReaderFn = FunPtr (Ptr () -> GhosttyString -> GhosttyWriter -> IO CBool)
+
+-- | @GhosttyMimeReader@: A MIME-typed content source callback and its opaque context.
+data GhosttyMimeReader = GhosttyMimeReader
+  { -- | @read@.
+    read :: GhosttyMimeReaderFn,
+    -- | @userdata@.
+    userdata :: Ptr ()
+  }
+  deriving stock (Eq, Show)
+
+instance Storable GhosttyMimeReader where
+  sizeOf _ = (#size GhosttyMimeReader)
+  alignment _ = (#alignment GhosttyMimeReader)
+  peek p =
+    GhosttyMimeReader
+      <$> (#peek GhosttyMimeReader, read) p
+      <*> (#peek GhosttyMimeReader, userdata) p
+  poke p s = do
+    (#poke GhosttyMimeReader, read) p s.read
+    (#poke GhosttyMimeReader, userdata) p s.userdata
+
+-- | The layout of @GhosttyMimeReader@ as compiled, for the layout test (§3.4).
+ghosttyMimeReaderLayout :: CStruct
+ghosttyMimeReaderLayout =
+  CStruct
+    { name = "GhosttyMimeReader",
+      size = (#size GhosttyMimeReader),
+      align = (#alignment GhosttyMimeReader),
+      fields =
+        [ CField "read" (#offset GhosttyMimeReader, read) (#const GVTFFI_FIELD_SIZE(GhosttyMimeReader, read)),
+          CField "userdata" (#offset GhosttyMimeReader, userdata) (#const GVTFFI_FIELD_SIZE(GhosttyMimeReader, userdata))
         ]
     }
 
