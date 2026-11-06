@@ -21,11 +21,13 @@ module Ghostty.FFI.Types
 
     -- * Strings
     GhosttyString (..),
+    ghosttyStringBytes,
   )
 where
 
+import Data.ByteString qualified as BS
 import Foreign.C.Types (CInt (..), CSize (..))
-import Foreign.Ptr (Ptr)
+import Foreign.Ptr (Ptr, castPtr, nullPtr)
 import Foreign.Storable (Storable (..))
 
 #include <ghostty/vt.h>
@@ -121,3 +123,12 @@ instance Storable GhosttyString where
   poke p s = do
     (#poke GhosttyString, ptr) p s.ptr
     (#poke GhosttyString, len) p s.len
+
+-- | Copy a borrowed string's bytes out, while the pointer is still valid. A
+-- null pointer is the empty string, whatever its length says. The one
+-- marshalling helper this package has (DESIGN.md §3.3): every reader of a
+-- 'GhosttyString' goes through it.
+ghosttyStringBytes :: GhosttyString -> IO ByteString
+ghosttyStringBytes s
+  | s.ptr == nullPtr = pure BS.empty
+  | otherwise = BS.packCStringLen (castPtr s.ptr, fromIntegral s.len)

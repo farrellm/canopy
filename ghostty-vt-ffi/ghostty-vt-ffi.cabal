@@ -48,6 +48,7 @@ library
   build-tool-depends: hsc2hs:hsc2hs
   build-depends:
     , base ^>=4.21.2.0
+    , bytestring ^>=0.12
     , canopy-prelude
 
   -- A missing or wrong library fails at configure time (§3.1). The range
@@ -73,11 +74,11 @@ test-suite ghostty-vt-ffi-test
   other-modules:    Test.Ghostty.FFI.BuildInfo
   build-depends:
     , base ^>=4.21.2.0
-    , bytestring ^>=0.12
     , canopy-prelude
     , ghostty-vt-ffi
     , tasty ^>=1.5
     , tasty-hunit ^>=0.10.2
+    , template-haskell ^>=2.23
     , text ^>=2.1
 
   mixins:

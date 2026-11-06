@@ -53,11 +53,16 @@ if [[ -z $zig ]] || ! zig_ok "$zig"; then
   zig=$zdir/zig
   if [[ ! -x $zig ]]; then
     echo "build-libghostty: fetching Zig $ZIG_VERSION" >&2
-    mkdir -p "$zdir"
+    # Unpacked beside $zdir and moved into place whole, so an interrupted
+    # fetch never leaves a zig binary without its lib/ for the next run.
+    mkdir -p "$root/_deps/zig"
     tarball=$root/_deps/zig/zig-$platform-$ZIG_VERSION.tar.xz
     curl -sSfL -o "$tarball" "https://ziglang.org/download/$ZIG_VERSION/zig-$platform-$ZIG_VERSION.tar.xz"
     echo "$sha  $tarball" | sha256sum -c --quiet - >&2
-    tar -xJf "$tarball" -C "$zdir" --strip-components=1
+    rm -rf "$zdir" "$zdir.partial"
+    mkdir -p "$zdir.partial"
+    tar -xJf "$tarball" -C "$zdir.partial" --strip-components=1
+    mv "$zdir.partial" "$zdir"
     rm -f "$tarball"
   fi
 fi
@@ -78,12 +83,6 @@ fi
 # writes the user's ~/.cache/zig.
 export ZIG_GLOBAL_CACHE_DIR=$root/_deps/zig-cache
 
-# Zig's own fetcher is bypassed: in Zig 0.17.1 it fails inside `zig build` with
-# TlsInitializationFailed against deps.files.ghostty.org on some machines, every
-# time. prefetch-zig-deps.py fills the cache with curl instead, and zig build
-# checks every package's hash against build.zig.zon.
-python3 -I "$root/scripts/prefetch-zig-deps.py" "$src" "$ZIG_GLOBAL_CACHE_DIR"
-
 # Stamp the pin into the library (DESIGN.md §3.4). libghostty-vt's build info
 # reports its own version (build.zig's lib_version, e.g. 0.1.0-dev) with no
 # build metadata unless one is given, so the commit goes in as semver build
@@ -93,9 +92,31 @@ lib_version=$(sed -nE 's/^const lib_version = "([^"+]+)(\+[^"]*)?";$/\1/p' "$src
   echo "build-libghostty: no lib_version in build.zig; has the build changed?" >&2
   exit 1
 }
+build_opts=(-Demit-lib-vt "-Doptimize=ReleaseFast" "-Dlib-version-string=$lib_version+$commit")
 
+# Zig's fetcher fails in Zig 0.17.1 with TlsInitializationFailed against
+# deps.files.ghostty.org on some machines, every time. So the build runs, and
+# each package it fails to fetch, which it names by its build.zig.zon `.url`, is
+# fetched with curl by prefetch-zig-deps.py, and the build runs again. Only what
+# -Demit-lib-vt asks for is fetched, not ghostty's lazy dependencies for the app
+# (GTK, imgui, fonts, ...). A lazy dependency is asked for only once its parent
+# is present, so this can take a few rounds. `zig build --fetch` is not enough:
+# it misses lazy dependencies that the build steps ask for. zig build checks
+# every package's hash.
+log=$root/_deps/ghostty/build.log
 echo "build-libghostty: building libghostty-vt $lib_version+$commit" >&2
-(cd "$src" && "$zig" build -Demit-lib-vt -Doptimize=ReleaseFast \
-  -Dlib-version-string="$lib_version+$commit" --prefix "$prefix") >&2
+for round in 1 2 3 4 5 6 7 8; do
+  if (cd "$src" && "$zig" build "${build_opts[@]}" --prefix "$prefix") >"$log" 2>&1; then
+    break
+  fi
+  mapfile -t urls < <(grep -oE '\.url = "[^"]+"' "$log" | sed -E 's/^\.url = "(.*)"$/\1/' | sort -u)
+  if ((${#urls[@]} == 0)) || ((round == 8)); then
+    cat "$log" >&2
+    echo "build-libghostty: zig build failed (log: $log)" >&2
+    exit 1
+  fi
+  echo "build-libghostty: fetching ${#urls[@]} Zig package(s) with curl (round $round)" >&2
+  python3 -I "$root/scripts/prefetch-zig-deps.py" "$src" "$ZIG_GLOBAL_CACHE_DIR" "${urls[@]}"
+done
 touch "$prefix/.complete"
 emit

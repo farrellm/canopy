@@ -251,7 +251,9 @@ The rules, by module name across all packages:
    import `Canopy.Child.**`, `Canopy.Lsp.Transport`, `Canopy.Syntax.GrammarStore`,
    `TreeSitter.Parse`, or any `Effectful.Concurrent.**`. It sees those subsystems only through their
    pure model modules. (It *may* import `TreeSitter.Tree`, `.Node` and `.Query`: their reads are pure
-   functions, §5B.2, and the model holds the current input's `Tree`.)
+   functions, §5B.2, and the model holds the current input's `Tree`.) The allow-list does not include
+   `Main`: every executable's and test suite's `Main` has that one name, so lint trusts it with
+   nothing, and canopy's `Main` reaches these only through `Canopy.Cli` and `Canopy.App.Run`.
 5. **`TreeSitter.FFI.**` is private to `TreeSitter.**`** (and `Test.TreeSitter.**`), as rule 1 does for
    ghostty. Nothing in canopy sees a `TSNode` or a raw pointer. `TreeSitter.Internal.Pure` (§5B.2) is
    private to `TreeSitter.**`.
@@ -338,12 +340,16 @@ Distribution packages do not exist yet, so:
   changes the pin, regenerates the layout baseline (§3.4) and says why.
 - **`scripts/build-libghostty.sh`** fetches that commit and builds into `_deps/ghostty/<commit>/`,
   printing the `PKG_CONFIG_PATH` to export. A `cabal.project.local` is never required. Zig's own
-  package fetcher is not used: in Zig 0.17.1 it fails inside `zig build` with
+  package fetcher is not relied on: in Zig 0.17.1 it fails inside `zig build` with
   `TlsInitializationFailed` against `deps.files.ghostty.org` on some machines, every time, while curl
-  succeeds. `scripts/prefetch-zig-deps.py` fills Zig's cache from ghostty's `build.zig.zon.json`
-  with curl, in the layout `zig build` writes, and `zig build` still checks every hash. (A `zig fetch`
-  entry is no substitute: it keeps the archive's top-level directory, so the build reports a hash
-  mismatch.)
+  succeeds. So the script runs the build, and each package it fails to fetch, named by its `.url`, is
+  fetched with curl by `scripts/prefetch-zig-deps.py` into Zig's cache, in the layout `zig build`
+  writes; then the build runs again, until it stops asking (a lazy dependency is asked for only once
+  its parent is present). Only what `-Demit-lib-vt` asks for is fetched, not the app's lazy GTK,
+  imgui, fonts and so on: 9 of the 37 packages in `build.zig.zon.json`. `zig build --fetch` is not
+  enough to find them: it misses lazy dependencies the build steps ask for. `zig build` still checks
+  every hash. (A `zig fetch` entry is no substitute: it keeps the archive's top-level directory, so
+  the build reports a hash mismatch.)
 - **The package declares `pkgconfig-depends: libghostty-vt >=0.1 && <0.2`.** The pinned commit's
   `libghostty-vt.pc` reports `Version: 0.1.0-dev+<commit>` (`build.zig`'s `lib_version`, stamped
   with the commit, §3.4), which that range admits; cabal resolves the constraint against the pkg-config database, so a missing or wrong library
@@ -402,7 +408,9 @@ from it:
   Haskell is a crash, and that cannot be checked by the compiler.
 - **Raw types only.** `Ptr`, `FunPtr`, `CSize`, `Word8`. No `ForeignPtr`, no exceptions, no `Text`.
   Everything that makes it safe is `ghostty-effectful`'s job; this package's job is to be complete and
-  exactly right.
+  exactly right. The one exception is `ghosttyStringBytes`, which copies a borrowed `GhosttyString`
+  out as a `ByteString` (a null pointer is empty): bytes, not `Text`, so that `ghostty-effectful` and
+  this package's own tests read the C boundary's strings through one function rather than two copies.
 
 ### 3.4 The layout test
 
@@ -1101,7 +1109,7 @@ names, fallbacks from `function.builtin` to `function`) is the application's.
 | C1 engines | `Canopy.Child.Pty`, `Canopy.Child.Process`, `Canopy.Ffi.Pty`; `Canopy.Syntax.GrammarStore`, `Canopy.Syntax.Grammars` (the known grammars' splices); `Canopy.Lsp.Transport`, `.Client`, `.Capabilities`; `Canopy.Watch` | Talk to the outside world; each also exposes a pure model module |
 | C2 domain | `Canopy.Profile.*`, `Canopy.Session.Frame`, `.Block`, `.Transcript`, `.Projection`, `Canopy.Intel.*`; `Canopy.Syntax.Edit`, `.Highlight`, `.Complete`, `.Structure`, `.Indent` (over `tree-sitter-effectful`) | REPL-specific logic and canopy's use of tree-sitter, pure |
 | C3 app core | `Canopy.App.Model`, `.Event`, `.Command`, `.Update`, `.View` | The state machine and the view; pure (§2.6 rule 4) |
-| C4 shell | `Canopy.App.Run`, `Canopy.App.Interpret`, `Canopy.Cli`, `Main` | Wire effects, threads and interpreters |
+| C4 shell | `Canopy.App.Run`, `Canopy.App.Interpret`, `Canopy.Cli`, `Main` | Wire effects, threads and interpreters. `Main` only calls into `Canopy.Cli`: lint trusts no `Main` (§2.6) |
 
 ### 6.2 The PTY
 

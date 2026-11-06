@@ -35,7 +35,7 @@
                Canopy.Child.**, Canopy.Cli, Canopy.Config.**, Canopy.Intel.**,
                Canopy.Lsp.**, Canopy.Optics, Canopy.Profile.**, Canopy.Serve,
                Canopy.Session.**, Canopy.Syntax.**, Canopy.Units, Canopy.Watch,
-               Ghostty.**, Tendril.**, TreeSitter.**, Main, Test.**, Bench.**]
+               Ghostty.**, Tendril.**, TreeSitter.**, Test.**, Bench.**]
 
     # 5. The raw tree-sitter binding is private to the high-level one and its
     #    tests; the one unsafe module is private to the high-level one.

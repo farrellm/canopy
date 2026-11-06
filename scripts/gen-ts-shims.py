@@ -2,7 +2,8 @@
 """Generate pointer-taking C shims for tree-sitter's by-value API (DESIGN.md §5A.2).
 
 GHC's FFI cannot pass or return a struct by value. For every `ts_*` prototype in
-the vendored `api.h` that takes or returns one of BY_VALUE, this writes a
+the vendored `api.h` that takes or returns a struct by value (any struct the
+header defines, `typedef struct T { ... } T;`), this writes a
 `tsffi_*` shim that takes a `const T *` in place of each by-value argument and
 returns a by-value result through a trailing `T *out`:
 
@@ -24,15 +25,10 @@ API_H = PKG / "vendor/tree-sitter/lib/include/tree_sitter/api.h"
 OUT_C = PKG / "cbits/tsffi_shims.c"
 OUT_H = PKG / "include/tsffi_shims.h"
 
-BY_VALUE = {
-    "TSNode",
-    "TSPoint",
-    "TSRange",
-    "TSTreeCursor",
-    "TSInput",
-    "TSParseOptions",
-    "TSLogger",
-}
+# A struct the header defines, and so a type that can cross by value. The
+# opaque handles (`typedef struct TSParser TSParser;`) have no body and only
+# ever cross behind a pointer.
+STRUCT = re.compile(r"\btypedef\s+struct\s+\w*\s*\{[^}]*\}\s*(\w+)\s*;")
 
 PROTO = re.compile(r"^([A-Za-z_][\w\s\*]*?)\b(ts_\w+)\s*\(([^;{)]*)\)\s*;", re.M)
 PARAM = re.compile(r"^(?P<type>.*?[\s\*])(?P<name>\w+)$")
@@ -49,13 +45,13 @@ def norm(s):
     return re.sub(r"\* \*", "**", s).strip()
 
 
-def bare(ty):
+def bare(ty, by_value):
     """The struct name of a by-value type, or None. `const TSNode` counts."""
     t = norm(ty)
     if "*" in t:
         return None
     t = re.sub(r"^const\s+", "", t)
-    return t if t in BY_VALUE else None
+    return t if t in by_value else None
 
 
 def parse(src):
@@ -77,11 +73,11 @@ def parse(src):
     return protos
 
 
-def shim(ret, name, params):
+def shim(ret, name, params, by_value):
     sname = "tsffi_" + name[len("ts_") :]
     decl, call = [], []
     for ty, pname in params:
-        s = bare(ty)
+        s = bare(ty, by_value)
         if s:
             decl.append(f"const {s} *{pname}")
             call.append(f"*{pname}")
@@ -89,7 +85,7 @@ def shim(ret, name, params):
             sep = "" if ty.endswith("*") else " "
             decl.append(f"{ty}{sep}{pname}")
             call.append(pname)
-    rs = bare(ret)
+    rs = bare(ret, by_value)
     if rs:
         decl.append(f"{rs} *out")
         sret = "void"
@@ -112,14 +108,16 @@ BANNER = """\
 
 
 def generate():
-    protos = parse(API_H.read_text())
+    src = API_H.read_text()
+    protos = parse(src)
+    by_value = set(STRUCT.findall(strip_comments(src)))
     if not protos:
         sys.exit(f"gen-ts-shims: no prototypes found in {API_H}")
     version = (PKG / "TREE_SITTER_VERSION").read_text().strip()
     shims = [
-        shim(r, n, ps)
+        shim(r, n, ps, by_value)
         for r, n, ps in protos
-        if bare(r) or any(bare(t) for t, _ in ps)
+        if bare(r, by_value) or any(bare(t, by_value) for t, _ in ps)
     ]
     banner = BANNER.format(api=API_H.relative_to(PKG), version=version, count=len(shims))
     h = [banner, "#ifndef TSFFI_SHIMS_H", "#define TSFFI_SHIMS_H", "",

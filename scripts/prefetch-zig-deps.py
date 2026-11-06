@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
 """Fill Zig's package cache for a ghostty checkout without Zig's HTTP client.
 
-Usage: prefetch-zig-deps.py <ghostty-src> <zig-global-cache-dir>
+Usage: prefetch-zig-deps.py <ghostty-src> <zig-global-cache-dir> <url>...
 
 Zig 0.17.1's fetcher fails inside `zig build` with TlsInitializationFailed
 against deps.files.ghostty.org, on some machines every time, while curl and a
 lone `zig fetch` of the same URL succeed. And a `zig fetch` entry can't be
 used: it keeps the archive's top-level directory, which `zig build` strips, so
-the build reports a hash mismatch. So this downloads every package listed in
-ghostty's build.zig.zon.json with curl (or git, for git+ URLs) and writes it as
-p/<hash>.tar.gz in the layout `zig build` writes: one directory named by the
-hash, holding the archive's contents with a lone top-level directory stripped.
+the build reports a hash mismatch. So this downloads the packages at the given
+URLs, each of which must be listed in ghostty's build.zig.zon.json, with curl
+(or git, for git+ URLs) and writes each as p/<hash>.tar.gz in the layout
+`zig build` writes: one directory named by the hash, holding the archive's
+contents with a lone top-level directory stripped.
+
+The URLs are the ones `zig build` failed to fetch (build-libghostty.sh),
+so only what the libghostty-vt build needs is downloaded, not ghostty's lazy
+dependencies for the app (GTK, imgui, fonts, ...).
 
 Nothing here is trusted: `zig build` recomputes every package's hash from
 these files and fails on a mismatch. Existing entries are left alone.
@@ -51,10 +56,14 @@ def fetch_git(url: str, into: Path) -> None:
 
 
 def main() -> None:
-    if len(sys.argv) != 3:
+    if len(sys.argv) < 4:
         sys.exit(__doc__)
-    src, cache = Path(sys.argv[1]), Path(sys.argv[2])
-    packages = json.loads((src / "build.zig.zon.json").read_text())
+    src, cache, urls = Path(sys.argv[1]), Path(sys.argv[2]), set(sys.argv[3:])
+    listed = json.loads((src / "build.zig.zon.json").read_text())
+    packages = {h: p for h, p in listed.items() if p["url"] in urls}
+    unknown = urls - {p["url"] for p in packages.values()}
+    if unknown:
+        sys.exit(f"prefetch-zig-deps: not in build.zig.zon.json: {sorted(unknown)}")
     store = cache / "p"
     store.mkdir(parents=True, exist_ok=True)
     for hash_, pkg in sorted(packages.items()):
@@ -63,7 +72,9 @@ def main() -> None:
             continue
         url = pkg["url"]
         print(f"prefetch-zig-deps: {pkg['name']} <- {url}", file=sys.stderr)
-        with tempfile.TemporaryDirectory(dir=store) as tmp:
+        # Scratch lives beside p/, not in it, so an interrupted run leaves
+        # nothing in the store but whole entries.
+        with tempfile.TemporaryDirectory(dir=cache) as tmp:
             scratch = Path(tmp)
             into = scratch / hash_
             if url.startswith("git+"):

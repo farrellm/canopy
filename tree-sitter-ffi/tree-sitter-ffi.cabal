@@ -20,6 +20,8 @@ extra-source-files:
   vendor/tree-sitter/lib/include/tree_sitter/*.h
   vendor/tree-sitter/lib/src/**/*.c
   vendor/tree-sitter/lib/src/**/*.h
+  vendor/tree-sitter/lib/src/unicode/LICENSE
+  vendor/tree-sitter/lib/src/wasm-stdlib/libc/LICENSE
 
 -- DESIGN.md §2.4. CI adds -Werror from the command line. The two common stanzas
 -- are copied into every package; scripts/check-common-stanzas.sh keeps them equal.
@@ -59,9 +61,15 @@ library
     vendor/tree-sitter/lib/include
     vendor/tree-sitter/lib/src
 
-  install-includes: tsffi_shims.h
+  -- tsffi_shims.h includes <tree_sitter/api.h>, so both are installed.
+  install-includes:
+    tsffi_shims.h
+    tree_sitter/api.h
+
+  -- No -O here: cabal passes its own optimisation level to the C compiler,
+  -- and a fixed one would override --disable-optimization.
   cc-options:
-    -std=c11 -O2 -D_POSIX_C_SOURCE=200112L -D_DEFAULT_SOURCE
+    -std=c11 -D_POSIX_C_SOURCE=200112L -D_DEFAULT_SOURCE
 
   mixins:
     base hiding (Prelude),
