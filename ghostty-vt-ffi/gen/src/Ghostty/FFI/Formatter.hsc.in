@@ -1,0 +1,96 @@
+{-# LANGUAGE CApiFFI #-}
+{-# LANGUAGE DuplicateRecordFields #-}
+
+-- | @include/ghostty/vt/formatter.h@: formatting a terminal's active screen,
+-- or a selection of it, as plain text, VT sequences or HTML.
+--
+-- A formatter borrows its terminal, which must outlive it, and reads the
+-- terminal's current state at each format call. The output format is
+-- 'Ghostty.FFI.Types.GhosttyFormatterFormat'.
+--
+-- __@safe@ and @unsafe@.__ 'ghosttyFormatterFormat' calls its writer, so it is
+-- @safe@. The other two format calls run no callback, but are @safe@ too: a
+-- format walks the whole screen including the scrollback, which can be
+-- large, and an @unsafe@ call that long would hold up every other Haskell
+-- thread at the next garbage collection (as 'Ghostty.FFI.Terminal.ghosttyTerminalCompress').
+-- Creating and freeing a formatter are @unsafe@.
+module Ghostty.FFI.Formatter
+  ( -- * Handles
+    GhosttyFormatter (..),
+    GhosttyFormatterImpl,
+
+    -- * Options
+    {{xstruct formatter.h GhosttyFormatterScreenExtra}}
+    {{xstruct formatter.h GhosttyFormatterTerminalExtra}}
+    {{xstruct formatter.h GhosttyFormatterTerminalOptions}}
+
+    -- * Formatters
+    ghosttyFormatterTerminalNew,
+    ghosttyFormatterFree,
+    ghosttyFormatterFormat,
+    ghosttyFormatterFormatBuf,
+    ghosttyFormatterFormatAlloc,
+  )
+where
+
+import Foreign.C.Types (CBool (..), CInt (..), CSize (..))
+import Foreign.Ptr (Ptr)
+import Foreign.Storable (Storable (..))
+import Ghostty.FFI.Allocator (GhosttyAllocator)
+import Ghostty.FFI.Io (GhosttyWriter)
+import Ghostty.FFI.Layout (CField (..), CStruct (..))
+import Ghostty.FFI.Selection (GhosttySelection)
+import Ghostty.FFI.Terminal.Handle (GhosttyTerminal (..))
+import Ghostty.FFI.Types (GhosttyFormatterFormat (..), GhosttyResult (..))
+
+#include <gvtffi_shims.h>
+
+-- * Handles
+
+-- | The C side of a 'GhosttyFormatter'. Never dereferenced.
+data GhosttyFormatterImpl
+
+-- | @GhosttyFormatter@: a formatter over one terminal, from
+-- 'ghosttyFormatterTerminalNew' and released by 'ghosttyFormatterFree'.
+newtype GhosttyFormatter = GhosttyFormatter (Ptr GhosttyFormatterImpl)
+  deriving stock (Eq, Show)
+  deriving newtype (Storable)
+
+-- * Options
+
+{{struct formatter.h GhosttyFormatterScreenExtra}}
+{{struct formatter.h GhosttyFormatterTerminalExtra}}
+{{struct formatter.h GhosttyFormatterTerminalOptions}}
+-- * Formatters
+
+-- | @ghostty_formatter_terminal_new@: a formatter for a terminal's active
+-- screen, with the allocator (null for the default). The C function takes the
+-- options by value, so this calls a pointer shim (@gvtffi_shims.h@, §3.3).
+-- @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "gvtffi_shims.h gvtffi_formatter_terminal_new"
+  ghosttyFormatterTerminalNew :: Ptr GhosttyAllocator -> Ptr GhosttyFormatter -> GhosttyTerminal -> Ptr GhosttyFormatterTerminalOptions -> IO GhosttyResult
+
+-- | @ghostty_formatter_free@ (null is a no-op). @unsafe@: it does not call back
+-- into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_formatter_free"
+  ghosttyFormatterFree :: GhosttyFormatter -> IO ()
+
+-- | @ghostty_formatter_format@: format, streaming the output to a writer, which
+-- must not call the formatter or its terminal. On an error the writer may
+-- have had part of the output. The C function takes the writer by value, so
+-- this calls a pointer shim (@gvtffi_shims.h@, §3.3). @safe@: it calls the
+-- writer, which may be a Haskell function.
+foreign import capi safe "gvtffi_shims.h gvtffi_formatter_format"
+  ghosttyFormatterFormat :: GhosttyFormatter -> Ptr GhosttyWriter -> IO GhosttyResult
+
+-- | @ghostty_formatter_format_buf@: format into a buffer; a null buffer, or
+-- one too small, returns @GHOSTTY_OUT_OF_SPACE@ with the size needed.
+-- @safe@: it calls nothing back, but a format can take long (above).
+foreign import capi safe "ghostty/vt.h ghostty_formatter_format_buf"
+  ghosttyFormatterFormatBuf :: GhosttyFormatter -> Ptr Word8 -> CSize -> Ptr CSize -> IO GhosttyResult
+
+-- | @ghostty_formatter_format_alloc@: format into an allocated buffer, to be
+-- released with 'Ghostty.FFI.Allocator.ghosttyFree'; empty output is a null
+-- pointer. @safe@: as 'ghosttyFormatterFormatBuf'.
+foreign import capi safe "ghostty/vt.h ghostty_formatter_format_alloc"
+  ghosttyFormatterFormatAlloc :: GhosttyFormatter -> Ptr GhosttyAllocator -> Ptr (Ptr Word8) -> Ptr CSize -> IO GhosttyResult

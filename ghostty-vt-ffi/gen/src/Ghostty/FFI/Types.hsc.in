@@ -3,8 +3,14 @@
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE ViewPatterns #-}
 
--- | Types shared by every libghostty-vt header: the result code and the
--- borrowed string (@include/ghostty/vt/types.h@, DESIGN.md §3.2).
+-- | Types shared by every libghostty-vt header (@include/ghostty/vt/types.h@,
+-- DESIGN.md §3.2): the result code, borrowed strings and codepoint lists,
+-- caller buffers, surface positions and the formatter's output format.
+--
+-- The header's opaque handles are bound in the module of the header that
+-- uses each: @GhosttyRenderState@ in "Ghostty.FFI.Render",
+-- and so on. Those of the parsers, kitty graphics, search and snapshots arrive
+-- with the steps that bind them.
 --
 -- C enums are open, so each is a newtype over the C integer with pattern
 -- synonyms and an @Unknown@ view (§3.3).
@@ -16,6 +22,16 @@ module Ghostty.FFI.Types
     GhosttyString (..),
     ghosttyStringBytes,
     ghosttyStringLayout,
+    {{xstruct types.h GhosttyCodepoints}}
+
+    -- * Buffers
+    {{xstruct types.h GhosttyBuffer}}
+
+    -- * Surface positions
+    {{xstruct types.h GhosttySurfacePosition}}
+
+    -- * Formatter output
+    {{xenum types.h GhosttyFormatterFormat}}
 
     -- * Type manifest
     ghosttyTypeJson,
@@ -24,7 +40,7 @@ where
 
 import Data.ByteString qualified as BS
 import Foreign.C.ConstPtr (ConstPtr (..))
-import Foreign.C.Types (CChar, CInt (..), CSize (..))
+import Foreign.C.Types (CChar, CDouble (..), CInt (..), CSize (..))
 import Foreign.Ptr (Ptr, castPtr, nullPtr)
 import Foreign.Storable (Storable (..))
 import Ghostty.FFI.Layout (CEnum (..), CField (..), CStruct (..), unnamed)
@@ -75,6 +91,10 @@ ghosttyStringLayout =
         ]
     }
 
+{{struct types.h GhosttyCodepoints}}
+{{struct types.h GhosttyBuffer}}
+{{struct types.h GhosttySurfacePosition}}
+{{enum types.h GhosttyFormatterFormat}}
 -- | @ghostty_type_json@: the linked library's description of every public
 -- type (sizes, alignments, field offsets, enum values), as a static
 -- NUL-terminated JSON string valid for the life of the process. What the

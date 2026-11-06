@@ -6,25 +6,24 @@
 -- is tested through @ghostty-effectful@.
 module Test.Ghostty.FFI.Terminal (tests) where
 
-import Control.Exception (bracket, finally)
 import Data.ByteString qualified as BS
 import Data.ByteString.Unsafe qualified as BSU
 import Foreign.C.Types (CBool, CSize)
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Marshal.Array (allocaArray, peekArray)
-import Foreign.Marshal.Utils (fillBytes, with)
-import Foreign.Ptr (FunPtr, Ptr, castFunPtrToPtr, castPtr, freeHaskellFunPtr, nullPtr)
+import Foreign.Marshal.Utils (with)
+import Foreign.Ptr (FunPtr, Ptr, castFunPtrToPtr, castPtr, nullPtr)
 import Foreign.Storable (Storable (..))
 import Ghostty.FFI.GridRef
 import Ghostty.FFI.Io
-import Ghostty.FFI.Layout (CStruct (..))
 import Ghostty.FFI.Modes
 import Ghostty.FFI.Point
 import Ghostty.FFI.Terminal
 import Ghostty.FFI.Terminal.Callbacks
 import Ghostty.FFI.Types
+import Test.Ghostty.FFI.Support
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))
+import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 tests :: TestTree
 tests =
@@ -127,19 +126,6 @@ tests =
 
 -- * Helpers
 
-withTerminal :: Word16 -> Word16 -> (GhosttyTerminal -> Assertion) -> Assertion
-withTerminal cols rows act = do
-  t <- alloca $ \tp -> do
-    ghosttyTerminalNew nullPtr tp cols rows >>= (@?= GhosttySuccess)
-    peek tp
-  act t `finally` ghosttyTerminalFree t
-
-withCallback :: IO (FunPtr a) -> (FunPtr a -> IO b) -> IO b
-withCallback mk = bracket mk freeHaskellFunPtr
-
-feed :: GhosttyTerminal -> ByteString -> IO ()
-feed t b = BSU.unsafeUseAsCStringLen b $ \(p, n) -> ghosttyTerminalVtWrite t (castPtr p) (fromIntegral n)
-
 writeUntil :: GhosttyTerminal -> ByteString -> GhosttyTerminalBoundary -> IO (GhosttyResult, GhosttyTerminalWriteStop)
 writeUntil t b boundary =
   BSU.unsafeUseAsCStringLen b $ \(p, n) -> alloca $ \sp -> do
@@ -149,13 +135,6 @@ writeUntil t b boundary =
 
 boundaryBit :: GhosttyTerminalBoundary -> Word32
 boundaryBit (GhosttyTerminalBoundary b) = fromIntegral b
-
--- | Zero a sized struct and set its leading @size_t size@, as
--- @GHOSTTY_INIT_SIZED@ does, from its layout descriptor.
-pokeSized :: CStruct -> Ptr a -> IO ()
-pokeSized l p = do
-  fillBytes p 0 l.size
-  poke (castPtr p) (fromIntegral l.size :: CSize)
 
 setFn :: GhosttyTerminal -> GhosttyTerminalOption -> FunPtr a -> IO ()
 setFn t o fn = ghosttyTerminalSet t o (castFunPtrToPtr fn) >>= (@?= GhosttySuccess)

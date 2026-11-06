@@ -107,6 +107,12 @@ jobs:
       - name: The ghostty binding covers the pinned headers (§3.3)
         run: python3 scripts/check-ghostty-coverage.py
 
+      - name: The ghostty binding's types are the headers' (§3.3)
+        run: python3 scripts/check-ghostty-signatures.py
+
+      - name: Each safe/unsafe was decided against the current headers (§3.3)
+        run: python3 scripts/check-ghostty-safety.py
+
       # 4
       - name: Doctest
         run: |

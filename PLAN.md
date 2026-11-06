@@ -61,6 +61,8 @@ Exit: formatter goldens; every typed key exercised (§13).
   header's line leaves `ghostty-vt-ffi/coverage.txt` as it is bound.
 - Layout-test rows for each. May be split into two CRs (render+format, encoders+parsers+unicode) if
   it reviews too large.
+- Split: the first CR (PR #4) bound render.h, screen.h, selection.h and formatter.h whole, and
+  generated the by-value shims. `coverage.txt`'s `M1.3` lines are what the second CR binds.
 
 ### M1.4 `Ghostty` effect and scoped terminals
 
@@ -307,6 +309,8 @@ Exit: §5B.7 passes; built-in profiles' grammars bind and their queries compile 
   `TreeSitter.FFI.Types` (all structs and enums), shims complete.
 - Vendored `tree-sitter-json` at a pinned tag in the test suite (§5B.7).
 - Tests: struct sizes vs `sizeof`; each shim against the direct C call (a C test helper calls both).
+- A signature check like `check-ghostty-signatures.py` (§3.3, §5A.2): `capi` does not catch integer
+  widths or pointers to Haskell types.
 
 ### M4.2 Budget, input reader, dynamic language
 

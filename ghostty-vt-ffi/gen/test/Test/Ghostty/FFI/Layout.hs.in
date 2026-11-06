@@ -22,12 +22,16 @@ import Foreign.Storable (Storable (..))
 import Ghostty.FFI.BuildInfo
 import Ghostty.FFI.Color
 import Ghostty.FFI.Device
+import Ghostty.FFI.Formatter
 import Ghostty.FFI.GridRef
 import Ghostty.FFI.Io
 import Ghostty.FFI.Layout (CEnum (..), CField (..), CStruct (..))
 import Ghostty.FFI.Modes
 import Ghostty.FFI.Osc
 import Ghostty.FFI.Point
+import Ghostty.FFI.Render
+import Ghostty.FFI.Screen
+import Ghostty.FFI.Selection
 import Ghostty.FFI.SizeReport
 import Ghostty.FFI.Style
 import Ghostty.FFI.Terminal
@@ -51,6 +55,10 @@ data EnumRow = EnumRow CEnum (Integer -> Bool)
 structs :: [StructRow]
 structs =
   [ StructRow ghosttyStringLayout (string 0x0102030405),
+    -- types.h
+    StructRow ghosttyCodepointsLayout (GhosttyCodepoints (addr 0x0102030405) 3),
+    StructRow ghosttyBufferLayout (GhosttyBuffer (addr 0x0102030405) 0x0a0b 0x0c),
+    StructRow ghosttySurfacePositionLayout (GhosttySurfacePosition 12.5 (-3.25)),
     -- color.h, style.h
     StructRow ghosttyColorRgbLayout aRgb,
     StructRow ghosttyStyleColorLayout (StyleColorRgb aRgb),
@@ -144,7 +152,45 @@ structs =
         (string 0x0102030405)
         (string 0x060708090a),
     StructRow ghosttyTerminalResizeWindowGridLayout aGrid,
-    StructRow ghosttyTerminalResizeWindowLayout (ResizeWindowGrid aGrid)
+    StructRow ghosttyTerminalResizeWindowLayout (ResizeWindowGrid aGrid),
+    -- screen.h
+    StructRow ghosttyCellsViewLayout (GhosttyCellsView (addr 0x0102030405) 80),
+    -- render.h
+    StructRow ghosttyRenderStateOverscanLayout (GhosttyRenderStateOverscan 0x0a0b 0x0c0d),
+    StructRow ghosttyRenderStateCursorLayout $
+      GhosttyRenderStateCursor 0x18 1 0x0a0b 0x0c0d 1 1 1 1 GhosttyRenderStateCursorVisualStyleBlockHollow,
+    StructRow ghosttyRenderStateColorsLayout $
+      GhosttyRenderStateColors
+        0x0310
+        aRgb
+        (GhosttyColorRgb 4 5 6)
+        (GhosttyColorRgb 7 8 9)
+        1
+        [GhosttyColorRgb (fromIntegral (i `mod` 255 + 1)) 2 3 | i <- [1 .. 256 :: Int]],
+    StructRow ghosttyRenderStateRowIdLayout (GhosttyRenderStateRowId [0x0102030405, 0x060708090a]),
+    StructRow ghosttyRenderStateRowSelectionLayout (GhosttyRenderStateRowSelection 0x10 0x0a0b 0x0c0d),
+    -- selection.h
+    StructRow ghosttySelectionLayout aSelection,
+    StructRow ghosttySelectionBufferLayout (GhosttySelectionBuffer (addr 0x0102030405) 4 3),
+    StructRow ghosttyTerminalSelectWordOptionsLayout $
+      GhosttyTerminalSelectWordOptions 0x30 aGridRef (addr 0x0102030405) 3,
+    StructRow ghosttyTerminalSelectWordBetweenOptionsLayout $
+      GhosttyTerminalSelectWordBetweenOptions 0x48 aGridRef anotherGridRef (addr 0x0102030405) 3,
+    StructRow ghosttyTerminalSelectLineOptionsLayout $
+      GhosttyTerminalSelectLineOptions 0x38 aGridRef (addr 0x0102030405) 3 1,
+    StructRow ghosttyTerminalSelectionFormatOptionsLayout $
+      GhosttyTerminalSelectionFormatOptions 0x20 GhosttyFormatterFormatHtml 1 1 (addr 0x0102030405),
+    StructRow ghosttySelectionGestureBehaviorsLayout $
+      GhosttySelectionGestureBehaviors
+        GhosttySelectionGestureBehaviorWord
+        GhosttySelectionGestureBehaviorLine
+        GhosttySelectionGestureBehaviorOutput,
+    StructRow ghosttySelectionGestureGeometryLayout (GhosttySelectionGestureGeometry 80 0x0a0b 0x0c0d 0x0e0f10),
+    -- formatter.h
+    StructRow ghosttyFormatterScreenExtraLayout aScreenExtra,
+    StructRow ghosttyFormatterTerminalExtraLayout aTerminalExtra,
+    StructRow ghosttyFormatterTerminalOptionsLayout $
+      GhosttyFormatterTerminalOptions 0x40 GhosttyFormatterFormatVt 1 1 aTerminalExtra (addr 0x0102030405)
   ]
   where
     aRgb = GhosttyColorRgb 1 2 3
@@ -156,6 +202,11 @@ structs =
     anOscSequence = GhosttyTerminalUnknownOscSequence 1 (string 0x0102030405) GhosttyOscTerminatorBel
     aContent = GhosttyClipboardContent (string 0x0102030405) (string 0x060708090a)
     aGrid = GhosttyTerminalResizeWindowGrid 24 80
+    aGridRef = GhosttyGridRef 0x18 (addr 0x0102030405) 0x0a0b 0x0c0d
+    anotherGridRef = GhosttyGridRef 0x18 (addr 0x060708090a) 0x0e0f 0x1011
+    aSelection = GhosttySelection 0x40 aGridRef anotherGridRef 1
+    aScreenExtra = GhosttyFormatterScreenExtra 0x10 1 1 1 1 1 1
+    aTerminalExtra = GhosttyFormatterTerminalExtra 0x28 1 1 1 1 1 1 aScreenExtra
 
 -- | A pointer sample: an address no field could hold by accident.
 addr :: Int -> Ptr a

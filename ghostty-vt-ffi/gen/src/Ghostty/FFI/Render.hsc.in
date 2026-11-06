@@ -1,0 +1,384 @@
+{-# LANGUAGE CApiFFI #-}
+{-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE ViewPatterns #-}
+
+-- | @include/ghostty/vt/render.h@: the render state, an incremental copy of a
+-- terminal's viewport, and the iterators over its rows, cells and image
+-- placements.
+--
+-- Everything read through an iterator is borrowed from the render state and
+-- valid only until its next update (§4.3). The type behind each keyed read
+-- and option is documented on its pattern, as the header documents it in
+-- parentheses; nothing checks it here (§4.4).
+--
+-- __@unsafe@.__ No call here runs a callback, so all are @unsafe@. An update
+-- copies the viewport (and any overscan rows), not the scrollback, so it is
+-- bounded by the screen's size.
+module Ghostty.FFI.Render
+  ( -- * Handles
+    GhosttyRenderState (..),
+    GhosttyRenderStateImpl,
+    GhosttyRenderStateRowIterator (..),
+    GhosttyRenderStateRowIteratorImpl,
+    GhosttyRenderStateRowCells (..),
+    GhosttyRenderStateRowCellsImpl,
+    GhosttyRenderStateImageIterator (..),
+    GhosttyRenderStateImageIteratorImpl,
+
+    -- * Lifecycle and update
+    ghosttyRenderStateNew,
+    ghosttyRenderStateFree,
+    ghosttyRenderStateUpdate,
+    ghosttyRenderStateBeginUpdate,
+    ghosttyRenderStateEndUpdate,
+    ghosttyRenderStateClean,
+
+    -- * Render state data and options
+    {{xenum render.h GhosttyRenderStateData}}
+    ghosttyRenderStateGet,
+    ghosttyRenderStateGetMulti,
+    {{xenum render.h GhosttyRenderStateOption}}
+    ghosttyRenderStateSet,
+    {{xenum render.h GhosttyRenderStateDirty}}
+    {{xenum render.h GhosttyRenderStateCursorVisualStyle}}
+    {{xstruct render.h GhosttyRenderStateOverscan}}
+    {{xstruct render.h GhosttyRenderStateCursor}}
+    GhosttyRenderStateColors (..),
+    ghosttyRenderStateColorsLayout,
+
+    -- * Rows
+    ghosttyRenderStateRowIteratorNew,
+    ghosttyRenderStateRowIteratorFree,
+    ghosttyRenderStateRowIteratorNext,
+    ghosttyRenderStateRowIteratorNextDirty,
+    {{xenum render.h GhosttyRenderStateRowData}}
+    ghosttyRenderStateRowGet,
+    ghosttyRenderStateRowGetMulti,
+    {{xenum render.h GhosttyRenderStateRowOption}}
+    ghosttyRenderStateRowSet,
+    GhosttyRenderStateRowId (..),
+    ghosttyRenderStateRowIdLayout,
+    {{xstruct render.h GhosttyRenderStateRowSelection}}
+
+    -- * Cells
+    ghosttyRenderStateRowCellsNew,
+    ghosttyRenderStateRowCellsFree,
+    ghosttyRenderStateRowCellsNext,
+    ghosttyRenderStateRowCellsSelect,
+    {{xenum render.h GhosttyRenderStateRowCellsData}}
+    ghosttyRenderStateRowCellsGet,
+    ghosttyRenderStateRowCellsGetMulti,
+
+    -- * Image placements
+    ghosttyRenderStateImageIteratorNew,
+    ghosttyRenderStateImageIteratorFree,
+    ghosttyRenderStateImageIteratorNext,
+    {{xenum render.h GhosttyRenderStateImageData}}
+    ghosttyRenderStateImageGet,
+    ghosttyRenderStateImageGetMulti,
+    {{xenum render.h GhosttyImageProtocol}}
+    {{xenum render.h GhosttyRenderStateImageLayer}}
+    {{xenum render.h GhosttyRenderStateKittyPlacementKind}}
+  )
+where
+
+import Foreign.C.Types (CBool (..), CInt (..), CSize (..))
+import Foreign.Marshal.Array (peekArray, pokeArray)
+import Foreign.Ptr (Ptr, plusPtr)
+import Foreign.Storable (Storable (..))
+import Ghostty.FFI.Allocator (GhosttyAllocator)
+import Ghostty.FFI.Color (GhosttyColorRgb (..))
+import Ghostty.FFI.Layout (CEnum (..), CField (..), CStruct (..), unnamed)
+import Ghostty.FFI.Terminal.Handle (GhosttyTerminal (..))
+import Ghostty.FFI.Types (GhosttyResult (..))
+
+#include <gvtffi_shims.h>
+
+-- * Handles
+
+-- | The C side of a 'GhosttyRenderState'. Never dereferenced.
+data GhosttyRenderStateImpl
+
+-- | @GhosttyRenderState@: the state a renderer reads, updated from a terminal
+-- on demand. From 'ghosttyRenderStateNew', released by
+-- 'ghosttyRenderStateFree'. Not thread-safe (§4.6).
+newtype GhosttyRenderState = GhosttyRenderState (Ptr GhosttyRenderStateImpl)
+  deriving stock (Eq, Show)
+  deriving newtype (Storable)
+
+-- | The C side of a 'GhosttyRenderStateRowIterator'. Never dereferenced.
+data GhosttyRenderStateRowIteratorImpl
+
+-- | @GhosttyRenderStateRowIterator@: an iterator over a render state's rows,
+-- filled by reading 'GhosttyRenderStateDataRowIterator' into it. From
+-- 'ghosttyRenderStateRowIteratorNew', released by
+-- 'ghosttyRenderStateRowIteratorFree'.
+newtype GhosttyRenderStateRowIterator = GhosttyRenderStateRowIterator (Ptr GhosttyRenderStateRowIteratorImpl)
+  deriving stock (Eq, Show)
+  deriving newtype (Storable)
+
+-- | The C side of a 'GhosttyRenderStateRowCells'. Never dereferenced.
+data GhosttyRenderStateRowCellsImpl
+
+-- | @GhosttyRenderStateRowCells@: an iterator over one row's cells, filled by
+-- reading 'GhosttyRenderStateRowDataCells' into it. From
+-- 'ghosttyRenderStateRowCellsNew', released by 'ghosttyRenderStateRowCellsFree'.
+newtype GhosttyRenderStateRowCells = GhosttyRenderStateRowCells (Ptr GhosttyRenderStateRowCellsImpl)
+  deriving stock (Eq, Show)
+  deriving newtype (Storable)
+
+-- | The C side of a 'GhosttyRenderStateImageIterator'. Never dereferenced.
+data GhosttyRenderStateImageIteratorImpl
+
+-- | @GhosttyRenderStateImageIterator@: an iterator over the image placements
+-- the last update found, filled by reading 'GhosttyRenderStateDataImageIterator'
+-- into it. From 'ghosttyRenderStateImageIteratorNew', released by
+-- 'ghosttyRenderStateImageIteratorFree'.
+newtype GhosttyRenderStateImageIterator = GhosttyRenderStateImageIterator (Ptr GhosttyRenderStateImageIteratorImpl)
+  deriving stock (Eq, Show)
+  deriving newtype (Storable)
+
+-- * Lifecycle and update
+
+-- | @ghostty_render_state_new@: an empty render state, with the allocator
+-- (null for the default). @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_render_state_new"
+  ghosttyRenderStateNew :: Ptr GhosttyAllocator -> Ptr GhosttyRenderState -> IO GhosttyResult
+
+-- | @ghostty_render_state_free@ (null is a no-op). @unsafe@: it does not call
+-- back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_render_state_free"
+  ghosttyRenderStateFree :: GhosttyRenderState -> IO ()
+
+-- | @ghostty_render_state_update@: update from a terminal, both phases in one
+-- call. It sets dirty state and never clears it. @unsafe@: it does not call
+-- back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_render_state_update"
+  ghosttyRenderStateUpdate :: GhosttyRenderState -> GhosttyTerminal -> IO GhosttyResult
+
+-- | @ghostty_render_state_begin_update@: the phase of an update that reads the
+-- terminal. The state is incomplete until 'ghosttyRenderStateEndUpdate'.
+-- @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_render_state_begin_update"
+  ghosttyRenderStateBeginUpdate :: GhosttyRenderState -> GhosttyTerminal -> IO GhosttyResult
+
+-- | @ghostty_render_state_end_update@: the deferred phase of an update, which
+-- touches only the render state; a no-op without a begin. @unsafe@: it does
+-- not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_render_state_end_update"
+  ghosttyRenderStateEndUpdate :: GhosttyRenderState -> IO GhosttyResult
+
+-- | @ghostty_render_state_clean@: clear the global and every row's dirty
+-- state, after a whole frame is drawn. @unsafe@: it does not call back into
+-- Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_render_state_clean"
+  ghosttyRenderStateClean :: GhosttyRenderState -> IO GhosttyResult
+
+-- * Render state data and options
+
+{{enum render.h GhosttyRenderStateData}}
+-- | @ghostty_render_state_get@: read one key into a pointer of its type. A
+-- sized struct's @size@ must be set first. @unsafe@: it does not call back
+-- into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_render_state_get"
+  ghosttyRenderStateGet :: GhosttyRenderState -> GhosttyRenderStateData -> Ptr () -> IO GhosttyResult
+
+-- | @ghostty_render_state_get_multi@: read several keys in one call, stopping
+-- at the first error; the out count is how many succeeded. @unsafe@: it does
+-- not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_render_state_get_multi"
+  ghosttyRenderStateGetMulti :: GhosttyRenderState -> CSize -> Ptr GhosttyRenderStateData -> Ptr (Ptr ()) -> Ptr CSize -> IO GhosttyResult
+
+{{enum render.h GhosttyRenderStateOption}}
+-- | @ghostty_render_state_set@: set an option from a pointer to its value.
+-- @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_render_state_set"
+  ghosttyRenderStateSet :: GhosttyRenderState -> GhosttyRenderStateOption -> Ptr () -> IO GhosttyResult
+
+{{enum render.h GhosttyRenderStateDirty}}
+{{enum render.h GhosttyRenderStateCursorVisualStyle}}
+{{struct render.h GhosttyRenderStateOverscan}}
+{{struct render.h GhosttyRenderStateCursor}}
+-- | @GhosttyRenderStateColors@: every colour of a render state, as one sized
+-- struct.
+data GhosttyRenderStateColors = GhosttyRenderStateColors
+  { -- | @size@: the struct's size in bytes; set it before a read.
+    size :: CSize,
+    -- | @background@: the default or current background colour.
+    background :: GhosttyColorRgb,
+    -- | @foreground@: the default or current foreground colour.
+    foreground :: GhosttyColorRgb,
+    -- | @cursor@: the cursor colour, when @cursor_has_value@ says there is one.
+    cursor :: GhosttyColorRgb,
+    -- | @cursor_has_value@: whether @cursor@ holds an explicit colour.
+    cursorHasValue :: CBool,
+    -- | @palette@: the whole fixed-size array, the active 256-colour palette.
+    -- A 'peek' reads every element; a 'poke' writes the list's first elements
+    -- and zeroes the rest.
+    palette :: [GhosttyColorRgb]
+  }
+  deriving stock (Eq, Show)
+
+-- | How many elements @palette@ has in C.
+paletteLen :: Int
+paletteLen = (#const GVTFFI_ARRAY_LEN(GhosttyRenderStateColors, palette))
+
+instance Storable GhosttyRenderStateColors where
+  sizeOf _ = (#size GhosttyRenderStateColors)
+  alignment _ = (#alignment GhosttyRenderStateColors)
+  peek p =
+    GhosttyRenderStateColors
+      <$> (#peek GhosttyRenderStateColors, size) p
+      <*> (#peek GhosttyRenderStateColors, background) p
+      <*> (#peek GhosttyRenderStateColors, foreground) p
+      <*> (#peek GhosttyRenderStateColors, cursor) p
+      <*> (#peek GhosttyRenderStateColors, cursor_has_value) p
+      <*> peekArray paletteLen ((#ptr GhosttyRenderStateColors, palette) p)
+  poke p s = do
+    (#poke GhosttyRenderStateColors, size) p s.size
+    (#poke GhosttyRenderStateColors, background) p s.background
+    (#poke GhosttyRenderStateColors, foreground) p s.foreground
+    (#poke GhosttyRenderStateColors, cursor) p s.cursor
+    (#poke GhosttyRenderStateColors, cursor_has_value) p s.cursorHasValue
+    pokeArray
+      ((#ptr GhosttyRenderStateColors, palette) p)
+      (take paletteLen (s.palette <> repeat (GhosttyColorRgb 0 0 0)))
+
+{{layout GhosttyRenderStateColors size background foreground cursor cursor_has_value palette}}
+-- * Rows
+
+-- | @ghostty_render_state_row_iterator_new@: an empty row iterator, with the
+-- allocator (null for the default). @unsafe@: it does not call back into
+-- Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_render_state_row_iterator_new"
+  ghosttyRenderStateRowIteratorNew :: Ptr GhosttyAllocator -> Ptr GhosttyRenderStateRowIterator -> IO GhosttyResult
+
+-- | @ghostty_render_state_row_iterator_free@ (null is a no-op). @unsafe@: it
+-- does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_render_state_row_iterator_free"
+  ghosttyRenderStateRowIteratorFree :: GhosttyRenderStateRowIterator -> IO ()
+
+-- | @ghostty_render_state_row_iterator_next@: move to the next row, top to
+-- bottom; false at the end. @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_render_state_row_iterator_next"
+  ghosttyRenderStateRowIteratorNext :: GhosttyRenderStateRowIterator -> IO CBool
+
+-- | @ghostty_render_state_row_iterator_next_dirty@: move to the next row that
+-- needs a redraw under the global dirty state, writing its position in the
+-- iterator; false at the end. Clears nothing. @unsafe@: it does not call back
+-- into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_render_state_row_iterator_next_dirty"
+  ghosttyRenderStateRowIteratorNextDirty :: GhosttyRenderStateRowIterator -> Ptr Word16 -> IO CBool
+
+{{enum render.h GhosttyRenderStateRowData}}
+-- | @ghostty_render_state_row_get@: read one key of the current row into a
+-- pointer of its type. @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_render_state_row_get"
+  ghosttyRenderStateRowGet :: GhosttyRenderStateRowIterator -> GhosttyRenderStateRowData -> Ptr () -> IO GhosttyResult
+
+-- | @ghostty_render_state_row_get_multi@: read several keys of the current row
+-- in one call, as 'ghosttyRenderStateGetMulti'. @unsafe@: it does not call
+-- back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_render_state_row_get_multi"
+  ghosttyRenderStateRowGetMulti :: GhosttyRenderStateRowIterator -> CSize -> Ptr GhosttyRenderStateRowData -> Ptr (Ptr ()) -> Ptr CSize -> IO GhosttyResult
+
+{{enum render.h GhosttyRenderStateRowOption}}
+-- | @ghostty_render_state_row_set@: set an option on the current row from a
+-- pointer to its value. @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_render_state_row_set"
+  ghosttyRenderStateRowSet :: GhosttyRenderStateRowIterator -> GhosttyRenderStateRowOption -> Ptr () -> IO GhosttyResult
+
+-- | @GhosttyRenderStateRowId@: a row's identity across updates. Opaque: two
+-- ids are the same row when both words are equal, and nothing else about
+-- them means anything. All zeros is never a row.
+newtype GhosttyRenderStateRowId = GhosttyRenderStateRowId
+  { -- | @bits@: the whole fixed-size array of words. A 'peek' reads every
+    -- element; a 'poke' writes the list's first elements and zeroes the rest.
+    bits :: [Word64]
+  }
+  deriving stock (Eq, Show)
+
+-- | How many elements @bits@ has in C.
+bitsLen :: Int
+bitsLen = (#const GVTFFI_ARRAY_LEN(GhosttyRenderStateRowId, bits))
+
+instance Storable GhosttyRenderStateRowId where
+  sizeOf _ = (#size GhosttyRenderStateRowId)
+  alignment _ = (#alignment GhosttyRenderStateRowId)
+  peek p = GhosttyRenderStateRowId <$> peekArray bitsLen ((#ptr GhosttyRenderStateRowId, bits) p)
+  poke p s = pokeArray ((#ptr GhosttyRenderStateRowId, bits) p) (take bitsLen (s.bits <> repeat 0))
+
+{{layout GhosttyRenderStateRowId bits}}
+{{struct render.h GhosttyRenderStateRowSelection}}
+-- * Cells
+
+-- | @ghostty_render_state_row_cells_new@: an empty cell iterator, reusable
+-- across rows, with the allocator (null for the default). @unsafe@: it does
+-- not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_render_state_row_cells_new"
+  ghosttyRenderStateRowCellsNew :: Ptr GhosttyAllocator -> Ptr GhosttyRenderStateRowCells -> IO GhosttyResult
+
+-- | @ghostty_render_state_row_cells_free@ (null is a no-op). @unsafe@: it does
+-- not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_render_state_row_cells_free"
+  ghosttyRenderStateRowCellsFree :: GhosttyRenderStateRowCells -> IO ()
+
+-- | @ghostty_render_state_row_cells_next@: move to the next cell; false at the
+-- end. @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_render_state_row_cells_next"
+  ghosttyRenderStateRowCellsNext :: GhosttyRenderStateRowCells -> IO CBool
+
+-- | @ghostty_render_state_row_cells_select@: move to a column;
+-- @GHOSTTY_INVALID_VALUE@ when it is out of range. @unsafe@: it does not call
+-- back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_render_state_row_cells_select"
+  ghosttyRenderStateRowCellsSelect :: GhosttyRenderStateRowCells -> Word16 -> IO GhosttyResult
+
+{{enum render.h GhosttyRenderStateRowCellsData}}
+-- | @ghostty_render_state_row_cells_get@: read one key of the current cell
+-- into a pointer of its type. @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_render_state_row_cells_get"
+  ghosttyRenderStateRowCellsGet :: GhosttyRenderStateRowCells -> GhosttyRenderStateRowCellsData -> Ptr () -> IO GhosttyResult
+
+-- | @ghostty_render_state_row_cells_get_multi@: read several keys of the
+-- current cell in one call, as 'ghosttyRenderStateGetMulti'. @unsafe@: it
+-- does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_render_state_row_cells_get_multi"
+  ghosttyRenderStateRowCellsGetMulti :: GhosttyRenderStateRowCells -> CSize -> Ptr GhosttyRenderStateRowCellsData -> Ptr (Ptr ()) -> Ptr CSize -> IO GhosttyResult
+
+-- * Image placements
+
+-- | @ghostty_render_state_image_iterator_new@: an empty image iterator,
+-- reusable across updates, with the allocator (null for the default).
+-- @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_render_state_image_iterator_new"
+  ghosttyRenderStateImageIteratorNew :: Ptr GhosttyAllocator -> Ptr GhosttyRenderStateImageIterator -> IO GhosttyResult
+
+-- | @ghostty_render_state_image_iterator_free@ (null is a no-op). @unsafe@: it
+-- does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_render_state_image_iterator_free"
+  ghosttyRenderStateImageIteratorFree :: GhosttyRenderStateImageIterator -> IO ()
+
+-- | @ghostty_render_state_image_iterator_next@: move to the next placement,
+-- in no drawing order; false at the end. @unsafe@: it does not call back into
+-- Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_render_state_image_iterator_next"
+  ghosttyRenderStateImageIteratorNext :: GhosttyRenderStateImageIterator -> IO CBool
+
+{{enum render.h GhosttyRenderStateImageData}}
+-- | @ghostty_render_state_image_get@: read one key of the current placement
+-- into a pointer of its type; @GHOSTTY_NO_VALUE@ for a key of another
+-- protocol. @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_render_state_image_get"
+  ghosttyRenderStateImageGet :: GhosttyRenderStateImageIterator -> GhosttyRenderStateImageData -> Ptr () -> IO GhosttyResult
+
+-- | @ghostty_render_state_image_get_multi@: read several keys of the current
+-- placement in one call, as 'ghosttyRenderStateGetMulti'. @unsafe@: it does
+-- not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_render_state_image_get_multi"
+  ghosttyRenderStateImageGetMulti :: GhosttyRenderStateImageIterator -> CSize -> Ptr GhosttyRenderStateImageData -> Ptr (Ptr ()) -> Ptr CSize -> IO GhosttyResult
+
+{{enum render.h GhosttyImageProtocol}}
+{{enum render.h GhosttyRenderStateImageLayer}}
+{{enum render.h GhosttyRenderStateKittyPlacementKind}}
