@@ -715,13 +715,17 @@ with the rest of the chunk. The header forbids calling `vt_write` from inside a 
 never does: the terminal is read between writes, not inside them. (Checked, M1.6: an OSC ended by
 `ESC \` is dispatched at the `ESC`, where `vt_write_until` stops, so its mark's cursor is right too;
 and the same stream split at every byte gives the same events.) Adjacent `WritePty`s are joined, so
-one reply is one write.
+one reply is one write: across stops, and with any events buffered before the write.
 
 A callback must not let an exception into C, so each body is guarded: an exception is recorded in
 the buffer and thrown by the drain, after the write. So is a C enum value the binding does not name
-(`UnknownEnum`, §4.7), which a callback cannot throw. `resize` and `reset` call callbacks too (the
-end of a render hold, mode 2048's in-band size report), so they return `[TerminalEvent]` as `feed`
-does; an event from any other call (a `setT` the library reported on) comes first in the next `feed`.
+(`UnknownEnum`, §4.7), which a callback cannot throw. A failure while resolving one stop's events does
+not stop the write: every byte is written, so the terminal never falls behind the program's output,
+and the first failure is thrown after. `resize` and `reset` call callbacks too (the end of a render
+hold, mode 2048's in-band size report), so they return `[TerminalEvent]` as `feed` does. `setT`
+returns `()`: the header says setting a mode never invokes a callback, not even the end of a render
+hold, and a test writes every option and finds nothing buffered, so a pin bump that changes this
+fails it. An event left by a call that threw before returning it comes first in the next `feed`.
 
 **Query callbacks are configuration, not callbacks.** Colour scheme, device attributes, enquiry,
 XTVERSION and size are answered from `TerminalConfig`, which the caller can update with `setT`
@@ -771,7 +775,12 @@ data GhosttyError                       -- thrown
   | WrongThread CallSite                -- §4.6
   | Invariant CallSite ResultCode       -- the library returned what the header says it cannot
   | UnknownEnum CallSite Text Integer   -- a C enum value the binding does not name (§3.3)
+  | ShortStruct CallSite Text Integer   -- a sized struct the library passed, smaller than the binding reads
 ```
+
+A sized struct passed to a callback may be read only as far as its `size` field covers, so a callback
+checks it before reading, and one too short is `ShortStruct`, recorded and thrown by the drain like
+`UnknownEnum`. The version check and the layout test rule both out.
 
 `ResultCode` is `GhosttyResult` closed, with an unknown case (§3.3), so no `Ghostty.FFI` type
 escapes. `CallSite` names the C function, or the operation for `WrongThread`. Errors a caller can

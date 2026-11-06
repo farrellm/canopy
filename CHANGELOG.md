@@ -145,6 +145,15 @@ Written as changes land, not at release (DESIGN.md §2.9).
   stream split at every byte; a mark ended by `ESC \` reads the cursor right after it; query
   replies arrive as `WritePty` and follow each answer option; clipboard, notification, progress,
   program status, render hold, reset, resize-request and unsupported-sequence events.
+- Fixed in review, each with a numbered regression case: a failure resolving one OSC stop's events
+  stopped `feed` there, so the rest of the input never reached the terminal (regression 1; every
+  byte is now written, and the failure thrown after); replies were joined only within one stop, so
+  an OSC between two replies split them into two writes (regression 2); `setT` causing no event is
+  now held by a test rather than assumed (regression 3); the clipboard-write callback read its
+  request without checking the struct's `size` (regression 4; a short one is `ShortStruct`, a new
+  `GhosttyError`, and the write is denied). A refused `resize` now restores the size its queries
+  report. The calls that resolve events moved to `Ghostty.Effectful.Internal.Feed`, which reads the
+  terminal's keys directly instead of taking a reader from every caller.
 
 ### M0: infrastructure
 

@@ -39,6 +39,7 @@ library
     Ghostty.Effectful.Internal.Convert
     Ghostty.Effectful.Internal.Effect
     Ghostty.Effectful.Internal.Error
+    Ghostty.Effectful.Internal.Feed
     Ghostty.Effectful.Internal.Keys
     Ghostty.Effectful.Internal.Size
     Ghostty.Effectful.Internal.Terminal

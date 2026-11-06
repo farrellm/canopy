@@ -1,5 +1,3 @@
-{-# LANGUAGE PatternSynonyms #-}
-
 -- | A terminal's representation and its raw calls (DESIGN.md §4.2). The
 -- public API is "Ghostty.Effectful.Terminal", which exports these types
 -- without their constructors; the calls here are what the 'Ghostty'
@@ -32,11 +30,6 @@ module Ghostty.Effectful.Internal.Terminal
     -- * Calls
     openTerminal,
     closeTerminal,
-    resizeTerminal,
-    resetTerminal,
-    feedTerminal,
-    drainEvents,
-    Reader,
 
     -- * Tracked references
     trackPoint,
@@ -47,28 +40,23 @@ module Ghostty.Effectful.Internal.Terminal
   )
 where
 
-import Control.Exception (onException, throwIO, try)
-import Data.ByteString.Unsafe qualified as BSU
+import Control.Exception (onException, throwIO)
 import Data.IntMap.Strict qualified as IntMap
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Marshal.Utils (with)
-import Foreign.Ptr (Ptr, castPtr, nullPtr, plusPtr)
-import Foreign.Storable (Storable (..), peek)
+import Foreign.Ptr (nullPtr)
+import Foreign.Storable (peek)
 import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), ResultCode (..))
-import Ghostty.Effectful.Event (TerminalEvent)
 import Ghostty.Effectful.Internal.Callbacks
   ( Answers (..),
     Installed,
     Pending,
-    drain,
     installCallbacks,
-    joinWrites,
     releaseCallbacks,
-    resolve,
   )
 import Ghostty.Effectful.Internal.Error (expectSuccess, resultCode)
 import Ghostty.Effectful.Internal.Size (CellPixels (..), Extent (..), GridSize (..), extent, fromExtent, noCellPixels)
-import Ghostty.Effectful.Terminal.Keys (ColorScheme, DeviceAttributes, TerminalData, defaultDeviceAttributes)
+import Ghostty.Effectful.Terminal.Keys (ColorScheme, DeviceAttributes, defaultDeviceAttributes)
 import Ghostty.FFI.GridRef
   ( GhosttyTrackedGridRef,
     ghosttyTrackedGridRefFree,
@@ -79,18 +67,9 @@ import Ghostty.FFI.GridRef
 import Ghostty.FFI.Point (GhosttyPoint, GhosttyPointCoordinate, GhosttyPointTag)
 import Ghostty.FFI.Terminal
   ( GhosttyTerminal,
-    GhosttyTerminalBoundary (..),
-    GhosttyTerminalStringEnd (..),
-    GhosttyTerminalStringIntroducer (..),
-    GhosttyTerminalStringKind (..),
-    GhosttyTerminalWriteStop (..),
     ghosttyTerminalFree,
     ghosttyTerminalGridRefTrack,
     ghosttyTerminalNew,
-    ghosttyTerminalReset,
-    ghosttyTerminalResize,
-    ghosttyTerminalVtWriteUntil,
-    pattern GhosttyTerminalBoundaryOscEnd,
   )
 
 -- | A terminal, alive in the region @s@ that
@@ -206,85 +185,6 @@ closeTerminal open t = do
   modifyIORef' open (subtract (IntMap.size live))
   ghosttyTerminalFree t.handle
   releaseCallbacks t.installed
-
--- | A read of a terminal's keyed data, which resolving events needs.
-type Reader = forall a. TerminalData a -> IO a
-
--- | @ghostty_terminal_resize@, and the grid the size callback reports with
--- it. Its one documented refusal, a zero extent or a null terminal, cannot
--- be expressed, so only running out of memory remains. Returns the events
--- it caused: the end of a render hold, and an in-band size report (mode
--- 2048).
-resizeTerminal :: Reader -> Terminal s -> GridSize -> CellPixels -> IO [TerminalEvent]
-resizeTerminal get t g px = do
-  -- The size callback runs inside the resize, so the answers change first,
-  -- and change back if the resize is refused.
-  old <- readIORef t.answers
-  writeIORef t.answers old {grid = g, pixels = px}
-  ( expectSuccess (CallSite "ghostty_terminal_resize")
-      =<< ghosttyTerminalResize t.handle (fromExtent g.cols) (fromExtent g.rows) px.width px.height
-    )
-    `onException` writeIORef t.answers old
-  drainEvents get t
-
--- | @ghostty_terminal_reset@: a full reset (RIS), keeping the size. Returns
--- the events it caused: the end of a render hold. (The 'Reset' event is for
--- a reset the program asks for.)
-resetTerminal :: Reader -> Terminal s -> IO [TerminalEvent]
-resetTerminal get t = do
-  ghosttyTerminalReset t.handle
-  drainEvents get t
-
--- | The events buffered since the last drain, resolved.
-drainEvents :: Reader -> Terminal s -> IO [TerminalEvent]
-drainEvents get t = resolve get =<< drain t.events
-
--- | Write VT to the terminal, stopping after each OSC
--- (@GHOSTTY_TERMINAL_BOUNDARY_OSC_END@) to resolve the events so far, so a
--- prompt mark's cursor is read right after the mark (DESIGN.md §4.5).
--- Events buffered before the write come first, and adjacent 'WritePty's are
--- joined across stops. Every byte is written even if resolving throws (a
--- callback's exception, an unnamed enum value): the first such exception is
--- thrown after the whole write, so the terminal never stops part-way through
--- the input.
-feedTerminal :: Reader -> Terminal s -> ByteString -> IO [TerminalEvent]
-feedTerminal get t bytes = do
-  before <- try (drainEvents get t)
-  (failure, after) <- BSU.unsafeUseAsCStringLen bytes $ \(p, n) -> alloca $ \stop -> go stop (castPtr p) n (leftToMaybe before) []
-  whenJust failure throwIO
-  pure (joinWrites (fromRight [] before <> after))
-  where
-    go :: Ptr GhosttyTerminalWriteStop -> Ptr Word8 -> Int -> Maybe SomeException -> [[TerminalEvent]] -> IO (Maybe SomeException, [TerminalEvent])
-    go stop p n failure acc
-      | n <= 0 = pure (failure, concat (reverse acc))
-      | otherwise = do
-          poke stop emptyStop
-          r <- ghosttyTerminalVtWriteUntil t.handle p (fromIntegral n) boundary stop
-          resolved <- try (drainEvents get t)
-          let failure' = failure <|> leftToMaybe resolved
-              acc' = fromRight [] resolved : acc
-          case resultCode r of
-            ResultNoValue -> pure (failure', concat (reverse acc'))
-            ResultSuccess -> do
-              used <- fromIntegral . (.consumed) <$> peek stop
-              go stop (p `plusPtr` used) (n - used) failure' acc'
-            other -> throwIO (Invariant (CallSite "ghostty_terminal_vt_write_until") other)
-
-    boundary = let GhosttyTerminalBoundary b = GhosttyTerminalBoundaryOscEnd in fromIntegral b
-
-    -- GHOSTTY_INIT_SIZED: the size, and zeros. ('sizeOf' ignores its
-    -- argument.)
-    emptyStop :: GhosttyTerminalWriteStop
-    emptyStop =
-      GhosttyTerminalWriteStop
-        { size = fromIntegral (sizeOf emptyStop),
-          consumed = 0,
-          reached = 0,
-          kind = GhosttyTerminalStringKind 0,
-          introducer = GhosttyTerminalStringIntroducer 0,
-          end = GhosttyTerminalStringEnd 0,
-          byte = 0
-        }
 
 -- | @ghostty_terminal_grid_ref_track@: a tracked reference to the cell at a
 -- point of the active screen, registered with the terminal and counted;

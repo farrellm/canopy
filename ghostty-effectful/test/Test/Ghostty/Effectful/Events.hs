@@ -1,17 +1,29 @@
+{-# LANGUAGE PatternSynonyms #-}
+
 -- | Events and @feed@ (PLAN.md M1.6, DESIGN.md §4.5): the order of events
 -- across mixed streams and chunk boundaries, each prompt mark's cursor,
 -- query replies as 'WritePty', the answers 'TerminalConfig' gives and
 -- 'setT' changes, and the other callbacks' events.
 module Test.Ghostty.Effectful.Events (tests) where
 
+import Control.Exception (ErrorCall (..))
 import Data.ByteString qualified as BS
 import Effectful (Eff, IOE, runEff)
+import Effectful.Exception (try)
+import Foreign.C.Types (CSize)
+import Foreign.Marshal.Alloc (allocaBytes)
+import Foreign.Ptr (castFunPtrToPtr, castPtr, freeHaskellFunPtr, nullPtr)
+import Foreign.Storable (pokeByteOff)
 import Ghostty.Effectful (Ghostty, runGhostty)
+import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..))
 import Ghostty.Effectful.Event
-import Ghostty.Effectful.Internal.Terminal (Extent (..))
+import Ghostty.Effectful.Internal.Callbacks (Pending (..), onClipboardWrite)
+import Ghostty.Effectful.Internal.Terminal (Extent (..), Terminal (..))
 import Ghostty.Effectful.Mode (ModeKey (..))
 import Ghostty.Effectful.Point (Point (..))
 import Ghostty.Effectful.Terminal
+import Ghostty.FFI.Terminal (GhosttyTerminal (..), ghosttyTerminalSet, pattern GhosttyTerminalOptBell)
+import Ghostty.FFI.Terminal.Callbacks (mkGhosttyTerminalBellFn)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
@@ -178,6 +190,41 @@ tests =
               setT t (SetMode ModeSyncOutput) True
               feed t "x"
             evs @?= []
+        ],
+      testGroup
+        "regressions"
+        [ -- A failure while resolving one stop's events stopped the write
+          -- there, so the bytes after it never reached the terminal. Now
+          -- every byte is written and the failure thrown after.
+          testCase "regression 1: a failure mid-chunk still writes the rest" $ do
+            (fp, (mid, before)) <- withFresh $ \t -> do
+              -- a bell that records a failure, as a sheltered body would
+              fp <- liftIO (mkGhosttyTerminalBellFn (\_ _ -> modifyIORef' t.events (Failed (toException boom) :)))
+              _ <- liftIO (ghosttyTerminalSet t.handle GhosttyTerminalOptBell (castFunPtrToPtr fp))
+              a <- try @ErrorCall (feed t "\a\ESC]2;x\aabc")
+              ax <- getT t CursorX
+              liftIO (modifyIORef' t.events (Failed (toException boom) :))
+              b <- try @ErrorCall (feed t "de")
+              bx <- getT t CursorX
+              pure (fp, ((void a, ax), (void b, bx)))
+            freeHaskellFunPtr fp
+            (mid, before) @?= ((Left boom, 3), (Left boom, 5)),
+          -- Replies were joined only within one stop, so an OSC between two
+          -- replies split one reply into two writes.
+          testCase "regression 2: a reply split by an OSC stop is one write" $ do
+            evs <- withFresh (`feed` "\ESC[6n\ESC]7777;x\a\ESC[6n")
+            evs @?= [WritePty "\ESC[1;1R\ESC[1;1R"],
+          -- The clipboard callback read the whole request whatever its
+          -- size said. A short one is now refused unread: not even its
+          -- reply, which is null here, is called.
+          testCase "regression 4: a short clipboard write is refused unread" $ do
+            answers <- newIORef =<< withFresh (\t -> liftIO (readIORef t.answers))
+            buf <- newIORef []
+            allocaBytes 64 $ \p -> do
+              pokeByteOff p 0 (8 :: CSize)
+              onClipboardWrite buf answers (GhosttyTerminal nullPtr) nullPtr (castPtr p)
+            recorded <- readIORef buf
+            map failure recorded @?= [Just (ShortStruct (CallSite "GhosttyTerminalClipboardWriteFn") "GhosttyClipboardWrite" 8)]
         ]
     ]
 
@@ -222,3 +269,13 @@ config = terminalConfig (grid 80 24)
 -- | A grid of non-zero extents, built with the internal constructor.
 grid :: Word16 -> Word16 -> GridSize
 grid c r = GridSize {cols = Extent c, rows = Extent r}
+
+-- | What a test's injected failure throws.
+boom :: ErrorCall
+boom = ErrorCall "boom"
+
+-- | The binding's error a buffer entry recorded, if it is one.
+failure :: Pending -> Maybe GhosttyError
+failure = \case
+  Failed e -> fromException e
+  _ -> Nothing

@@ -23,7 +23,9 @@ events instead of callbacks. No export may expose a pointer.
   (title, cursor) is a `Pending` entry resolved between writes. A query's answer is configuration
   (`TerminalConfig`, and a `Set…` option named for the callback's row); ENQ and XTVERSION answer in
   C (`cbits/`), since they return a struct by value. Any operation whose C call can run a callback
-  returns the events it caused, as `feed`, `resize` and `reset` do.
+  returns the events it caused, as `feed`, `resize` and `reset` do (`Internal.Feed`, which can
+  read the terminal's keys); `setT`'s cannot, and a test holds that. A sized struct a callback
+  receives is read only after checking its `size` (`ShortStruct` otherwise).
 - **A C enum is closed at this level, with no unknown case**: an unnamed value is `UnknownEnum`
   (`Internal.Convert.unknownEnum`), because the version check and the layout test rule it out.
 - Tests may import `Internal` (to build values or reach `runGhosttyPinnedTo`).

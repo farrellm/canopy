@@ -45,6 +45,7 @@ import Effectful.Dispatch.Static (unsafeEff_, unsafeSeqUnliftIO)
 import Ghostty.Effectful.Event (TerminalEvent)
 import Ghostty.Effectful.Internal.Convert (fromCoordinate, pointTag, toPoint)
 import Ghostty.Effectful.Internal.Effect (Ghostty, Handles (..), owned)
+import Ghostty.Effectful.Internal.Feed (feedTerminal, resetTerminal, resizeTerminal)
 import Ghostty.Effectful.Internal.Keys (getData, setOption)
 import Ghostty.Effectful.Internal.Terminal
   ( CellPixels (..),
@@ -55,15 +56,12 @@ import Ghostty.Effectful.Internal.Terminal
     TrackedRef,
     closeTerminal,
     extent,
-    feedTerminal,
     fromExtent,
     moveTrackedRef,
     noCellPixels,
     openTerminal,
     refCoordinate,
     refHasValue,
-    resetTerminal,
-    resizeTerminal,
     terminalConfig,
     trackPoint,
     untrackRef,
@@ -85,7 +83,7 @@ withTerminal cfg k = do
       ( \t -> do
           -- A new terminal has no mode on that a resize reports to, so
           -- this causes no event.
-          when (cfg.cellPixels /= noCellPixels) $ void (resizeTerminal (getData t.handle) t cfg.size cfg.cellPixels)
+          when (cfg.cellPixels /= noCellPixels) $ void (resizeTerminal t cfg.size cfg.cellPixels)
           unlift (k t)
       )
 
@@ -97,12 +95,13 @@ withTerminal cfg k = do
 --
 -- The write stops after each OSC, so that a prompt mark's cursor is read
 -- right after the mark, and a title change's title right after the change.
--- Events from other calls that have not been returned yet (a 'setT' the
--- library reported on) come first.
+-- If an earlier 'feed', 'resize' or 'reset' threw before returning its
+-- events, what it left comes first. Every byte is written even if resolving an event throws; the
+-- exception is thrown after the write.
 feed :: (Ghostty :> es) => Terminal s -> ByteString -> Eff es [TerminalEvent]
 feed t bytes = do
   _ <- owned "feed"
-  unsafeEff_ (feedTerminal (getData t.handle) t bytes)
+  unsafeEff_ (feedTerminal t bytes)
 
 -- | Resize the grid and set the cell size. A terminal's primary screen
 -- reflows if wraparound is on; the alternate screen does not. Returns what
@@ -111,7 +110,7 @@ feed t bytes = do
 resize :: (Ghostty :> es) => Terminal s -> GridSize -> CellPixels -> Eff es [TerminalEvent]
 resize t g px = do
   _ <- owned "resize"
-  unsafeEff_ (resizeTerminal (getData t.handle) t g px)
+  unsafeEff_ (resizeTerminal t g px)
 
 -- | A full reset (RIS): modes, scrollback, scrolling region and screen
 -- contents, keeping the size. Returns what the reset reported: the end of a
@@ -119,7 +118,7 @@ resize t g px = do
 reset :: (Ghostty :> es) => Terminal s -> Eff es [TerminalEvent]
 reset t = do
   _ <- owned "reset"
-  unsafeEff_ (resetTerminal (getData t.handle) t)
+  unsafeEff_ (resetTerminal t)
 
 -- | How many terminals are open in this 'Ghostty.Effectful.runGhostty': each
 -- 'withTerminal' adds one for its duration.
@@ -138,7 +137,10 @@ getT t key = do
   unsafeEff_ (getData t.handle key)
 
 -- | Write an option; the value's type follows from it (§4.4). The options
--- that answer the program's queries take effect at its next query.
+-- that answer the program's queries take effect at its next query. A write
+-- causes no event: the header says setting a mode never invokes a callback
+-- (not even the end of a render hold), and a test writes every option and
+-- finds nothing reported (§4.5).
 --
 -- > setT t SetTitle "canopy"
 -- > setT t (SetMode ModeBracketedPaste) True

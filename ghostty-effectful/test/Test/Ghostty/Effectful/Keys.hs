@@ -77,6 +77,14 @@ tests =
         failures <- ghostty $ withTerminal config $ \t ->
           concat <$> traverse (\(Some o) -> written t o) allOptions
         failures @?= [],
+      -- Regression 3 (DESIGN.md §4.5): 'setT' returns no events because
+      -- none of its C calls runs a callback; were one to, its event would
+      -- wait here for the next 'feed'.
+      testCase "regression 3: writing every option reports nothing" $ do
+        evs <- ghostty $ withTerminal config $ \t -> do
+          traverse_ (\(Some o) -> written t o) allOptions
+          feed t ""
+        evs @?= [],
       testCase "every option is a constructor, or deferred" $
         sort (ordNub (map (\(Some o) -> optionNumber (optionKey o)) allOptions) <> map snd deferredOptions)
           @?= sort (map snd ghosttyTerminalOptionEnum.values),

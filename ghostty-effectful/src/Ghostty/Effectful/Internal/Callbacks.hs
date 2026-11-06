@@ -30,6 +30,9 @@ module Ghostty.Effectful.Internal.Callbacks
     releaseCallbacks,
     setEnquiryAnswer,
     setXtversionAnswer,
+
+    -- * Callbacks
+    onClipboardWrite,
   )
 where
 
@@ -42,7 +45,7 @@ import Foreign.Marshal.Array (mallocArray, peekArray)
 import Foreign.Marshal.Utils (copyBytes, with)
 import Foreign.Ptr (FunPtr, Ptr, castFunPtr, castFunPtrToPtr, castPtr, freeHaskellFunPtr, nullPtr)
 import Foreign.Storable (Storable (..))
-import Ghostty.Effectful.Error (CallSite (..))
+import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..))
 import Ghostty.Effectful.Event
 import Ghostty.Effectful.Internal.Convert (unknownEnum)
 import Ghostty.Effectful.Internal.Error (expectSuccess)
@@ -50,7 +53,7 @@ import Ghostty.Effectful.Internal.Size (CellPixels (..), GridSize (..), extent, 
 import Ghostty.Effectful.Point (Point (..))
 import Ghostty.Effectful.Terminal.Keys (ColorScheme (..), DeviceAttributes (..), TerminalData (..))
 import Ghostty.FFI.Device
-import Ghostty.FFI.Layout (CEnum)
+import Ghostty.FFI.Layout (CEnum, CStruct (..))
 import Ghostty.FFI.Osc (ghosttyOscTerminatorEnum, pattern GhosttyOscTerminatorBel, pattern GhosttyOscTerminatorSt, pattern GhosttyOscTerminatorUnknown)
 import Ghostty.FFI.SizeReport (GhosttySizeReportSize (..))
 import Ghostty.FFI.Terminal
@@ -317,15 +320,29 @@ onAttributesAnswer buf answers _ _ out = sheltered buf 0 $ do
 -- | @CLIPBOARD_WRITE@: accepted, recorded and answered with success;
 -- refused, answered with a denial. The reply is the one call a callback
 -- makes, because the header requires it before the callback returns.
+--
+-- The request is a sized struct, whose fields may be read only as far as its
+-- @size@ covers. One smaller than the binding's is recorded as 'ShortStruct'
+-- and not read, not even its @reply@; the header says returning without a
+-- reply denies the write.
 onClipboardWrite :: IORef [Pending] -> IORef Answers -> GhosttyTerminal -> Ptr () -> Ptr GhosttyClipboardWrite -> IO ()
 onClipboardWrite buf answers _ _ wp = sheltered buf () $ do
+  -- @size@ is the first field, so at offset 0 whatever the struct's size.
+  given <- peekByteOff wp 0 :: IO CSize
+  if toInteger given < toInteger ghosttyClipboardWriteLayout.size
+    then push buf (Failed (toException (ShortStruct clipboardSite ghosttyClipboardWriteLayout.name (toInteger given))))
+    else answerClipboardWrite buf answers wp
+
+-- | Answer a clipboard write whose struct is whole.
+answerClipboardWrite :: IORef [Pending] -> IORef Answers -> Ptr GhosttyClipboardWrite -> IO ()
+answerClipboardWrite buf answers wp = do
   a <- readIORef answers
   w <- peek wp
   location <- case w.location of
     GhosttyClipboardLocationStandard -> pure (Just StandardClipboard)
     GhosttyClipboardLocationSelection -> pure (Just SelectionClipboard)
     GhosttyClipboardLocationPrimary -> pure (Just PrimaryClipboard)
-    GhosttyClipboardLocationUnknown n -> Nothing <$ push buf (Unnamed site ghosttyClipboardLocationEnum n)
+    GhosttyClipboardLocationUnknown n -> Nothing <$ push buf (Unnamed clipboardSite ghosttyClipboardLocationEnum n)
   ok <- case location of
     Just loc | a.clipboard -> do
       cs <- peekArray (fromIntegral w.contentsLen) w.contents
@@ -339,8 +356,10 @@ onClipboardWrite buf answers _ _ wp = sheltered buf () $ do
             remember = 0
           }
   with reply (callGhosttyClipboardWriteReplyFn w.reply wp)
-  where
-    site = CallSite "GhosttyTerminalClipboardWriteFn"
+
+-- | Where a clipboard write's errors come from.
+clipboardSite :: CallSite
+clipboardSite = CallSite "GhosttyTerminalClipboardWriteFn"
 
 -- | @DESKTOP_NOTIFICATION@.
 onNotification :: IORef [Pending] -> GhosttyTerminal -> Ptr () -> Ptr GhosttyTerminalDesktopNotification -> IO ()
