@@ -260,9 +260,10 @@ data KeyEvent = KeyEvent
     -- | whether the key is part of an input method's composition
     composing :: Bool,
     -- | the text the key produces in the current layout, before Control or
-    -- Meta change it; empty for none. The header asks for no C0 control
-    -- characters (U+0000–U+001F, U+007F) and no platform function-key
-    -- codes here: those keys are encoded from 'key'.
+    -- Meta change it; empty for none. C0 control characters
+    -- (U+0000–U+001F) and DEL, which the header asks not to be given, are
+    -- dropped: those keys are encoded from 'key'. Nor should platform
+    -- function-key codes be here.
     text :: Text,
     -- | the character the key produces without Shift; 'Nothing' (as
     -- @'Just' '\\NUL'@) for none. The Kitty protocol finds a text key by

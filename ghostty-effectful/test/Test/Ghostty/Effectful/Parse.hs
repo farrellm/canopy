@@ -35,7 +35,10 @@ tests =
           testCase "bright colours and resets" $
             sgr "91;102;39;49;22" >>= (@?= [SgrBrightFg8 9, SgrBrightBg8 10, SgrResetFg, SgrResetBg, SgrResetBold]),
           testCase "an unknown parameter keeps its lists" $
-            sgr "1;999" >>= (@?= [SgrBold, SgrUnknown [1, 999] [999]])
+            sgr "1;999" >>= (@?= [SgrBold, SgrUnknown [1, 999] [999]]),
+          testCase "24 parameters are parsed, and more set nothing, as the terminal ignores them" $ do
+            sgr (T.intercalate ";" (replicate 24 "1")) >>= (@?= replicate 24 SgrBold)
+            sgr (T.intercalate ";" (replicate 25 "1")) >>= (@?= [])
         ],
       testGroup
         "OSC"

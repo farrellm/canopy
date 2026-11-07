@@ -32,7 +32,8 @@ import Ghostty.Effectful.Internal.Parse
 -- | The attributes an SGR sequence's parameters set, in order. Each
 -- parameter is paired with the separator after it (the last one's is not
 -- read): @ESC[1;4:3m@ is @[(1, Semicolon), (4, Colon), (3, Semicolon)]@.
--- No parameters is SGR 0.
+-- No parameters is SGR 0. More than 24 parameters set nothing, since the
+-- terminal ignores such a sequence.
 --
 -- >>> import Effectful (runEff)
 -- >>> import Ghostty.Effectful (runGhostty)

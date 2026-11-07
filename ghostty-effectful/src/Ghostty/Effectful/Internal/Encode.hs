@@ -66,10 +66,11 @@ module Ghostty.Effectful.Internal.Encode
   )
 where
 
-import Control.Exception (onException, throwIO)
+import Control.Exception (finally, onException, throwIO)
 import Data.Bits ((.|.))
 import Data.ByteString qualified as BS
 import Data.ByteString.Unsafe qualified as BSU
+import Data.Text qualified as T
 import Foreign.C.Types (CBool, CChar, CSize)
 import Foreign.Marshal.Alloc (alloca, allocaBytes)
 import Foreign.Marshal.Utils (fromBool, toBool, with)
@@ -79,7 +80,7 @@ import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), ResultCode (..
 import Ghostty.Effectful.Event (TerminalEvent)
 import Ghostty.Effectful.Input
 import Ghostty.Effectful.Internal.Convert (modeCode, withSize)
-import Ghostty.Effectful.Internal.Error (expectSuccess, resultCode)
+import Ghostty.Effectful.Internal.Error (newHandle, resultCode)
 import Ghostty.Effectful.Internal.Feed (drainEvents)
 import Ghostty.Effectful.Internal.Size (CellPixels (..), Extent, GridSize (..), fromExtent)
 import Ghostty.Effectful.Internal.Terminal (Terminal (..))
@@ -240,14 +241,17 @@ encodeKeyEvent enc e = do
   ghosttyKeyEventSetConsumedMods enc.event (modsBits e.consumedMods)
   ghosttyKeyEventSetComposing enc.event (fromBool e.composing)
   ghosttyKeyEventSetUnshiftedCodepoint enc.event (maybe 0 (fromIntegral . ord) e.unshifted)
-  let utf8 = encodeUtf8 e.text :: ByteString
+  -- The header asks for no C0 control or DEL in the text: the encoder
+  -- derives a control key from the key itself.
+  let utf8 = encodeUtf8 (T.filter (\c -> c >= ' ' && c /= '\DEL') e.text) :: ByteString
       encode = bytesVia (CallSite "ghostty_key_encoder_encode") (ghosttyKeyEncoderEncode enc.encoder enc.event)
   if BS.null utf8
     then ghosttyKeyEventSetUtf8 enc.event nullPtr 0 >> encode
     else BSU.unsafeUseAsCStringLen utf8 $ \(p, n) -> do
       ghosttyKeyEventSetUtf8 enc.event p (fromIntegral n)
-      -- The event keeps the pointer; leave none behind that outlives it.
-      encode <* ghosttyKeyEventSetUtf8 enc.event nullPtr 0
+      -- The event keeps the pointer; leave none behind that outlives it,
+      -- even when the encode throws.
+      encode `finally` ghosttyKeyEventSetUtf8 enc.event nullPtr 0
 
 -- | The binding's key.
 keyCode :: Key -> GhosttyKey
@@ -843,12 +847,3 @@ pasteInto t safety text =
             other -> throwIO (Invariant site other)
   where
     site = CallSite "ghostty_terminal_paste"
-
--- * Handles
-
--- | A handle from a @…_new(allocator, &out)@ call, with the default
--- allocator (§3.3); its only documented failure is running out of memory.
-newHandle :: (Storable h) => CallSite -> (Ptr allocator -> Ptr h -> IO GhosttyResult) -> IO h
-newHandle site new = alloca $ \out -> do
-  expectSuccess site =<< new nullPtr out
-  peek out

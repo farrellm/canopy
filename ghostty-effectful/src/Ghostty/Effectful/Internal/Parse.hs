@@ -33,7 +33,7 @@ import Foreign.Storable (Storable, peek)
 import Ghostty.Effectful.Color (Rgb)
 import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), ResultCode (..))
 import Ghostty.Effectful.Internal.Convert (fromRgb, fromUnderline, unknownEnum)
-import Ghostty.Effectful.Internal.Error (expectSuccess)
+import Ghostty.Effectful.Internal.Error (expectSuccess, newHandle)
 import Ghostty.Effectful.Style (Underline)
 import Ghostty.FFI.Osc
 import Ghostty.FFI.Sgr
@@ -120,20 +120,20 @@ data SgrAttribute
 
 -- | @ghostty_sgr_set_params@ and @ghostty_sgr_next@ until it is done, on a
 -- parser of its own. An unknown attribute's lists are borrowed from the
--- parser, so they are copied out before the next call.
+-- parser, so they are copied out before the next call. More than
+-- 'maxSgrParams' parameters set nothing: the terminal ignores such a
+-- sequence, and the parser refuses their separators.
 parseSgrParams :: [(Word16, Separator)] -> IO [SgrAttribute]
-parseSgrParams ps =
-  bracket new ghosttySgrFree $ \parser ->
-    withArrayLen (map fst ps) $ \n params ->
-      withArrayLen (map (sepChar . snd) ps) $ \_ seps -> do
-        expectSuccess (CallSite "ghostty_sgr_set_params")
-          =<< ghosttySgrSetParams parser params seps (fromIntegral n)
-        alloca $ \ap -> collect parser ap []
+parseSgrParams ps
+  | length ps > maxSgrParams = pure []
+  | otherwise =
+      bracket (newHandle (CallSite "ghostty_sgr_new") ghosttySgrNew) ghosttySgrFree $ \parser ->
+        withArrayLen (map fst ps) $ \n params ->
+          withArrayLen (map (sepChar . snd) ps) $ \_ seps -> do
+            expectSuccess (CallSite "ghostty_sgr_set_params")
+              =<< ghosttySgrSetParams parser params seps (fromIntegral n)
+            alloca $ \ap -> collect parser ap []
   where
-    new = alloca $ \out -> do
-      expectSuccess (CallSite "ghostty_sgr_new") =<< ghosttySgrNew nullPtr out
-      peek out
-
     sepChar = \case
       Semicolon -> castCharToCChar ';'
       Colon -> castCharToCChar ':'
@@ -183,6 +183,12 @@ parseSgrParams ps =
       SgrAttrBg256 i -> pure (SgrBg256 i)
       SgrAttrFg256 i -> pure (SgrFg256 i)
       SgrAttrOther (GhosttySgrAttributeTag n) -> unknownEnum site ghosttySgrAttributeTagEnum n
+
+-- | The most parameters a CSI sequence the terminal acts on has (the VT
+-- parser's @MAX_PARAMS@), which is also how many separators
+-- @ghostty_sgr_set_params@ takes.
+maxSgrParams :: Int
+maxSgrParams = 24
 
 -- * OSC
 
@@ -250,20 +256,16 @@ data UnknownOsc = UnknownOsc
 -- parser is freed.
 parseOscBytes :: CSize -> OscTerminator -> ByteString -> IO (Maybe OscCommand)
 parseOscBytes limit end body =
-  bracket new ghosttyOscFree $ \parser -> do
+  bracket (newHandle (CallSite "ghostty_osc_new") ghosttyOscNew) ghosttyOscFree $ \parser -> do
     when (limit > 0) $
       with limit $ \lp ->
         expectSuccess (CallSite "ghostty_osc_set") =<< ghosttyOscSet parser GhosttyOscOptUnknownMaxBytes (castPtr lp)
-    traverse_ (ghosttyOscNext parser) (BS.unpack body)
+    BS.foldr (\b rest -> ghosttyOscNext parser b >> rest) pass body
     cmd <- ghosttyOscEnd parser $ case end of
       TerminatedBySt -> 0x5c
       TerminatedByBel -> 0x07
     ghosttyOscCommandType cmd >>= command cmd
   where
-    new = alloca $ \out -> do
-      expectSuccess (CallSite "ghostty_osc_new") =<< ghosttyOscNew nullPtr out
-      peek out
-
     site = CallSite "ghostty_osc_command_data"
 
     -- One datum of the command; the header says each is there for its type.

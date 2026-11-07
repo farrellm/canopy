@@ -53,6 +53,10 @@ tests =
                   keyPress KeyShiftLeft
                 ]
             r @?= ["a", "\ETX", "\ESC[A", ""],
+          testCase "control characters in a key's text are dropped: the key is encoded from its code" $ do
+            r <- ghostty $ withKeyEncoder defaultKeyOptions $ \enc ->
+              traverse (encodeKey enc) [keyPress KeyEnter `withText` "\r", keyPress KeyEnter]
+            r @?= ["\r", "\r"],
           testCase "options from a terminal: cursor-key application mode (DECCKM)" $ do
             r <- ghostty $ withTerminal config $ \t -> withKeyEncoder defaultKeyOptions $ \enc -> do
               before <- encodeKey enc (keyPress KeyArrowUp)
@@ -211,6 +215,10 @@ withAction e a = KeyEvent {action = a, key = e.key, mods = e.mods, consumedMods 
 -- | The same event, with another unshifted character.
 withUnshifted :: KeyEvent -> Maybe Char -> KeyEvent
 withUnshifted e u = KeyEvent {action = e.action, key = e.key, mods = e.mods, consumedMods = e.consumedMods, composing = e.composing, text = e.text, unshifted = u}
+
+-- | The same event, with other text.
+withText :: KeyEvent -> Text -> KeyEvent
+withText e t = KeyEvent {action = e.action, key = e.key, mods = e.mods, consumedMods = e.consumedMods, composing = e.composing, text = t, unshifted = e.unshifted}
 
 -- | The header's name for a value.
 rowName :: CEnum -> Integer -> Maybe Text
