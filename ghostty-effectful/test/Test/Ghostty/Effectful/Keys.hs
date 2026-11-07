@@ -8,16 +8,16 @@ module Test.Ghostty.Effectful.Keys (tests) where
 
 import Data.Char (isUpper, toUpper)
 import Data.List (stripPrefix)
-import Effectful (Eff, IOE, runEff)
+import Effectful (Eff, IOE)
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Marshal.Utils (with)
 import Foreign.Ptr (castPtr)
 import Foreign.Storable (poke)
-import Ghostty.Effectful (Ghostty, runGhostty)
+import Ghostty.Effectful (Ghostty)
 import Ghostty.Effectful.Color
 import Ghostty.Effectful.Internal.Convert (modeCode)
 import Ghostty.Effectful.Internal.Keys (dataKey, optionKey)
-import Ghostty.Effectful.Internal.Terminal (Extent (..), Terminal (..))
+import Ghostty.Effectful.Internal.Terminal (Terminal (..))
 import Ghostty.Effectful.Mode
 import Ghostty.Effectful.Style (defaultStyle)
 import Ghostty.Effectful.Terminal
@@ -52,6 +52,7 @@ import Ghostty.FFI.Terminal
     pattern GhosttyTerminalOptWritePty,
   )
 import Ghostty.FFI.Types (pattern GhosttyInvalidValue, pattern GhosttySuccess)
+import Test.Ghostty.Effectful.Support (config, ghostty)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
@@ -104,14 +105,6 @@ tests =
         paletteColor (setPaletteColor 7 (Rgb 1 2 3) p) 7 @?= Rgb 1 2 3
         paletteColor p 255 @?= Rgb 255 255 255
     ]
-
--- | Run under the effect, failing the test on a version mismatch.
-ghostty :: Eff '[Ghostty, IOE] a -> IO a
-ghostty act = runEff (runGhostty act) >>= either (assertFailure . show) pure
-
--- | An 80×24 terminal.
-config :: TerminalConfig
-config = terminalConfig GridSize {cols = Extent 80, rows = Extent 24}
 
 -- | A constructor's name as the header spells its row: the first word of
 -- its 'show', in upper snake case (@CursorX@ is @CURSOR_X@).

@@ -7,13 +7,13 @@ import Control.Concurrent (forkIO)
 import Control.Exception (ErrorCall (..), throwIO, try)
 import Effectful (Eff, IOE, Limit (..), Persistence (..), UnliftStrategy (..), runEff, withEffToIO, (:>))
 import Effectful.Exception qualified as E
-import Ghostty.Effectful (Ghostty, runGhostty)
+import Ghostty.Effectful (runGhostty)
 import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), VersionMismatch (..))
 import Ghostty.Effectful.Internal.Effect (linkedBuild, runGhosttyPinnedTo)
-import Ghostty.Effectful.Internal.Terminal (Extent (..))
 import Ghostty.Effectful.Terminal
+import Test.Ghostty.Effectful.Support (config, ghostty, grid)
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
+import Test.Tasty.HUnit (testCase, (@?=))
 
 tests :: TestTree
 tests =
@@ -60,10 +60,6 @@ tests =
         r @?= Left (WrongThread (CallSite "withTerminal"))
     ]
 
--- | Run under the effect, failing the test on a version mismatch.
-ghostty :: Eff '[Ghostty, IOE] a -> IO a
-ghostty act = runEff (runGhostty act) >>= either (assertFailure . show) pure
-
 -- | Run an action on another thread with the effect's environment cloned
 -- into it, as effectful's own @forkIO@ does (§4.6), and wait for its result.
 fromForkedThread :: (IOE :> es) => Eff es () -> Eff es (Either GhosttyError ())
@@ -71,11 +67,3 @@ fromForkedThread act = withEffToIO (ConcUnlift Persistent Unlimited) $ \run -> d
   done <- newEmptyMVar
   _ <- forkIO (try (run act) >>= putMVar done)
   takeMVar done
-
--- | An 80×24 terminal.
-config :: TerminalConfig
-config = terminalConfig (grid 80 24)
-
--- | A grid of non-zero extents, built with the internal constructor.
-grid :: Word16 -> Word16 -> GridSize
-grid c r = GridSize {cols = Extent c, rows = Extent r}

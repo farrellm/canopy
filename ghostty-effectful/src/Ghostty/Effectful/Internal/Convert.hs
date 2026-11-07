@@ -21,18 +21,26 @@ module Ghostty.Effectful.Internal.Convert
 
     -- * Modes
     modeCode,
+
+    -- * Sized structs
+    sized,
+    withSize,
+    refTemplate,
   )
 where
 
 import Control.Exception (throwIO)
-import Foreign.C.Types (CInt)
+import Foreign.C.Types (CInt, CSize)
 import Foreign.Marshal.Utils (toBool)
+import Foreign.Ptr (nullPtr)
+import Foreign.Storable (Storable (..))
 import Ghostty.Effectful.Color (Rgb (..))
 import Ghostty.Effectful.Error (CallSite, GhosttyError (..))
 import Ghostty.Effectful.Mode (ModeKey (..))
 import Ghostty.Effectful.Point (KnownCoord (..), Point (..), SCoord (..))
 import Ghostty.Effectful.Style (CellColor (..), Style (..), Underline (..))
 import Ghostty.FFI.Color (GhosttyColorRgb (..))
+import Ghostty.FFI.GridRef (GhosttyGridRef (..))
 import Ghostty.FFI.Layout (CEnum (..))
 import Ghostty.FFI.Modes
 import Ghostty.FFI.Point
@@ -181,3 +189,18 @@ modeCode = \case
   ModeVisibilityReport -> GhosttyModeVisibilityReport
   ModeInBandResize -> GhosttyModeInBandResize
   ModePasteEvents -> GhosttyModePasteEvents
+
+-- | A sized struct's own size, for @GHOSTTY_INIT_SIZED@: the template at
+-- the size of the struct it makes ('sizeOf' ignores its argument).
+sized :: (Storable b) => (CSize -> b) -> CSize
+sized mk = fromIntegral (sizeOf (mk 0))
+
+-- | A sized struct made at its own size: @withSize (\\size -> S {size, ..})@
+-- writes the struct once, where @S {size = sized (\\n -> S {size = n, ..}),
+-- ..}@ writes it twice.
+withSize :: (Storable b) => (CSize -> b) -> b
+withSize mk = mk (sized mk)
+
+-- | An empty grid reference of the given size.
+refTemplate :: CSize -> GhosttyGridRef
+refTemplate n = GhosttyGridRef {size = n, node = nullPtr, x = 0, y = 0}

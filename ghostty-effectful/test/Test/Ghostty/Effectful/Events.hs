@@ -8,13 +8,13 @@ module Test.Ghostty.Effectful.Events (tests) where
 
 import Control.Exception (ErrorCall (..))
 import Data.ByteString qualified as BS
-import Effectful (Eff, IOE, runEff)
+import Effectful (Eff, IOE)
 import Effectful.Exception (try)
 import Foreign.C.Types (CSize)
 import Foreign.Marshal.Alloc (allocaBytes)
 import Foreign.Ptr (castFunPtrToPtr, castPtr, freeHaskellFunPtr, nullPtr)
 import Foreign.Storable (pokeByteOff)
-import Ghostty.Effectful (Ghostty, runGhostty)
+import Ghostty.Effectful (Ghostty)
 import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..))
 import Ghostty.Effectful.Event
 import Ghostty.Effectful.Internal.Callbacks (Pending (..), onClipboardWrite)
@@ -24,8 +24,9 @@ import Ghostty.Effectful.Point (Point (..))
 import Ghostty.Effectful.Terminal
 import Ghostty.FFI.Terminal (GhosttyTerminal (..), ghosttyTerminalSet, pattern GhosttyTerminalOptBell)
 import Ghostty.FFI.Terminal.Callbacks (mkGhosttyTerminalBellFn)
+import Test.Ghostty.Effectful.Support (config, ghostty, grid)
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
+import Test.Tasty.HUnit (testCase, (@?=))
 
 tests :: TestTree
 tests =
@@ -260,15 +261,7 @@ withFresh = withConfig config
 
 -- | Run with a fresh terminal, failing the test on a version mismatch.
 withConfig :: TerminalConfig -> (forall s. Terminal s -> Eff '[Ghostty, IOE] a) -> IO a
-withConfig cfg k = runEff (runGhostty (withTerminal cfg k)) >>= either (assertFailure . show) pure
-
--- | An 80×24 terminal.
-config :: TerminalConfig
-config = terminalConfig (grid 80 24)
-
--- | A grid of non-zero extents, built with the internal constructor.
-grid :: Word16 -> Word16 -> GridSize
-grid c r = GridSize {cols = Extent c, rows = Extent r}
+withConfig cfg k = ghostty (withTerminal cfg k)
 
 -- | What a test's injected failure throws.
 boom :: ErrorCall

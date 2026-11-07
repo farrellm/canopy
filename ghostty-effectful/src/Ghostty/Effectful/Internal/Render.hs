@@ -61,7 +61,7 @@ import Ghostty.Effectful.Cell (Cell (..), CellWidth (..), Hyperlink (..), Semant
 import Ghostty.Effectful.Color (Palette, paletteFromList)
 import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), ResultCode (..))
 import Ghostty.Effectful.Internal.Callbacks (captureAttach, captureDetach, captureFraming, captureHeld)
-import Ghostty.Effectful.Internal.Convert (enumName, fromRgb, fromStyle, toPoint, unknownEnum)
+import Ghostty.Effectful.Internal.Convert (enumName, fromRgb, fromStyle, refTemplate, sized, toPoint, unknownEnum)
 import Ghostty.Effectful.Internal.Error (expectSuccess, resultCode)
 import Ghostty.Effectful.Internal.Terminal (Terminal (..), forgetRegion)
 import Ghostty.Effectful.Point (Coord (..), Point (..))
@@ -69,7 +69,7 @@ import Ghostty.Effectful.Render.Keys
 import Ghostty.Effectful.Style (defaultStyle)
 import Ghostty.Effectful.Terminal.Keys (CursorShape (..))
 import Ghostty.FFI.Color (GhosttyColorRgb (..))
-import Ghostty.FFI.GridRef (GhosttyGridRef (..), ghosttyGridRefHyperlinkUri)
+import Ghostty.FFI.GridRef (ghosttyGridRefHyperlinkUri)
 import Ghostty.FFI.Render
 import Ghostty.FFI.Screen
 import Ghostty.FFI.Style (GhosttyStyle, ghosttyStyleDefault)
@@ -368,11 +368,6 @@ getFrameData rs key = case key of
       GhosttyRenderStateCursorVisualStyleBlockHollow -> pure HollowBlockCursor
       GhosttyRenderStateCursorVisualStyleUnknown n -> unknownEnum site ghosttyRenderStateCursorVisualStyleEnum n
 
--- | A sized struct's own size, for @GHOSTTY_INIT_SIZED@: the template at
--- the size of the struct it makes ('sizeOf' ignores its argument).
-sized :: (Storable b) => (CSize -> b) -> CSize
-sized mk = fromIntegral (sizeOf (mk 0))
-
 -- | An empty cursor of the given size.
 cursorTemplate :: CSize -> GhosttyRenderStateCursor
 cursorTemplate n =
@@ -401,10 +396,6 @@ colorsTemplate n =
     }
   where
     black = GhosttyColorRgb {r = 0, g = 0, b = 0}
-
--- | An empty grid reference of the given size.
-refTemplate :: CSize -> GhosttyGridRef
-refTemplate n = GhosttyGridRef {size = n, node = nullPtr, x = 0, y = 0}
 
 -- | @ghostty_render_state_row_get@ at the key's output type, on the row.
 -- Any failure is 'Invariant'.

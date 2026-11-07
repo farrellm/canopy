@@ -12,15 +12,15 @@ import Data.List (stripPrefix)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as T
 import Data.Vector qualified as V
-import Effectful (Eff, IOE, runEff)
+import Effectful (Eff, IOE)
 import Effectful.Exception qualified as E
 import Foreign.Marshal.Utils (with)
-import Ghostty.Effectful (Ghostty, runGhostty)
+import Ghostty.Effectful (Ghostty)
 import Ghostty.Effectful.Cell
 import Ghostty.Effectful.Color
 import Ghostty.Effectful.Event (TerminalEvent (..))
 import Ghostty.Effectful.Internal.Render (cellKeys, frameKey, rowKey)
-import Ghostty.Effectful.Internal.Terminal (Extent (..), Terminal (..))
+import Ghostty.Effectful.Internal.Terminal (Terminal (..))
 import Ghostty.Effectful.Mode (ModeKey (..))
 import Ghostty.Effectful.Point (Point (..))
 import Ghostty.Effectful.Render
@@ -54,6 +54,7 @@ import Ghostty.FFI.Render
     pattern GhosttyRenderStateRowOptionDirty,
   )
 import Ghostty.FFI.Terminal (GhosttyTerminalScrollViewport (..), ghosttyTerminalScrollViewport)
+import Test.Ghostty.Effectful.Support (config, ghostty, grid)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
@@ -427,10 +428,6 @@ freshRow r k = do
 
 -- * Helpers
 
--- | Run under the effect, failing the test on a version mismatch.
-ghostty :: Eff '[Ghostty, IOE] a -> IO a
-ghostty act = runEff (runGhostty act) >>= either (assertFailure . show) pure
-
 -- | Feed an 80×24 terminal, and read one frame of it.
 rendered :: ByteString -> (forall s f. Frame s f -> Eff '[Ghostty, IOE] a) -> IO a
 rendered bytes k = ghostty $ withTerminal config $ \t -> withRenderState t $ \rs -> do
@@ -466,14 +463,6 @@ fg, bg, cur :: Rgb
 fg = Rgb 1 2 3
 bg = Rgb 4 5 6
 cur = Rgb 7 8 9
-
--- | An 80×24 terminal.
-config :: TerminalConfig
-config = terminalConfig (grid 80 24)
-
--- | A grid of non-zero extents, built with the internal constructor.
-grid :: Word16 -> Word16 -> GridSize
-grid c r = GridSize {cols = Extent c, rows = Extent r}
 
 -- | A constructor's name as the header spells its row (@CursorX@ is
 -- @CURSOR_X@).

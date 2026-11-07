@@ -183,6 +183,21 @@ Written as changes land, not at release (DESIGN.md §2.9).
   frame under `mask`, so an asynchronous exception cannot leave it open for good; a render state
   with no rows has no rows, not 65536; a row move that fails no longer leaves a stale count for the
   next read. `setOption` counts every write itself, and a render state keeps its `Terminal`.
+- `Ghostty.Effectful.Format` (M1.8): `format` renders a terminal's active screen, scrollback
+  included, as plain text, VT or HTML, and `formatRange` a range of it (`Span`, `Block` or
+  `WholeRows`, in any coordinate system; `Nothing` when an end is outside it). Options: unwrap,
+  trim, and the terminal and screen extras VT output can carry. A formatter is made and freed inside
+  each call, so a range's untracked grid references cannot go stale (DESIGN.md §4.2).
+- Formatter goldens (`ghostty-effectful/test/golden/format/`) over canned streams: colours (16, 256,
+  direct, attributes), wide and combining characters and a ZWJ sequence, soft wraps (and `unwrap`),
+  OSC 8 links ended by ST and BEL, and scrollback; each in plain, VT and HTML, plus a row range, a
+  block, a span, and VT without trimming.
+- Fixed: a scrollback point past the end of the scrollback resolved to an active-area row, since
+  the library bounds a history row only by the whole screen; `track`, `moveRef` and `formatRange`
+  now refuse it (regression 6; DESIGN.md §4.4).
+- Fixed: `refPoint @'History` of a reference to an active-area cell gave a scrollback row past the
+  scrollback (the cell's screen row), the converse of regression 6; it is now `Nothing`
+  (regression 7; DESIGN.md §4.4).
 
 ### M0: infrastructure
 

@@ -53,7 +53,7 @@ import Ghostty.Effectful.Internal.Terminal
     GridSize (..),
     Terminal (..),
     TerminalConfig (..),
-    TrackedRef,
+    TrackedRef (..),
     closeTerminal,
     extent,
     fromExtent,

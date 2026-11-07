@@ -36,11 +36,13 @@ library
     Ghostty.Effectful.Color
     Ghostty.Effectful.Error
     Ghostty.Effectful.Event
+    Ghostty.Effectful.Format
     Ghostty.Effectful.Internal.Callbacks
     Ghostty.Effectful.Internal.Convert
     Ghostty.Effectful.Internal.Effect
     Ghostty.Effectful.Internal.Error
     Ghostty.Effectful.Internal.Feed
+    Ghostty.Effectful.Internal.Format
     Ghostty.Effectful.Internal.Keys
     Ghostty.Effectful.Internal.Render
     Ghostty.Effectful.Internal.Size
@@ -85,8 +87,10 @@ test-suite ghostty-effectful-test
   other-modules:
     Test.Ghostty.Effectful
     Test.Ghostty.Effectful.Events
+    Test.Ghostty.Effectful.Format
     Test.Ghostty.Effectful.Keys
     Test.Ghostty.Effectful.Render
+    Test.Ghostty.Effectful.Support
     Test.Ghostty.Effectful.Terminal
     Test.Ghostty.Effectful.TrackedRef
 
@@ -98,6 +102,7 @@ test-suite ghostty-effectful-test
     , ghostty-effectful
     , ghostty-vt-ffi
     , tasty ^>=1.5
+    , tasty-golden ^>=2.3.5
     , tasty-hunit ^>=0.10.2
     , text ^>=2.1
     , vector ^>=0.13

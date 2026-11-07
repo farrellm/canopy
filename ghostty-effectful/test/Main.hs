@@ -2,6 +2,7 @@ module Main (main) where
 
 import Test.Ghostty.Effectful qualified
 import Test.Ghostty.Effectful.Events qualified
+import Test.Ghostty.Effectful.Format qualified
 import Test.Ghostty.Effectful.Keys qualified
 import Test.Ghostty.Effectful.Render qualified
 import Test.Ghostty.Effectful.Terminal qualified
@@ -18,5 +19,6 @@ main =
         Test.Ghostty.Effectful.Keys.tests,
         Test.Ghostty.Effectful.Events.tests,
         Test.Ghostty.Effectful.TrackedRef.tests,
-        Test.Ghostty.Effectful.Render.tests
+        Test.Ghostty.Effectful.Render.tests,
+        Test.Ghostty.Effectful.Format.tests
       ]

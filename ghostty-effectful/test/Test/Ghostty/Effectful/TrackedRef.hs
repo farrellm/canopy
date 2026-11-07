@@ -4,11 +4,11 @@
 module Test.Ghostty.Effectful.TrackedRef (tests) where
 
 import Data.ByteString qualified as BS
-import Effectful (Eff, IOE, runEff)
-import Ghostty.Effectful (Ghostty, runGhostty)
-import Ghostty.Effectful.Internal.Terminal (Extent (..))
+import Effectful (Eff, IOE)
+import Ghostty.Effectful (Ghostty)
 import Ghostty.Effectful.Point (Coord (..), Point (..))
 import Ghostty.Effectful.Terminal
+import Test.Ghostty.Effectful.Support (config, ghostty)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
@@ -34,6 +34,28 @@ tests =
           write t (BS.replicate 30 10)
           (,,) <$> refPoint @'Active ref <*> refPoint @'Grid ref <*> refPoint @'History ref
         r @?= (Nothing, Just (Point 0 0), Just (Point 0 0)),
+      -- Regression 6: the library resolves a scrollback row past the
+      -- scrollback to the active row that many rows down. With 5 rows of
+      -- scrollback, History row 5 was tracked as Active row 0.
+      testCase "a scrollback row past the scrollback is refused" $ do
+        r <- ghostty $ withTerminal config $ \t -> do
+          write t (BS.replicate 28 10)
+          past <- track t (Point 0 5 :: Point 'History)
+          lastRow <- track t (Point 0 4 :: Point 'History)
+          ref <- tracked t (Point 0 0 :: Point 'Active)
+          moved <- moveRef ref (Point 0 5 :: Point 'History)
+          p <- refPoint @'Active ref
+          pure (isJust past, isJust lastRow, moved, p)
+        r @?= (False, True, False, Just (Point 0 0)),
+      -- Regression 7: the converse of 6. A reference to an active-area
+      -- cell read back as a scrollback row past the scrollback (its screen
+      -- row) rather than Nothing.
+      testCase "an active-area reference has no scrollback point" $ do
+        r <- ghostty $ withTerminal config $ \t -> do
+          write t (BS.replicate 28 10)
+          ref <- tracked t (Point 0 1 :: Point 'Active)
+          (,,) <$> refPoint @'Active ref <*> refPoint @'Grid ref <*> refPoint @'History ref
+        r @?= (Just (Point 0 1), Just (Point 0 6), Nothing),
       testCase "a reference moves, and stays when the point is outside" $ do
         r <- ghostty $ withTerminal config $ \t -> do
           ref <- tracked t (Point 0 0 :: Point 'Active)
@@ -65,14 +87,6 @@ tests =
           pure (inside, after)
         r @?= (3, 0)
     ]
-
--- | Run under the effect, failing the test on a version mismatch.
-ghostty :: Eff '[Ghostty, IOE] a -> IO a
-ghostty act = runEff (runGhostty act) >>= either (assertFailure . show) pure
-
--- | An 80×24 terminal.
-config :: TerminalConfig
-config = terminalConfig GridSize {cols = Extent 80, rows = Extent 24}
 
 -- | Track a point that must be inside the grid.
 tracked :: Terminal s -> Point 'Active -> Eff '[Ghostty, IOE] (TrackedRef s)

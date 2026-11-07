@@ -579,10 +579,13 @@ zero (`extent :: Word16 -> Maybe Extent`), because `terminal_new` and `terminal_
 so that refusal cannot be expressed and the remaining failure of each is out of memory.
 
 The rank-2 `s` makes a `Terminal s` unusable outside `withTerminal`, so the handle cannot outlive
-its `free`. `bracket`-style release runs on exceptions. The same pattern scopes formatters, encoders
-and search sessions. Handles that the application needs to keep for the whole session (the child
-terminal) are opened once at the top of `Canopy.App.Run` inside the region, which is fine: the region
-is the session.
+its `free`. `bracket`-style release runs on exceptions. The same pattern scopes encoders and search
+sessions. A formatter is not a handle at this level (M1.8): it reads its terminal afresh at each
+format, so keeping one buys nothing, and a range to format is a pair of untracked grid references,
+valid only until the terminal next changes. So `format` and `formatRange` each make a formatter,
+resolve the range's points, format and free it in one call. Handles that the application needs to
+keep for the whole session (the child terminal) are opened once at the top of `Canopy.App.Run`
+inside the region, which is fine: the region is the session.
 
 ### 4.3 Borrowed data: frames
 
@@ -720,7 +723,13 @@ entry, not the C handle, so `untrack` is idempotent, and a reference that was un
 point and cannot be moved: it is never passed to the library again. `untrack` exists because each
 live reference costs the terminal work on every scroll, and a session's blocks accumulate. Points
 carry their coordinate system in their type (`refPoint @'Grid`), and a point outside it is
-`Nothing`, which the header documents as `INVALID_VALUE` for a valid terminal.
+`Nothing`, which the header documents as `INVALID_VALUE` for a valid terminal. One such point the
+library does not refuse: a scrollback (`History`) row past the end of the scrollback resolves to the
+active row that many rows down (at the pin, `PageList.pin` bounds a history row only by the whole
+screen). So every call that takes a point checks a `History` row against `SCROLLBACK_ROWS` first
+(M1.8, regression 6). Conversely, the library reads a reference to an active-area cell back as a
+`History` row past the scrollback, so `refPoint @'History` is `Nothing` for any cell with an `Active`
+position (regression 7).
 
 ### 4.5 Callbacks become events
 
@@ -843,7 +852,7 @@ every signature would hide the errors that matter. The version check in `runGhos
 | `Ghostty.Effectful.Terminal` | new/free/reset/resize, `feed`, typed get/set, scroll viewport, grid refs, tracked refs |
 | `Ghostty.Effectful.Event` | `TerminalEvent` and the values it carries (§4.5) |
 | `Ghostty.Effectful.Render` | render state, frames, dirty rows, cells, cursor, colours, kitty-graphics placements |
-| `Ghostty.Effectful.Format` | plain / VT / HTML formatting of a terminal, a selection or a row range |
+| `Ghostty.Effectful.Format` | plain / VT / HTML formatting of a terminal's active screen (scrollback included), or of a range of it: a span between two points, a block, or whole rows |
 | `Ghostty.Effectful.Encode` | key, mouse, focus, paste, size-report, mode-report encoding, configured from a terminal's modes |
 | `Ghostty.Effectful.Parse` | standalone OSC and SGR parsers |
 | `Ghostty.Effectful.Search` | incremental scrollback search with viewport matches |
