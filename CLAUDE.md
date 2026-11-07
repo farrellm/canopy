@@ -21,8 +21,8 @@ two disagree, the design is the intent and the code is behind. Conventions are c
 | `cabal.project` | Lists the seven packages. |
 | `.ormolu` | ormolu's fixities and re-exports (§2.5). Copied from cassini. Not style config. |
 | `.hlint.yaml`, `lint/` | §2.6's layering rules, their fixtures, and `lint/check-layering.sh`. |
-| `scripts/` | `build-libghostty.sh` (with `prefetch-zig-deps.py`), `vendor-tree-sitter.sh`, `gen-ts-shims.py`, `gen-ghostty-ffi.py`, `check-ghostty-coverage.py`, `check-ghostty-signatures.py`, `check-ghostty-safety.py`, `check-common-stanzas.sh`, `check-haddock.py`, `check-layout-rows.py`, `check-allocation.py`. |
-| `_deps/` | Gitignored output of `build-libghostty.sh`: the Zig, the ghostty checkout, and the built library. |
+| `scripts/` | `build-libghostty.sh`, `vendor-tree-sitter.sh`, `gen-ts-shims.py`, `gen-ghostty-ffi.py`, `check-ghostty-coverage.py`, `check-ghostty-signatures.py`, `check-ghostty-safety.py`, `check-common-stanzas.sh`, `check-haddock.py`, `check-layout-rows.py`, `check-allocation.py`. |
+| `_deps/` | Gitignored output of `build-libghostty.sh`: the Zig, the release tarballs unpacked, and the built library. |
 | `.github/workflows/ci.yml` | CI, §2.8 steps 1–8. |
 
 ## Rules
@@ -46,7 +46,8 @@ two disagree, the design is the intent and the code is behind. Conventions are c
    tests live in `Test.*` modules, not in its `Main`. A rule change comes with fixtures in
    `lint/fixtures/{reported,allowed}`.
 5. **Ormolu reads `default-extensions` from each package's `.cabal`. Never pass `--no-cabal`.**
-6. **Pins move only on purpose.** `ghostty-vt-ffi/GHOSTTY_COMMIT` and
+6. **Pins move only on purpose.** `ghostty-vt-ffi/LIBGHOSTTY_VT_VERSION` (with the tarballs' sums in
+   `build-libghostty.sh`) and
    `tree-sitter-ffi/TREE_SITTER_VERSION` each change in one commit that says why. A tree-sitter bump
    also regenerates the shims, and a ghostty bump the generated binding (`gen-ghostty-ffi.py`).
 7. **Goldens are read before they are accepted.** Every fixed bug adds a numbered regression case
@@ -55,7 +56,8 @@ two disagree, the design is the intent and the code is behind. Conventions are c
 ## Toolchain and commands
 
 GHC 9.12.4, cabal 3.16.1.0, ormolu 0.8.0.2, hlint 3.10 and doctest 0.25.0, as in cassini. Zig
-≥0.17 is needed only to build libghostty-vt, and the script fetches it. Everything runs from the
+0.17.x, as libghostty-vt 1.0 requires, is needed only to build libghostty-vt, and the script fetches
+it. Everything runs from the
 root:
 
 - Library: `eval "$(scripts/build-libghostty.sh)"`, once per shell. It sets `PKG_CONFIG_PATH` and

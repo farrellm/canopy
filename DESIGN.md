@@ -341,31 +341,42 @@ a deletion.
 
 ### 3.1 Getting the library
 
-libghostty-vt is built with `zig build -Demit-lib-vt`, which produces a shared library, a static
-library (`libghostty-vt.a`), headers and a pkg-config file. It has no dependencies, not even libc.
+libghostty-vt is released on its own, with its own version numbers, as a signed source tarball and a
+**deps tarball** holding every Zig package the build needs (`release.files.ghostty.org/libghostty-vt/<V>/`,
+minisign-signed, with a signed `SHA256SUMS`). `zig build` in the source tarball builds the library
+(its `LIB_VERSION` file selects it; no `-Demit-lib-vt`) and produces a shared library, a static
+library (`libghostty-vt.a`), headers and pkg-config files. It has no dependencies, not even libc.
 Distribution packages do not exist yet, so:
 
-- **The commit is pinned** in `ghostty-vt-ffi/GHOSTTY_COMMIT`. Upgrading is one deliberate commit that
-  changes the pin, regenerates the generated binding (§3.3), and says why. The layout test (§3.4) and
-  the coverage check then name whatever the new headers changed.
-- **`scripts/build-libghostty.sh`** fetches that commit and builds into `_deps/ghostty/<commit>/`,
-  printing the `PKG_CONFIG_PATH` to export. A `cabal.project.local` is never required. Zig's own
-  package fetcher is not relied on: in Zig 0.17.1 it fails inside `zig build` with
-  `TlsInitializationFailed` against `deps.files.ghostty.org` on some machines, every time, while curl
-  succeeds. So the script runs the build, and each package it fails to fetch, named by its `.url`, is
-  fetched with curl by `scripts/prefetch-zig-deps.py` into Zig's cache, in the layout `zig build`
-  writes; then the build runs again, until it stops asking (a lazy dependency is asked for only once
-  its parent is present). Only what `-Demit-lib-vt` asks for is fetched, not the app's lazy GTK,
-  imgui, fonts and so on: 9 of the 37 packages in `build.zig.zon.json`. `zig build --fetch` is not
-  enough to find them: it misses lazy dependencies the build steps ask for. `zig build` still checks
-  every hash. (A `zig fetch` entry is no substitute: it keeps the archive's top-level directory, so
-  the build reports a hash mismatch.)
-- **The package declares `pkgconfig-depends: libghostty-vt >=0.1 && <0.2`.** The pinned commit's
-  `libghostty-vt.pc` reports `Version: 0.1.0-dev+<commit>` (`build.zig`'s `lib_version`, stamped
-  with the commit, §3.4), which that range admits; cabal resolves the constraint against the pkg-config database, so a missing or wrong library
-  fails at *configure* time, not link time and never at run time. (Checked with cabal 3.16.1.0: a
-  range below the installed version is rejected at planning, and the wildcard form `==0.1.*` is *not*
-  accepted in `pkgconfig-depends` — it is a parse error.)
+- **The release is pinned** in `ghostty-vt-ffi/LIBGHOSTTY_VT_VERSION` (`1.0.0`), as tree-sitter's is
+  in `TREE_SITTER_VERSION` (D14, M1.11). Upgrading is one deliberate commit that changes the pin and
+  the two tarballs' sums, regenerates the generated binding (§3.3), and says why. The layout test
+  (§3.4) and the coverage check then name whatever the new headers changed. (Until M1.11 the pin
+  was a commit, `GHOSTTY_COMMIT`, built from a git checkout.)
+- **`scripts/build-libghostty.sh`** downloads both tarballs of the pinned release, checks each
+  against the sha256 pinned in the script (as it does Zig's), and builds offline with
+  `zig build --system <deps> -Doptimize=ReleaseFast` into `_deps/ghostty/<version>/`, printing the
+  `PKG_CONFIG_PATH` and `LD_LIBRARY_PATH` to export. A `cabal.project.local` is never required. Each
+  build uses a new, empty `ZIG_GLOBAL_CACHE_DIR`: upstream's packaging guide says a Zig 0.17 cache
+  holding a package archive can crash a `--system` build with "reached unreachable code". The
+  pinned sums were checked against upstream's minisign key when the pin moved; the script checks
+  the signature too when `minisign` is installed, but the pinned sum is the required check. Nothing
+  is fetched by Zig, so the curl prefetch M0 needed (Zig 0.17.1's fetcher failed with
+  `TlsInitializationFailed` against `deps.files.ghostty.org`) is gone with the git build.
+- **`--release` builds for the baseline CPU** (`-Dcpu=baseline`, into
+  `_deps/ghostty/<version>-baseline/`), as upstream's packaging guide recommends for distribution
+  (D17). The default build targets the build machine's CPU, which is right for development; but the
+  shipped `canopy` links the library statically (below), and a native build would die with `SIGILL`
+  on an older CPU. The release job uses `--release`.
+- **Zig 0.17.x.** Each libghostty-vt release requires one Zig minor version (`minimum_zig_version`
+  in `build.zig.zon`; 1.0 requires 0.17); the script uses a `zig` 0.17.x on `PATH`, or downloads
+  Zig 0.17.1 and checks its sum.
+- **The package declares `pkgconfig-depends: libghostty-vt ==1.0.0`**, exactly the pin (D15).
+  cabal resolves the constraint against the pkg-config database, so a missing or wrong library
+  fails at *configure* time, not link time and never at run time. (Checked with cabal 3.16.1.0: `==`
+  on a pkg-config version parses and is enforced, and a range below the installed version is
+  rejected at planning; the wildcard form `==0.1.*` is *not* accepted in `pkgconfig-depends` — it is
+  a parse error.)
 - **A `static` flag** (default on for the release build, off for development) switches the dependency
   to the separate `libghostty-vt-static` pkg-config package that the build also installs, so the
   shipped `canopy` binary has no runtime library dependency. Zero transitive dependencies is what
@@ -381,14 +392,26 @@ from it:
   `GhosttyKeyEncoder`, `GhosttyKeyEvent`, `GhosttyMouseEncoder`, `GhosttyMouseEvent`,
   `GhosttyOscParser`, `GhosttySgrParser`, `GhosttySearch`, `GhosttySnapshotDecoder`, selection
   gestures, tracked grid refs.
-- **Every fallible call returns `GhosttyResult`**: `SUCCESS`, `OUT_OF_MEMORY`, `INVALID_VALUE`,
-  `OUT_OF_SPACE`, `NO_VALUE`, `IO_ERROR`, `LIMIT_EXCEEDED`, `REJECTED`.
+- **Every fallible call returns `GhosttyResult`**, setters included: `SUCCESS`, `OUT_OF_MEMORY`,
+  `INVALID_VALUE`, `OUT_OF_SPACE`, `NO_VALUE`, `IO_ERROR`, `LIMIT_EXCEEDED`, `REJECTED`, and
+  `UNSUPPORTED` for a key this library does not know or a feature compiled out of it
+  (`-Dvt-features`). A null handle or out pointer is `INVALID_VALUE` or a no-op, never a crash.
 - **Keyed getters and setters**: `ghostty_terminal_get(t, GhosttyTerminalData key, void *out)`,
   `ghostty_terminal_set(t, GhosttyTerminalOption key, const void *value)`, and the same shape for
-  render state, rows, cells, search, kitty graphics. The type of `out` depends on `key` and is
-  documented only in a table in the header.
-- **Sized structs**: option structs carry a leading `size` field initialised by
-  `GHOSTTY_INIT_SIZED(T)`, so the library can accept structs from older headers.
+  render state, rows, cells, the formatter (`ghostty_formatter_set`/`_get`), the encoders, search,
+  kitty graphics. The type of `out` depends on `key` and is documented on each key. **Every key enum
+  starts with `INVALID = 0`**, which no binding maps. A setter given a null value **restores the
+  option's default** (as a new handle has it), so where "none" differs from the default the header
+  names another value: no scrollback byte limit is `SIZE_MAX`, its default is 10,000 bytes
+  (regression 11).
+- **Sized structs** carry a leading `size` field initialised by `GHOSTTY_INIT_SIZED(T)` (or
+  `ghostty_sized_init`), so the library can accept structs from older headers: at least the struct's
+  first released size, and never nested, in an array or by value. 13 are sized at 1.0 (the encoder
+  geometry, paste, the render state's cursor, colours and row selection, the selection options, the
+  write stop, memory usage, and the two clipboard replies). Others are **frozen**, with no `size`
+  and a fixed layout, zeroed with `{0}`: `GhosttyGridRef`, `GhosttySelection`, `GhosttyStyle` (16
+  bytes: three colours and a `GhosttyStyleFlags` word with the attributes in bits 0–7 and the
+  underline in bits 8–10), and every struct a callback receives.
 - **Callbacks** registered as options (`GHOSTTY_TERMINAL_OPT_WRITE_PTY`, `_BELL`, `_TITLE_CHANGED`,
   `_PWD_CHANGED`, `_SEMANTIC_PROMPT`, `_CLIPBOARD_WRITE`, `_RENDER_HOLD`, …), with a `USERDATA`
   pointer. Some are notifications; some answer queries and return values (`_COLOR_SCHEME`,
@@ -398,7 +421,12 @@ from it:
   whose validity ends at the next update.
 - **`ghostty_type_json()`** returns a JSON description of every public struct: size, and each field's
   offset, size and type, including tagged unions. This is what §3.4 tests against.
-- The header says the API "is not yet stable and is definitely going to change" (§14.1).
+- **The ABI is stable across 1.x** (M1.11): a minor release only adds functions, types, enum values
+  or fields at the end of a sized struct, and a behaviour change is a new function, the old one
+  marked `GHOSTTY_DEPRECATED`. The shared library's SONAME is `libghostty-vt.so.1` and its symbols
+  are versioned (`ghostty_*@@GHOSTTY_VT_1.0`). Upstream's CI holds this with abidiff and goldens.
+  The snapshot byte format is outside the promise (§8.7). Before 1.0 the header said the API "is not
+  yet stable and is definitely going to change" (§14.1).
 
 ### 3.3 Binding conventions
 
@@ -416,15 +444,18 @@ from it:
   the pinned headers, ignoring `const`. Enums and handles are compared by name, so one handle for
   another fails; type synonyms and C scalar typedefs resolve to what they name, and each synonym
   must name what its C typedef does.
-- **Eighteen functions take a struct by value, and one returns one**, which GHC's FFI cannot do
-  (at the pin; `ghostty_mouse_event_get_position` is the one that returns). Each that the binding
-  binds gets a `static inline` pointer shim in `ghostty-vt-ffi/include/gvtffi_shims.h`, taking the
-  struct by pointer (and returning one through an out pointer), called through `capi` like any
-  other function, so the compiler still checks both prototypes. The shims are generated from the
-  header prototypes by `scripts/gen-ghostty-ffi.py`, one `{{shim}}` line each in that header's
-  template, added as each function is bound (seventeen so far; the other two are `snapshot.h`'s,
-  M6.10's). M1.2 wrote its five by hand; M1.3's first half more than doubled them, past the point
-  where a hand list was the cheaper check, as tree-sitter's 56 are generated (§5A.2). A function bound without its shim is a C compile error,
+- **Fifteen functions pass a struct by value** at the pin (thirteen take one, and
+  `ghostty_mouse_event_get_position` and `ghostty_key_event_get_utf8` return one), which GHC's FFI
+  cannot do. Each that the binding binds gets a `static inline` pointer shim in
+  `ghostty-vt-ffi/include/gvtffi_shims.h`, taking the struct by pointer (and returning one through
+  an out pointer), called through `capi` like any other function, so the compiler still checks both
+  prototypes. The shims are generated from the header prototypes by `scripts/gen-ghostty-ffi.py`,
+  one `{{shim}}` line each in that header's template, added as each function is bound (thirteen so
+  far; the other two are `snapshot.h`'s, M6.10's). M1.2 wrote its five by hand; M1.3's first half
+  more than doubled them, past the point where a hand list was the cheaper check, as tree-sitter's
+  56 are generated (§5A.2). (Before 1.0 there were nineteen and seventeen bound; 1.0 moved six to
+  pointers or removed them, and its sized-struct rule forbids passing a sized struct by value, so a
+  new one will only ever be small and frozen.) A function bound without its shim is a C compile error,
   since `capi` checks the prototype. Two callbacks *return* a struct by value (`ENQUIRY` and
   `XTVERSION` return a `GhosttyString`), and one *receives* structs by value (`io.h`'s
   `GhosttyMimeReaderFn`, given a `GhosttyString` and a `GhosttyWriter`, which paste's MIME reader
@@ -484,8 +515,9 @@ from it:
   callback. `formatter_format` calls its writer. Some calls are `safe` for a different reason:
   they call nothing back, but can run long, and an `unsafe` call would hold up every Haskell thread
   at the next GC. `terminal_compress` can stall on a full pass, and the formatter's
-  `format_buf`/`format_alloc` and selection formatting walk the whole screen including the
-  scrollback. `render_state_update` stays `unsafe`: it copies the viewport, not the scrollback, and
+  `format_buf`/`format_alloc` walk the whole screen including the scrollback (a selection is
+  formatted through the formatter since 1.0). Setting and reading a formatter's options is short and
+  `unsafe`. `render_state_update` stays `unsafe`: it copies the viewport, not the scrollback, and
   is on the per-frame path. `terminal_paste` is `safe`: it pulls the data through the paste's MIME
   reader and streams the encoding to `WRITE_PTY`. The terminal-free `paste_is_safe` and
   `paste_encode` stay `unsafe`: they call nothing back, and each is one pass over a buffer the
@@ -527,17 +559,24 @@ the test, and one missing from the match fails to compile. That a bound type has
 checked by `scripts/check-layout-rows.py` in CI's lint job: every hand-written `Storable` instance
 needs a `…Layout` descriptor, every newtype over a C integer an `…Enum` one, and every descriptor a
 row.
-Build info reports the *library's* version (`build.zig`'s `lib_version`, `0.1.0-dev`), and its
-build metadata (`VERSION_BUILD`) is empty unless the build is given one. So `build-libghostty.sh`
-stamps the pin in: it builds with `-Dlib-version-string=<lib_version>+<commit>`, and the check
-requires `VERSION_BUILD` to equal `GHOSTTY_COMMIT` exactly, which is the precise identity anyway.
-(Checked by M0's CI at the pinned commit; an earlier reading had expected the application version,
-`1.4.1-dev+<commit>`.)
+The identity check (D14, D15, M1.11) has three parts: the linked library's `ghostty_version()` equals
+`LIBGHOSTTY_VT_VERSION` exactly (a development build's has a `-dev+…` suffix, so no pre-release or
+build metadata passes); the headers' `GHOSTTY_VT_VERSION` equals it too, which catches headers left in
+`_deps` from another pin; and build info reports every optional feature (`FEATURE_*`) compiled in,
+since a `-Dvt-features` build still reports the release's version but turns the calls of a missing
+feature into `UNSUPPORTED`. (Until M1.11 the pin was a commit, stamped into the library's
+`VERSION_BUILD` with `-Dlib-version-string`, since a git build reported only `0.1.0-dev`; a release
+reports its own version.)
 
 At startup, `ghostty-effectful` performs the same version check once and refuses to run against a different
 library (§4.7); this is the one runtime check of the C boundary, and it runs before any handle exists.
-It compares with `ghosttyPinnedCommit`, which `gen-ghostty-ffi.py` writes from `GHOSTTY_COMMIT` into
-`Ghostty.FFI.BuildInfo` (`{{pin}}`), so a pin bump that is not regenerated fails `--check`.
+It compares the linked version and features with `ghosttyPinnedVersion`, which `gen-ghostty-ffi.py`
+writes from `LIBGHOSTTY_VT_VERSION` into `Ghostty.FFI.BuildInfo` (`{{pin}}`), so a pin bump that is
+not regenerated fails `--check`. 1.0 makes "same major, minor at least the headers'" memory-safe,
+but the check stays exact (D15): §3.3's and §4.7's argument that `UnknownEnum` is unreachable, and
+the layout test's exhaustiveness, rest on the exact pin, and a newer 1.x adds enum values. With
+static linking for releases the runtime check bites only in development, where exact is right. The
+relaxation is D-deferred-11 (§15.2).
 
 ---
 
@@ -688,7 +727,10 @@ cannot happen, it is an internal invariant violation (§4.7). `INVALID_VALUE` fo
 at all: the constructors are the only keys. An option takes a `Maybe` exactly where the header's
 null pointer means something no value of the type says (unset a colour, remove a limit, restore the
 built-in palette); where null only equals some value (`DEFAULT_CURSOR_BLINK`'s null is "not
-blinking"), the option takes the plain type.
+blinking"), the option takes the plain type. Since libghostty-vt 1.0 a null value restores the
+option's default, so where `Nothing` means something other than the default the binding passes the
+header's own value for it: no scrollback byte limit is `SIZE_MAX`, since the default is 10,000 bytes
+(M1.11, regression 11).
 
 What a write would refuse is kept out by the value's type, as `Extent` does for zero (§4.2):
 
@@ -834,12 +876,14 @@ data GhosttyError                       -- thrown
   | WrongThread CallSite                -- §4.6
   | Invariant CallSite ResultCode       -- the library returned what the header says it cannot
   | UnknownEnum CallSite Text Integer   -- a C enum value the binding does not name (§3.3)
-  | ShortStruct CallSite Text Integer   -- a sized struct the library passed, smaller than the binding reads
 ```
 
-A sized struct passed to a callback may be read only as far as its `size` field covers, so a callback
-checks it before reading, and one too short is `ShortStruct`, recorded and thrown by the drain like
-`UnknownEnum`. The version check and the layout test rule both out.
+The version check and the layout test rule `UnknownEnum` out. (Until M1.11 there was a
+`ShortStruct`, for a sized struct a callback received with a smaller `size` than the binding reads.
+At libghostty-vt 1.0 every struct a callback receives is frozen, with no `size`, so it went.) The
+library's `UNSUPPORTED` (`ResultUnsupported`), for a key it does not know or a feature compiled
+out, is only ever an `Invariant`: the exact version check (§3.4) refuses a library without every
+feature, and the binding names no key the pinned library lacks.
 
 `ResultCode` is `GhosttyResult` closed, with an unknown case (§3.3), so no `Ghostty.FFI` type
 escapes. `CallSite` names the C function, or the operation for `WrongThread`. Errors a caller can
@@ -858,11 +902,11 @@ every signature would hide the errors that matter. The version check in `runGhos
 | `Ghostty.Effectful.Terminal` | new/free/reset/resize, `feed`, typed get/set, scroll viewport, grid refs, tracked refs |
 | `Ghostty.Effectful.Event` | `TerminalEvent` and the values it carries (§4.5) |
 | `Ghostty.Effectful.Render` | render state, frames, dirty rows, cells, cursor, colours, kitty-graphics placements |
-| `Ghostty.Effectful.Format` | plain / VT / HTML formatting of a terminal's active screen (scrollback included), or of a range of it: a span between two points, a block, or whole rows |
+| `Ghostty.Effectful.Format` | plain / VT / HTML formatting of a terminal's active screen (scrollback included), or of a range of it: a span between two points, a block, or whole rows. Each format sets every formatter option (`EMIT`, `UNWRAP`, `TRIM`, `EXTRAS`, `SELECTION`), since a new formatter's defaults are the library's, not canopy's (regression 10) |
 | `Ghostty.Effectful.Encode` | key, mouse, focus, paste, size-report, mode-report and colour-scheme-report encoding, configured from a terminal's modes |
 | `Ghostty.Effectful.Input` | the plain values encoders take: `Key`, `Mods`, `KeyEvent`, `MouseEvent` |
 | `Ghostty.Effectful.Parse` | standalone OSC and SGR parsers |
-| `Ghostty.Effectful.Search` | incremental scrollback search with viewport matches |
+| `Ghostty.Effectful.Search` | incremental scrollback search with viewport matches; moving the search's selection is `ghostty_search_select_next`/`_prev` (1.0) |
 | `Ghostty.Effectful.Snapshot` | encode and restore terminal state (session resume, §8.7) |
 | `Ghostty.Effectful.Unicode` | codepoint and grapheme widths |
 | `Ghostty.Effectful.Color`, `.Style`, `.Point`, `.Mode` | the plain values keys and frames return: `Rgb`, `Palette`, `Style`, `Point c`, `ModeKey r` (§4.4) |
@@ -1668,6 +1712,10 @@ without leaving the child mode.
 | Named checkpoints; restore = restart + replay to the checkpoint | Ammonite | transcript |
 | JSON-RPC mode on a socket: other tools submit inputs and read structured blocks | ghcitty's JSON mode | `Canopy.Serve` (milestone M7) |
 
+A snapshot's byte format is outside libghostty-vt's ABI promise (§3.2), so a stored snapshot can stop
+decoding after any library update. A session store keeps what restores the screen another way (the
+transcript, replayed) and treats a snapshot that fails to decode as absent, never as an error.
+
 ### 8.8 History
 
 History is an SQLite database (`sqlite-simple`) keyed by profile, with context per entry: working
@@ -2045,12 +2093,25 @@ stream of marks ever is.
 
 ### 14.1 libghostty-vt is unstable by its own declaration
 
-The header says the API will change. Mitigations: the pin; the FFI package quarantines the change; the
-layout test makes header/library drift a test failure rather than corruption; the high-level types are
-designed around concepts (terminal, frame, event) rather than the C shapes, so most upgrades change
-`ghostty-effectful`'s implementation and not its interface. The open request to set default terminal modes
-in the C constructor (ghostty discussion #13474) is the kind of change to expect, and it affects only
-`newTerminal`.
+Until 1.0 the header said the API would change, and the pin, the FFI quarantine, the layout test and
+concept-shaped high-level types were the mitigations. They stay. Since 1.0 (M1.11) the C ABI is
+stable across 1.x (§3.2): a minor release only adds, so a bump within 1.x should be small, and
+exactly what the existing checks catch (a new enum value fails the layout test until named, a new
+function fails the coverage check until bound or listed, a rewritten doc fails the safety check).
+What remains of the risk:
+
+- **The snapshot format** is outside the promise; §8.7 treats a snapshot that will not decode as
+  absent.
+- **Zig version coupling**: each 1.x may require a different Zig minor (1.0 requires 0.17), so a
+  bump may move `ZIG_VERSION` in the build script.
+- **The dynamic-link policy** is exact (D15); accepting any newer 1.x at run time is deferred
+  (D-deferred-11), and would make `UnknownEnum` a reachable, documented error.
+- **Deprecations do not fail `-Werror`**: a `GHOSTTY_DEPRECATED` function is a C warning in GHC's
+  `capi` stubs, which GHC's `-Werror` does not cover. Consider `-optc-Werror=deprecated-declarations`
+  in the common stanza (all seven `.cabal` files) at the next minor bump.
+
+The open request to set default terminal modes in the C constructor (ghostty discussion #13474) is
+the kind of addition to expect, and it affects only `newTerminal`.
 
 ### 14.2 Assumptions, checked
 
@@ -2072,11 +2133,11 @@ reading the pinned sources. A ✗ changed the design, in the section named.
 | ghci and python emit OSC 133 marks set through their prompt strings | ✓ both; PyREPL re-emits per redraw, hence the bootstrap | §7.2 |
 | ghci `:complete repl` and `:type` are usable as hidden queries | ✓ replies sit cleanly between marks | §9.3 |
 | `SeqUnlift` refuses cross-thread use, so `Ghostty` cannot leak to another thread | ½: `SeqUnlift` does refuse (✓, exact error message observed), but effectful's `forkIO` clones the environment, so a fork inherits the effect; added the effect-row split and an owner-thread check | §4.6 |
-| GHC can call libghostty-vt directly | ✗ 18 functions take a struct by value, 1 returns one, 2 callbacks return one and 1 receives two (at the pin; M1.2 counted 5 and the callbacks in the headers it bound, M1.3 the rest); generated pointer shims, and C for the callbacks | §3.3, §4.5 |
+| GHC can call libghostty-vt directly | ✗ 18 functions take a struct by value, 1 returns one, 2 callbacks return one and 1 receives two (at the pin; M1.2 counted 5 and the callbacks in the headers it bound, M1.3 the rest); generated pointer shims, and C for the callbacks. 2026-11-07, at 1.0.0: 13 take one and 2 return one; the callbacks are unchanged | §3.3, §4.5 |
 | `capi` makes the C compiler check each Haskell signature against the prototype | ✗ integers of the wrong width or signedness convert silently and truncate, and a `Ptr` to a Haskell type is `void *`, accepted for any pointer, handles included (probe, GCC 16); a signature check against the headers by name | §3.3 |
 | `vt_write_until` can stop at each OSC 133 mark | ✓ `BOUNDARY_OSC_END`; the pre-scan fallback is gone | §4.5 |
-| `pkgconfig-depends: libghostty-vt ==0.1.*` | ✗ the wildcard does not parse there; `>=0.1 && <0.2` does and admits `0.1.0-dev`; static linking is a separate `libghostty-vt-static` package | §3.1 |
-| `ghostty_build_info` identifies the pinned build | ✗ it reports the library's `0.1.0-dev` with empty build metadata (M0's CI, at the pin; first read as the app version `1.4.1-dev+…`); the build script stamps the commit in with `-Dlib-version-string`, and the check compares build metadata with the pin | §3.4 |
+| `pkgconfig-depends: libghostty-vt ==0.1.*` | ✗ the wildcard does not parse there; `>=0.1 && <0.2` does and admits `0.1.0-dev`; static linking is a separate `libghostty-vt-static` package. 2026-11-07, at 1.0.0: ✓ `==1.0.0` parses and is enforced (cabal 3.16.1.0) | §3.1 |
+| `ghostty_build_info` identifies the pinned build | ✗ it reports the library's `0.1.0-dev` with empty build metadata (M0's CI, at the pin; first read as the app version `1.4.1-dev+…`); the build script stamps the commit in with `-Dlib-version-string`, and the check compares build metadata with the pin. 2026-11-07, at 1.0.0: ✓ a release reports exactly `1.0.0` (`ghostty_version()`, and the headers' `GHOSTTY_VT_VERSION`), and build info lists its optional features; the check compares the version and requires every feature | §3.4 |
 | `text-rope` keeps UTF-16 metrics | ✓ `Data.Text.Mixed.Rope` | §5.3 |
 | `unicode-data` provides grapheme-break and width data | ✗ neither, in 0.9.0, and nothing else on Hackage does without ICU; tendril generates its own tables | §5.3 |
 
@@ -2126,6 +2187,10 @@ input; a per-session toggle hides them.
 | D10 | Toolchain and repository conventions are cassini's | §2 |
 | D11 | Static linking of libghostty-vt for releases | §3.1 |
 | D12 | History in SQLite with context | §8.8 |
+| D14 | libghostty-vt is pinned by release version (`LIBGHOSTTY_VT_VERSION`), built offline from the signed release tarball and its deps tarball, both sha256-pinned; not by commit from a git checkout (M1.11) | §3.1, §3.4 |
+| D15 | The runtime check is exact: the linked library is the pinned release, with every optional feature (`==1.0.0` in `pkgconfig-depends` too), though 1.x makes a newer minor memory-safe (relaxation is D-deferred-11) | §3.1, §3.4 |
+| D16 | The public effectful API follows upstream's renames at a pin bump (`ModeKey` after the `GHOSTTY_MODE_*` names, `CursorSgrStyle`), as §4.4's naming rule already requires | §4.4 |
+| D17 | The release build of libghostty-vt targets the baseline CPU (`build-libghostty.sh --release`, `-Dcpu=baseline`), since releases link it statically | §3.1 |
 
 ### 15.2 Deferred
 
@@ -2141,6 +2206,7 @@ input; a per-session toggle hides them.
 | D-deferred-8 | A chunked `TSInput` reader over a rope instead of one contiguous buffer per parse (§5A.3) | The copy showing up in the keystroke-to-frame benchmark (§12.3), e.g. on large shadow documents |
 | D-deferred-9 | Generate per-kind typed field accessors (required → total, repeated → list) from `node-types.json` | Projection or completeness code accumulating `Maybe` handling for fields the grammar guarantees |
 | D-deferred-10 | The regex engine for `#match?` predicates: query collections are written for Rust's `regex` syntax, which neither `regex-tdfa` (POSIX) nor `regex-pcre2` matches exactly | M4: pick by running Helix's and nvim-treesitter's queries for the built-in languages through each and counting compile failures and mismatches |
+| D-deferred-11 | Accept any libghostty-vt `1.y.z` with `y` at least the pin's minor at run time, making `UnknownEnum` a reachable, documented error | A distribution package of libghostty-vt that canopy should link dynamically |
 
 ---
 
@@ -2148,8 +2214,10 @@ input; a per-session toggle hides them.
 
 ### 16.1 Components
 
-- libghostty-vt: `include/ghostty/vt.h` and `include/ghostty/vt/*.h` in https://github.com/ghostty-org/ghostty
-  (read at commit `c7f68a7f`); examples under `example/c-vt-*`; build via `zig build -Demit-lib-vt`.
+- libghostty-vt 1.0.0: https://lib.ghostty.org/vt/1.0.0/ (the C API reference, with `stability`,
+  `installing` and `conventions`); `include/ghostty/vt.h` and `include/ghostty/vt/*.h` and
+  `PACKAGING-LIBGHOSTTY.md` in the release tarball (`release.files.ghostty.org/libghostty-vt/1.0.0/`,
+  tag `vt-1.0.0` in https://github.com/ghostty-org/ghostty); examples under `example/c-vt-*`.
 - Ghostling, the reference libghostty consumer: https://github.com/ghostty-org/ghostling
 - libghostty C API discussions: https://github.com/ghostty-org/ghostty/discussions/11348,
   https://github.com/ghostty-org/ghostty/discussions/13474
