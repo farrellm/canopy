@@ -131,7 +131,7 @@ done
 # ~/.cache/zig is neither read nor written. Upstream's packaging guide: with
 # Zig 0.17, a cache holding a package archive can crash a --system build with
 # "reached unreachable code".
-export ZIG_GLOBAL_CACHE_DIR=$root/_deps/zig-cache/$version
+export ZIG_GLOBAL_CACHE_DIR=$root/_deps/zig-cache/$(basename "$prefix")
 rm -rf "$ZIG_GLOBAL_CACHE_DIR"
 
 build_opts=(--system "$src_root/libghostty-vt-$version-deps" -Doptimize=ReleaseFast)
