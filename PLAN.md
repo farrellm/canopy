@@ -4,7 +4,7 @@ The milestones of DESIGN.md §13, broken into steps. **Each step is one CR**: it
 `-Werror`, passes every CI step, adds its `CHANGELOG.md` line, and updates `DESIGN.md` in the same
 commit if it changes a decision (§2.9). Section references (§) are to DESIGN.md.
 
-M0 is done (PR #1), and M1.1–M1.9 (PRs #2–#11). Steps are numbered `M<n>.<k>`
+M0 is done (PR #1), and M1 (PRs #2–#12). Steps are numbered `M<n>.<k>`
 and are in dependency order within a milestone.
 
 ## Tracks
@@ -144,6 +144,11 @@ Exit: formatter goldens; every typed key exercised (§13).
 
 - `tasty-bench` `feed` throughput benchmark in `ghostty-effectful`.
 - Committed allocation baseline; CI step 8 gates allocation, reports time (§12.3, §2.8).
+- Five 1 MiB streams (plain, SGR, wide and combining text, an OSC 133 transcript, plain in 4 KiB
+  writes) and an empty terminal's life, each iteration a whole `runGhostty`-open-feed-free.
+  `scripts/check-allocation.py` is cassini's, with a 4 KiB slack: the streams that allocate nothing
+  per byte move by up to 1.3 KB between runs. The OSC 133 transcript costs about 3.2 µs and 2.9 KB
+  per stop, recorded in DESIGN.md §12.3. **Done; M1 complete.**
 
 ---
 

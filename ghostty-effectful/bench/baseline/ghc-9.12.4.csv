@@ -1,0 +1,7 @@
+Name,Mean (ps),2*Stdev (ps),Allocated,Copied,Peak Memory
+All.ghostty-effectful.Feed.open and close,24128170,2184000,4364,1,6291456
+All.ghostty-effectful.Feed.plain,1436363659,107744418,5470,18,11534336
+All.ghostty-effectful.Feed.sgr,11633092250,1030546710,7585,291,37748736
+All.ghostty-effectful.Feed.unicode,5885354650,389971596,6519,144,37748736
+All.ghostty-effectful.Feed.prompts,223543011400,14048701700,209282755,65299080,62914560
+"All.ghostty-effectful.Feed.plain, 4 KiB writes",1751264079,129435094,236791,1226,62914560

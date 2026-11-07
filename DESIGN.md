@@ -321,7 +321,8 @@ The rules, by module name across all packages:
    `scripts/check-layout-rows.py` (§3.4)
 6. `ormolu --mode check $(git ls-files '*.hs')`
 7. `cabal haddock` with the coverage floor
-8. The benchmark gate (§12.3), allocation only.
+8. The benchmark gate (§12.3), allocation only: each benchmark suite's CSV against its committed
+   baseline, through `scripts/check-allocation.py`.
 
 A nightly job runs `canopy-e2e` against real REPLs and language servers (§11.5), which a CI runner
 cannot be relied on to have at pinned versions.
@@ -2002,6 +2003,26 @@ Nightly only, against pinned versions recorded in the suite.
 incremental reparse and highlight of a one-character edit (in `tree-sitter-effectful`'s suite and,
 end to end, in canopy's), decoder throughput. CI gates allocation (machine-independent) against a committed
 baseline; time is reported, not gated. Baselines are regenerated deliberately with a commit saying why.
+
+Each package's suite is `benchmark <package>-bench`, its modules `Bench.*` (as tests are `Test.*`,
+§2.6), compiled `-O2 -with-rtsopts=-T` over a library at cabal's default optimization, as cassini's
+are. Its baseline is `<package>/bench/baseline/ghc-<version>.csv`, from `cabal bench` with CI's
+flags. `scripts/check-allocation.py` (cassini's) fails a benchmark that allocates more than 10%
+*and* more than the slack over its baseline. CI passes a 4 KiB slack, not cassini's 1 KiB: the
+streams whose per-byte work allocates nothing on the Haskell side allocate 4–8 KB per run, and
+that figure moves by up to 1.3 KB between runs. A per-byte regression on a 1 MiB stream is
+megabytes, and the per-write case still catches 16 bytes a write. Only Haskell allocation is
+counted, so the gate guards the binding's work, not libghostty's.
+
+**`feed` (M1.10)**, `ghostty-effectful-bench`: a fresh 80×24 terminal's life (`runGhostty`, open,
+feed, free) on about 1 MiB of plain ASCII, SGR-coloured words, wide and combining text, and a REPL
+transcript of OSC 133 blocks, plus plain text in 4 KiB writes and the life with nothing fed. First
+figures (2026-11-07; GHC 9.12.4, one developer machine): open and close 24 µs; plain 1.4 ms;
+unicode 5.9 ms; SGR 11.6 ms; 4 KiB writes 1.75 ms, about 900 bytes a write. The OSC 133 transcript
+takes 224 ms and allocates 200 MB: about 3.2 µs and 2.9 KB for each of its 71,000 stops (§4.5),
+linear in the stops and the same in 4 KiB writes. A REPL block has four marks, so this is not the
+child-throughput budget's (§12.1) path, but the per-stop cost is the first place to look if a
+stream of marks ever is.
 
 ---
 
