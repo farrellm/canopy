@@ -13,6 +13,7 @@ module Ghostty.Effectful.Internal.Convert
     fromRgb,
     toRgb,
     fromStyle,
+    fromUnderline,
 
     -- * Points
     pointTag,
@@ -93,14 +94,7 @@ fromStyle site s = do
   foreground <- color s.fgColor
   background <- color s.bgColor
   underlineColor <- color s.underlineColor
-  underline <- case GhosttySgrUnderline s.underline of
-    GhosttySgrUnderlineNone -> pure NoUnderline
-    GhosttySgrUnderlineSingle -> pure SingleUnderline
-    GhosttySgrUnderlineDouble -> pure DoubleUnderline
-    GhosttySgrUnderlineCurly -> pure CurlyUnderline
-    GhosttySgrUnderlineDotted -> pure DottedUnderline
-    GhosttySgrUnderlineDashed -> pure DashedUnderline
-    GhosttySgrUnderlineUnknown n -> unknownEnum site ghosttySgrUnderlineEnum n
+  underline <- fromUnderline site (GhosttySgrUnderline s.underline)
   pure
     Style
       { foreground,
@@ -122,6 +116,17 @@ fromStyle site s = do
       StyleColorPalette i -> pure (PaletteColor i)
       StyleColorRgb c -> pure (RgbColor (fromRgb c))
       StyleColorOther (GhosttyStyleColorTag n) -> unknownEnum site ghosttyStyleColorTagEnum n
+
+-- | An underline style from the binding's.
+fromUnderline :: CallSite -> GhosttySgrUnderline -> IO Underline
+fromUnderline site = \case
+  GhosttySgrUnderlineNone -> pure NoUnderline
+  GhosttySgrUnderlineSingle -> pure SingleUnderline
+  GhosttySgrUnderlineDouble -> pure DoubleUnderline
+  GhosttySgrUnderlineCurly -> pure CurlyUnderline
+  GhosttySgrUnderlineDotted -> pure DottedUnderline
+  GhosttySgrUnderlineDashed -> pure DashedUnderline
+  GhosttySgrUnderlineUnknown n -> unknownEnum site ghosttySgrUnderlineEnum n
 
 -- | The tag of a coordinate system.
 pointTag :: SCoord c -> GhosttyPointTag

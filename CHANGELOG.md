@@ -198,6 +198,21 @@ Written as changes land, not at release (DESIGN.md §2.9).
 - Fixed: `refPoint @'History` of a reference to an active-area cell gave a scrollback row past the
   scrollback (the cell's screen row), the converse of regression 6; it is now `Nothing`
   (regression 7; DESIGN.md §4.4).
+- `Ghostty.Effectful.Encode` (M1.9): key and mouse encoders as scoped handles (`withKeyEncoder`,
+  `withMouseEncoder`), configured by `KeyOptions`/`MouseOptions` or from a terminal's modes
+  (`keyOptionsFrom`, `mouseOptionsFrom`); focus, size, mode (DECRPM) and colour-scheme reports;
+  `paste` into a terminal, which returns `Either Rejected [TerminalEvent]` (DESIGN.md §4.7), through
+  a C MIME reader (`cbits/gveff_paste.c`); and the terminal-free `isPasteSafe` and `encodePaste`.
+  The events encoders take are plain values in `Ghostty.Effectful.Input`: `Key` (every
+  `GhosttyKey`, held against the header), `Mods` (a side only with its modifier), `KeyEvent`,
+  `MouseEvent`. A cell of zero pixels, which the library ignores, cannot be given (`Extent`).
+- `Ghostty.Effectful.Parse` (M1.9): `parseSgr` (parameters and their separators to
+  `SgrAttribute`s) and `parseOsc` (a sequence's body to its `OscCommand`, with unimplemented
+  numbers kept to a limit), each on a parser made and freed in the call. `Ghostty.Effectful.Unicode`:
+  `codepointWidth` and `graphemes` (clusters and their widths, as with mode 2027).
+- Found while testing: ghostty's Kitty encoder finds a text key by its unshifted character, so a
+  `KeyEvent` without one sends its press as text and no release at all. Documented on
+  `KeyEvent.unshifted` and in DESIGN.md §11.2, for M2.8's roundtrip generator.
 
 ### M0: infrastructure
 

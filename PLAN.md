@@ -4,7 +4,7 @@ The milestones of DESIGN.md §13, broken into steps. **Each step is one CR**: it
 `-Werror`, passes every CI step, adds its `CHANGELOG.md` line, and updates `DESIGN.md` in the same
 commit if it changes a decision (§2.9). Section references (§) are to DESIGN.md.
 
-M0 is done (PR #1), and M1.1–M1.8 (PRs #2–#10). Steps are numbered `M<n>.<k>`
+M0 is done (PR #1), and M1.1–M1.9 (PRs #2–#11). Steps are numbered `M<n>.<k>`
 and are in dependency order within a milestone.
 
 ## Tracks
@@ -132,6 +132,13 @@ Exit: formatter goldens; every typed key exercised (§13).
 - `Ghostty.Effectful.Encode` (configured from a terminal's modes), `.Parse`, `.Unicode`.
 - `paste` returns `Either Rejected` (§4.7).
 - Unit tests per encoder; these are M2's oracles.
+- Key and mouse encoders are scoped handles, each owning the event handle it fills in, configured
+  by an options record or from a terminal; their inputs are plain values in
+  `Ghostty.Effectful.Input` (`Key` held against the header, `Mods` with a side only for a held
+  modifier). Reports, `encodePaste` and the parsers make and free what they use in the call
+  (DESIGN.md §4.2). `paste` reads through a C MIME reader and returns its bytes as a `WritePty`
+  event. Found on the way: the Kitty encoder finds a text key by its unshifted character, so M2.8's
+  generator must set it (DESIGN.md §11.2). **Done.**
 
 ### M1.10 First benchmark and CI step 8
 

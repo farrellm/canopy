@@ -429,7 +429,8 @@ from it:
   `GhosttyMimeReaderFn`, given a `GhosttyString` and a `GhosttyWriter`, which paste's MIME reader
   uses), which a Haskell `wrapper` cannot make. Their types are bound, without a `wrapper`, and a
   function of any of them has to be written in C (§4.5); `ghostty-vt-ffi-test`'s paste test has its
-  MIME reader in C for that reason.
+  MIME reader in C for that reason, and so does `ghostty-effectful`'s `paste`
+  (`cbits/gveff_paste.c`, M1.9).
 - **One module per header** (`terminal.h` → `Ghostty.FFI.Terminal`, with its callback half in
   `Ghostty.FFI.Terminal.Callbacks`). A header is bound in part where only part of it is needed yet,
   and the module says which part.
@@ -580,12 +581,16 @@ so that refusal cannot be expressed and the remaining failure of each is out of 
 
 The rank-2 `s` makes a `Terminal s` unusable outside `withTerminal`, so the handle cannot outlive
 its `free`. `bracket`-style release runs on exceptions. The same pattern scopes encoders and search
-sessions. A formatter is not a handle at this level (M1.8): it reads its terminal afresh at each
-format, so keeping one buys nothing, and a range to format is a pair of untracked grid references,
-valid only until the terminal next changes. So `format` and `formatRange` each make a formatter,
-resolve the range's points, format and free it in one call. Handles that the application needs to
-keep for the whole session (the child terminal) are opened once at the top of `Canopy.App.Run`
-inside the region, which is fine: the region is the session.
+sessions. A key or mouse encoder (M1.9) owns the one event handle it encodes from, so an encode
+fills that in rather than making an event per keystroke; a mouse encoder keeps state between events
+(the last cell it reported), which is what makes it a handle. A formatter is not a handle at this
+level (M1.8): it reads its terminal afresh at each format, so keeping one buys nothing, and a range
+to format is a pair of untracked grid references, valid only until the terminal next changes. So
+`format` and `formatRange` each make a formatter, resolve the range's points, format and free it in
+one call. The OSC and SGR parsers are not handles either (M1.9): what a parser returns is borrowed
+until its next call, so each parse makes one, feeds it one sequence, copies the result out and frees
+it. Handles that the application needs to keep for the whole session (the child terminal) are opened
+once at the top of `Canopy.App.Run` inside the region, which is fine: the region is the session.
 
 ### 4.3 Borrowed data: frames
 
@@ -853,7 +858,8 @@ every signature would hide the errors that matter. The version check in `runGhos
 | `Ghostty.Effectful.Event` | `TerminalEvent` and the values it carries (§4.5) |
 | `Ghostty.Effectful.Render` | render state, frames, dirty rows, cells, cursor, colours, kitty-graphics placements |
 | `Ghostty.Effectful.Format` | plain / VT / HTML formatting of a terminal's active screen (scrollback included), or of a range of it: a span between two points, a block, or whole rows |
-| `Ghostty.Effectful.Encode` | key, mouse, focus, paste, size-report, mode-report encoding, configured from a terminal's modes |
+| `Ghostty.Effectful.Encode` | key, mouse, focus, paste, size-report, mode-report and colour-scheme-report encoding, configured from a terminal's modes |
+| `Ghostty.Effectful.Input` | the plain values encoders take: `Key`, `Mods`, `KeyEvent`, `MouseEvent` |
 | `Ghostty.Effectful.Parse` | standalone OSC and SGR parsers |
 | `Ghostty.Effectful.Search` | incremental scrollback search with viewport matches |
 | `Ghostty.Effectful.Snapshot` | encode and restore terminal state (session resume, §8.7) |
@@ -1936,7 +1942,9 @@ A complete terminal emulator available as a library is a test asset as much as a
 - **Diff correctness, as a property**: for random pairs of grids, rendering A, then the diff A→B,
   produces the same ghostty screen as rendering B from scratch.
 - **Input decoder roundtrip**: random key and mouse events under random keyboard-protocol modes are
-  encoded by libghostty and decoded by tendril; the event must come back equal.
+  encoded by libghostty and decoded by tendril; the event must come back equal. A generated text
+  key carries its unshifted character, as a platform's events do: ghostty's Kitty encoder finds a
+  text key by it, and without one sends the press as its text and no release (found in M1.9).
 - **Widths**: tendril's width tables agree with libghostty's for every codepoint, and for a corpus of
   grapheme clusters (emoji ZWJ sequences, flags, combining marks, Hangul).
 
