@@ -1,4 +1,5 @@
 {-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE PatternSynonyms #-}
 
 -- | Render states and frames: representations and calls (DESIGN.md §4.3).
 -- The public API is "Ghostty.Effectful.Render".
@@ -61,7 +62,7 @@ import Ghostty.Effectful.Cell (Cell (..), CellWidth (..), Hyperlink (..), Semant
 import Ghostty.Effectful.Color (Palette, paletteFromList)
 import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), ResultCode (..))
 import Ghostty.Effectful.Internal.Callbacks (captureAttach, captureDetach, captureFraming, captureHeld)
-import Ghostty.Effectful.Internal.Convert (enumName, fromRgb, fromStyle, refTemplate, sized, toPoint, unknownEnum)
+import Ghostty.Effectful.Internal.Convert (emptyRef, enumName, fromRgb, fromStyle, sized, toPoint, unknownEnum)
 import Ghostty.Effectful.Internal.Error (expectSuccess, newHandle, resultCode)
 import Ghostty.Effectful.Internal.Terminal (Terminal (..), forgetRegion)
 import Ghostty.Effectful.Point (Coord (..), Point (..))
@@ -74,7 +75,7 @@ import Ghostty.FFI.Render
 import Ghostty.FFI.Screen
 import Ghostty.FFI.Style (GhosttyStyle, ghosttyStyleDefault)
 import Ghostty.FFI.Terminal (ghosttyTerminalGridRef)
-import Ghostty.FFI.Types (GhosttyBuffer (..))
+import Ghostty.FFI.Types (GhosttyBuffer (..), ghosttyCursorStyleEnum, pattern GhosttyCursorStyleBar, pattern GhosttyCursorStyleBlock, pattern GhosttyCursorStyleBlockHollow, pattern GhosttyCursorStyleUnderline, pattern GhosttyCursorStyleUnknown)
 
 -- | A render state of one terminal, alive in the region @s@ that
 -- 'Ghostty.Effectful.Render.withRenderState' opens.
@@ -357,11 +358,11 @@ getFrameData rs key = case key of
       GhosttyRenderStateDirtyUnknown n -> unknownEnum site ghosttyRenderStateDirtyEnum n
 
     cursorShape = \case
-      GhosttyRenderStateCursorVisualStyleBar -> pure BarCursor
-      GhosttyRenderStateCursorVisualStyleBlock -> pure BlockCursor
-      GhosttyRenderStateCursorVisualStyleUnderline -> pure UnderlineCursor
-      GhosttyRenderStateCursorVisualStyleBlockHollow -> pure HollowBlockCursor
-      GhosttyRenderStateCursorVisualStyleUnknown n -> unknownEnum site ghosttyRenderStateCursorVisualStyleEnum n
+      GhosttyCursorStyleBar -> pure BarCursor
+      GhosttyCursorStyleBlock -> pure BlockCursor
+      GhosttyCursorStyleUnderline -> pure UnderlineCursor
+      GhosttyCursorStyleBlockHollow -> pure HollowBlockCursor
+      GhosttyCursorStyleUnknown n -> unknownEnum site ghosttyCursorStyleEnum n
 
 -- | An empty cursor of the given size.
 cursorTemplate :: CSize -> GhosttyRenderStateCursor
@@ -375,7 +376,7 @@ cursorTemplate n =
       visible = 0,
       blinking = 0,
       passwordInput = 0,
-      visualStyle = GhosttyRenderStateCursorVisualStyleBar
+      visualStyle = GhosttyCursorStyleBar
     }
 
 -- | Empty colours of the given size.
@@ -522,12 +523,13 @@ copyCell rs live y x = do
       expectSuccess cellSite =<< ghosttyCellGet raw d (castPtr p)
       peek p
 
-    -- The header's INVALID_VALUE for a colour is "none: use the default".
+    -- The header's NO_VALUE for a colour is "none of its own: use the
+    -- default" (INVALID_VALUE before libghostty-vt 1.0; regression 9).
     color d = alloca $ \p -> do
       r <- ghosttyRenderStateRowCellsGet rs.rowCells d (castPtr p)
       case resultCode r of
         ResultSuccess -> Just . fromRgb <$> peek p
-        ResultInvalidValue -> pure Nothing
+        ResultNoValue -> pure Nothing
         other -> throwIO (Invariant (site d) other)
 
     -- GRAPHEMES_UTF8: into a small buffer, or one of the size the library
@@ -551,7 +553,7 @@ linkUri rs x y = do
   let point = toPoint (Point {col = x, row = fromIntegral y} :: Point 'Viewport)
       refSite = CallSite "ghostty_terminal_grid_ref"
       uriSite = CallSite "ghostty_grid_ref_hyperlink_uri"
-  with point $ \pp -> with (refTemplate (sized refTemplate)) $ \rp -> do
+  with point $ \pp -> with emptyRef $ \rp -> do
     expectSuccess refSite =<< ghosttyTerminalGridRef rs.terminal.handle pp rp
     alloca $ \np -> do
       let into cap buf = do

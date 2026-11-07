@@ -75,7 +75,7 @@ data TerminalData a where
   -- | The viewport's place in the scrollable area.
   Scrollbar :: TerminalData ScrollState
   -- | The pen: the style newly printed characters get.
-  CursorStyle :: TerminalData Style
+  CursorSgrStyle :: TerminalData Style
   -- | Whether any mouse tracking mode is on.
   MouseTracking :: TerminalData Bool
   -- | The title set by OSC 0 or 2; empty if none.
@@ -180,11 +180,12 @@ data TerminalOption a where
   SetDefaultCursorStyle :: TerminalOption CursorShape
   -- | Whether the cursor DECSCUSR 0 resets to blinks.
   SetDefaultCursorBlink :: TerminalOption Bool
-  -- | Whether Glyph Protocol APC sequences are handled. Turning it off
-  -- clears the glyph glossary.
+  -- | Whether Glyph Protocol APC sequences are handled. Off in a new
+  -- terminal, which ignores them, and canopy leaves it off: a REPL frontend
+  -- has no glyph glossary to show. Turning it off clears the glossary.
   SetGlyphProtocol :: TerminalOption Bool
   -- | The scrollback limit in bytes; 'Nothing' removes it. Pruned by page,
-  -- so approximate.
+  -- so approximate. A new terminal's is 10,000 bytes.
   SetScrollbackMaxBytes :: TerminalOption (Maybe Word)
   -- | The scrollback limit in lines; 'Nothing' removes it. Pruned by page,
   -- so approximate.

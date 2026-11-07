@@ -23,16 +23,16 @@ module Ghostty.Effectful.Internal.Convert
     -- * Modes
     modeCode,
 
-    -- * Sized structs
+    -- * Sized and frozen structs
     sized,
     withSize,
-    refTemplate,
+    emptyRef,
   )
 where
 
 import Control.Exception (throwIO)
+import Data.Bits ((.&.))
 import Foreign.C.Types (CInt, CSize)
-import Foreign.Marshal.Utils (toBool)
 import Foreign.Ptr (nullPtr)
 import Foreign.Storable (Storable (..))
 import Ghostty.Effectful.Color (Rgb (..))
@@ -68,7 +68,17 @@ import Ghostty.FFI.Style
   ( GhosttyStyle (..),
     GhosttyStyleColor (..),
     GhosttyStyleColorTag (..),
+    GhosttyStyleFlags,
     ghosttyStyleColorTagEnum,
+    ghosttyStyleUnderline,
+    pattern GhosttyStyleFlagBlink,
+    pattern GhosttyStyleFlagBold,
+    pattern GhosttyStyleFlagFaint,
+    pattern GhosttyStyleFlagInverse,
+    pattern GhosttyStyleFlagInvisible,
+    pattern GhosttyStyleFlagItalic,
+    pattern GhosttyStyleFlagOverline,
+    pattern GhosttyStyleFlagStrikethrough,
   )
 
 -- | Throw 'UnknownEnum' for a value of the described enum.
@@ -88,29 +98,32 @@ fromRgb c = Rgb {red = c.r, green = c.g, blue = c.b}
 toRgb :: Rgb -> GhosttyColorRgb
 toRgb c = GhosttyColorRgb {r = c.red, g = c.green, b = c.blue}
 
--- | A style from the binding's.
+-- | A style from the binding's: its colours, and its flag word decoded, the
+-- attributes from their bits and the underline from its field (bits 8–10).
 fromStyle :: CallSite -> GhosttyStyle -> IO Style
 fromStyle site s = do
   foreground <- color s.fgColor
   background <- color s.bgColor
   underlineColor <- color s.underlineColor
-  underline <- fromUnderline site (GhosttySgrUnderline s.underline)
+  underline <- fromUnderline site (GhosttySgrUnderline (ghosttyStyleUnderline s.flags))
   pure
     Style
       { foreground,
         background,
         underlineColor,
-        bold = toBool s.bold,
-        italic = toBool s.italic,
-        faint = toBool s.faint,
-        blink = toBool s.blink,
-        inverse = toBool s.inverse,
-        invisible = toBool s.invisible,
-        strikethrough = toBool s.strikethrough,
-        overline = toBool s.overline,
+        bold = flag GhosttyStyleFlagBold,
+        italic = flag GhosttyStyleFlagItalic,
+        faint = flag GhosttyStyleFlagFaint,
+        blink = flag GhosttyStyleFlagBlink,
+        inverse = flag GhosttyStyleFlagInverse,
+        invisible = flag GhosttyStyleFlagInvisible,
+        strikethrough = flag GhosttyStyleFlagStrikethrough,
+        overline = flag GhosttyStyleFlagOverline,
         underline
       }
   where
+    flag :: GhosttyStyleFlags -> Bool
+    flag f = s.flags .&. f /= 0
     color = \case
       StyleColorNone -> pure DefaultColor
       StyleColorPalette i -> pure (PaletteColor i)
@@ -151,18 +164,18 @@ fromCoordinate c = Point {col = c.x, row = c.y}
 -- | A mode's packed number.
 modeCode :: ModeKey r -> GhosttyMode
 modeCode = \case
-  ModeKam -> GhosttyModeKam
+  ModeDisableKeyboard -> GhosttyModeDisableKeyboard
   ModeInsert -> GhosttyModeInsert
-  ModeSrm -> GhosttyModeSrm
+  ModeSendReceiveMode -> GhosttyModeSendReceiveMode
   ModeLinefeed -> GhosttyModeLinefeed
-  ModeDecckm -> GhosttyModeDecckm
+  ModeCursorKeys -> GhosttyModeCursorKeys
   Mode132Column -> GhosttyMode132Column
   ModeSlowScroll -> GhosttyModeSlowScroll
   ModeReverseColors -> GhosttyModeReverseColors
   ModeOrigin -> GhosttyModeOrigin
   ModeWraparound -> GhosttyModeWraparound
   ModeAutorepeat -> GhosttyModeAutorepeat
-  ModeX10Mouse -> GhosttyModeX10Mouse
+  ModeMouseEventX10 -> GhosttyModeMouseEventX10
   ModeCursorBlinking -> GhosttyModeCursorBlinking
   ModeCursorVisible -> GhosttyModeCursorVisible
   ModeEnableMode3 -> GhosttyModeEnableMode3
@@ -170,30 +183,30 @@ modeCode = \case
   ModeAltScreenLegacy -> GhosttyModeAltScreenLegacy
   ModeKeypadKeys -> GhosttyModeKeypadKeys
   ModeBackarrowKeyMode -> GhosttyModeBackarrowKeyMode
-  ModeLeftRightMargin -> GhosttyModeLeftRightMargin
-  ModeNormalMouse -> GhosttyModeNormalMouse
-  ModeButtonMouse -> GhosttyModeButtonMouse
-  ModeAnyMouse -> GhosttyModeAnyMouse
+  ModeEnableLeftAndRightMargin -> GhosttyModeEnableLeftAndRightMargin
+  ModeMouseEventNormal -> GhosttyModeMouseEventNormal
+  ModeMouseEventButton -> GhosttyModeMouseEventButton
+  ModeMouseEventAny -> GhosttyModeMouseEventAny
   ModeFocusEvent -> GhosttyModeFocusEvent
-  ModeUtf8Mouse -> GhosttyModeUtf8Mouse
-  ModeSgrMouse -> GhosttyModeSgrMouse
-  ModeAltScroll -> GhosttyModeAltScroll
-  ModeUrxvtMouse -> GhosttyModeUrxvtMouse
-  ModeSgrPixelsMouse -> GhosttyModeSgrPixelsMouse
-  ModeNumlockKeypad -> GhosttyModeNumlockKeypad
+  ModeMouseFormatUtf8 -> GhosttyModeMouseFormatUtf8
+  ModeMouseFormatSgr -> GhosttyModeMouseFormatSgr
+  ModeMouseAlternateScroll -> GhosttyModeMouseAlternateScroll
+  ModeMouseFormatUrxvt -> GhosttyModeMouseFormatUrxvt
+  ModeMouseFormatSgrPixels -> GhosttyModeMouseFormatSgrPixels
+  ModeIgnoreKeypadWithNumlock -> GhosttyModeIgnoreKeypadWithNumlock
   ModeAltEscPrefix -> GhosttyModeAltEscPrefix
-  ModeAltSendsEsc -> GhosttyModeAltSendsEsc
-  ModeReverseWrapExt -> GhosttyModeReverseWrapExt
+  ModeAltSendsEscape -> GhosttyModeAltSendsEscape
+  ModeReverseWrapExtended -> GhosttyModeReverseWrapExtended
   ModeAltScreen -> GhosttyModeAltScreen
   ModeSaveCursor -> GhosttyModeSaveCursor
-  ModeAltScreenSave -> GhosttyModeAltScreenSave
+  ModeAltScreenSaveCursorClearEnter -> GhosttyModeAltScreenSaveCursorClearEnter
   ModeBracketedPaste -> GhosttyModeBracketedPaste
-  ModeSyncOutput -> GhosttyModeSyncOutput
+  ModeSynchronizedOutput -> GhosttyModeSynchronizedOutput
   ModeGraphemeCluster -> GhosttyModeGraphemeCluster
-  ModeColorSchemeReport -> GhosttyModeColorSchemeReport
-  ModeVisibilityReport -> GhosttyModeVisibilityReport
-  ModeInBandResize -> GhosttyModeInBandResize
-  ModePasteEvents -> GhosttyModePasteEvents
+  ModeReportColorScheme -> GhosttyModeReportColorScheme
+  ModeReportVisibility -> GhosttyModeReportVisibility
+  ModeInBandSizeReports -> GhosttyModeInBandSizeReports
+  ModeKittyPasteEvents -> GhosttyModeKittyPasteEvents
 
 -- | A sized struct's own size, for @GHOSTTY_INIT_SIZED@: the template at
 -- the size of the struct it makes ('sizeOf' ignores its argument).
@@ -206,6 +219,7 @@ sized mk = fromIntegral (sizeOf (mk 0))
 withSize :: (Storable b) => (CSize -> b) -> b
 withSize mk = mk (sized mk)
 
--- | An empty grid reference of the given size.
-refTemplate :: CSize -> GhosttyGridRef
-refTemplate n = GhosttyGridRef {size = n, node = nullPtr, x = 0, y = 0}
+-- | An empty grid reference, zeroed as @{0}@ does: @GhosttyGridRef@ is
+-- frozen, with no @size@ field.
+emptyRef :: GhosttyGridRef
+emptyRef = GhosttyGridRef {node = nullPtr, x = 0, y = 0}

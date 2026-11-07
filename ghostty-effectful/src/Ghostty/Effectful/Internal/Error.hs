@@ -24,6 +24,7 @@ import Ghostty.FFI.Types
     pattern GhosttyRejected,
     pattern GhosttyResultUnknown,
     pattern GhosttySuccess,
+    pattern GhosttyUnsupported,
   )
 
 -- | The closed form of a result.
@@ -37,6 +38,7 @@ resultCode = \case
   GhosttyIoError -> ResultIoError
   GhosttyLimitExceeded -> ResultLimitExceeded
   GhosttyRejected -> ResultRejected
+  GhosttyUnsupported -> ResultUnsupported
   GhosttyResultUnknown n -> ResultUnknown (fromIntegral n)
 
 -- | For a call whose only documented failure is running out of memory:

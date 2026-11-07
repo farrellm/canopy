@@ -180,6 +180,19 @@ options =
         without <- format t (formatOptions Vt)
         pure ("\ESC[1;2H" `BS.isInfixOf` with', "\ESC[1;2H" `BS.isInfixOf` without)
       r @?= (True, False),
+    -- Regression 10 (DESIGN.md §4.8): at libghostty-vt 1.0 a new formatter
+    -- starts with the palette, cursor-style and hyperlink extras on, where a
+    -- zeroed options struct had none. Each option is now set on every
+    -- formatter, so no extras means none.
+    testCase "regression 10: no extras is none, whatever the library's defaults" $ do
+      let vt = formatOptions Vt
+          state = "\ESC]4;1;rgb:12/34/56\ESC\\\ESC[1m\ESC]8;;https://example.com/\ESC\\"
+      bare <- formatted "ab" $ \t -> format t vt
+      r <- formatted ("ab" <> state) $ \t -> do
+        without <- format t vt
+        palette <- format t vt {extras = noTerminalExtras {palette = True}}
+        pure (without, "\ESC]4;" `BS.isInfixOf` palette)
+      r @?= (bare, True),
     testCase "the pwd extra carries OSC 7" $ do
       r <- formatted "\ESC]7;file:///home\ESC\\x" $ \t -> do
         out <- format t (formatOptions Vt) {extras = noTerminalExtras {pwd = True}}

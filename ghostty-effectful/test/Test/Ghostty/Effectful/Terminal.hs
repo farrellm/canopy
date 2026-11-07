@@ -9,7 +9,7 @@ import Effectful (Eff, IOE, Limit (..), Persistence (..), UnliftStrategy (..), r
 import Effectful.Exception qualified as E
 import Ghostty.Effectful (runGhostty)
 import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), VersionMismatch (..))
-import Ghostty.Effectful.Internal.Effect (linkedBuild, runGhosttyPinnedTo)
+import Ghostty.Effectful.Internal.Effect (linkedVersion, runGhosttyPinnedTo)
 import Ghostty.Effectful.Terminal
 import Test.Ghostty.Effectful.Support (config, ghostty, grid)
 import Test.Tasty (TestTree, testGroup)
@@ -24,7 +24,7 @@ tests =
         r @?= Right (),
       testCase "a version mismatch refuses, and runs nothing" $ do
         ran <- newIORef False
-        linked <- linkedBuild
+        linked <- linkedVersion
         r <- runEff (runGhosttyPinnedTo "not-the-pin" (writeIORef ran True))
         r @?= Left VersionMismatch {pinned = "not-the-pin", linked}
         readIORef ran >>= (@?= False),

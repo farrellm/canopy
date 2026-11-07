@@ -24,7 +24,7 @@ import Ghostty.Effectful.Internal.Terminal (Terminal (..))
 import Ghostty.Effectful.Mode (ModeKey (..))
 import Ghostty.Effectful.Point (Point (..))
 import Ghostty.Effectful.Render
-import Ghostty.Effectful.Style (CellColor (..), Style (..), defaultStyle)
+import Ghostty.Effectful.Style (CellColor (..), Style (..), Underline (..), defaultStyle)
 import Ghostty.Effectful.Terminal
 import Ghostty.FFI.Layout (CEnum (..))
 import Ghostty.FFI.Render
@@ -43,17 +43,18 @@ import Ghostty.FFI.Render
     pattern GhosttyRenderStateDataOverscan,
     pattern GhosttyRenderStateDataOverscanRequest,
     pattern GhosttyRenderStateDataRowIterator,
-    pattern GhosttyRenderStateOptionDirty,
-    pattern GhosttyRenderStateOptionOverscan,
+    pattern GhosttyRenderStateOptDirty,
+    pattern GhosttyRenderStateOptOverscan,
     pattern GhosttyRenderStateRowCellsDataGraphemesBuf,
     pattern GhosttyRenderStateRowCellsDataGraphemesLen,
     pattern GhosttyRenderStateRowCellsDataSelected,
     pattern GhosttyRenderStateRowDataCells,
     pattern GhosttyRenderStateRowDataCellsRaw,
     pattern GhosttyRenderStateRowDataSelection,
-    pattern GhosttyRenderStateRowOptionDirty,
+    pattern GhosttyRenderStateRowOptDirty,
   )
 import Ghostty.FFI.Terminal (GhosttyTerminalScrollViewport (..), ghosttyTerminalScrollViewport)
+import Ghostty.FFI.Types (pattern GhosttySuccess)
 import Test.Ghostty.Effectful.Support (config, ghostty, grid)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
@@ -164,6 +165,15 @@ cellTests =
       c.foreground @?= Just (paletteColor palette 1)
       c.background @?= Nothing
       c.width @?= Narrow,
+    -- Regression 9 (DESIGN.md §4.3): at libghostty-vt 1.0 a cell with no
+    -- colour of its own is GHOSTTY_NO_VALUE, where it was INVALID_VALUE, so
+    -- every default-coloured cell read as an invariant failure.
+    testCase "regression 9: a cell of the default colours has none of its own" $ do
+      c <- rendered "X" firstCell
+      (c.text, c.foreground, c.background) @?= ("X", Nothing, Nothing),
+    testCase "a cell's attributes and underline read from the style's flag word" $ do
+      c <- rendered "\ESC[2;3;9;53;4:3mX" firstCell
+      c.style @?= defaultStyle {faint = True, italic = True, strikethrough = True, overline = True, underline = CurlyUnderline},
     testCase "a wide character is a wide cell and a spacer" $ do
       cs <- rendered "\230\151\165x" $ \f -> V.toList . V.take 3 <$> (allRows f >>= maybe (pure V.empty) cells . viaNonEmpty head)
       map (\c -> (c.text, c.width)) cs @?= [("\26085", Wide), ("", SpacerTail), ("x", Narrow)],
@@ -208,7 +218,7 @@ holds =
       r <- ghostty $ withTerminal config $ \t -> withRenderState t $ \rs -> do
         _ <- feed t "A\ESC[?2026hB"
         _ <- withFrame rs (const pass)
-        setT t (SetMode ModeSyncOutput) False
+        setT t (SetMode ModeSynchronizedOutput) False
         withFrame rs $ \f -> (,frameHeld f) . take 1 <$> texts f
       r @?= (["AB"], False),
     -- Regression 5 (§4.3): turning the mode off left the capture marked
@@ -217,8 +227,8 @@ holds =
     testCase "regression 5: a hold turned off and on again by setT shows the terminal" $ do
       r <- ghostty $ withTerminal config $ \t -> withRenderState t $ \rs -> do
         _ <- feed t "A\ESC[?2026hB"
-        setT t (SetMode ModeSyncOutput) False
-        setT t (SetMode ModeSyncOutput) True
+        setT t (SetMode ModeSynchronizedOutput) False
+        setT t (SetMode ModeSynchronizedOutput) True
         withFrame rs $ \f -> (,frameHeld f) . take 1 <$> texts f
       r @?= (["AB"], False),
     testCase "a hold that begins while a frame is open is not captured" $ do
@@ -257,7 +267,7 @@ keys =
     testCase "the cursor reads as nowhere when it is outside the viewport" $ do
       r <- ghostty $ withTerminal config $ \t -> do
         _ <- feed t (mconcat (replicate 30 "line\r\n"))
-        liftIO (with (ScrollViewportDelta (-5)) (ghosttyTerminalScrollViewport t.handle))
+        liftIO (with (ScrollViewportDelta (-5)) (ghosttyTerminalScrollViewport t.handle)) >>= liftIO . (@?= GhosttySuccess)
         withRenderState t $ \rs -> withFrame rs $ \f ->
           (,,) <$> getF f RenderCursorViewportX <*> getF f RenderCursorViewportWideTail <*> ((.position) <$> getF f RenderCursor)
       r @?= (Nothing, Nothing, Nothing),
@@ -303,10 +313,12 @@ keys =
       sort (map cellNumber cellKeys <> map snd deferredCellData)
         @?= sort [v | (n :: Text, v) <- ghosttyRenderStateRowCellsDataEnum.values, n /= "GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_INVALID"],
     -- No option has a constructor: a frame owns the dirty state, and no
-    -- overscan is requested (DESIGN.md §4.3).
+    -- overscan is requested (DESIGN.md §4.3). INVALID (0) is no option.
     testCase "the render state and row options are all left to frames" $ do
-      sort (map snd ghosttyRenderStateOptionEnum.values) @?= sort [optionNumber GhosttyRenderStateOptionDirty, optionNumber GhosttyRenderStateOptionOverscan]
-      map snd ghosttyRenderStateRowOptionEnum.values @?= [rowOptionNumber GhosttyRenderStateRowOptionDirty]
+      sort [v | (n :: Text, v) <- ghosttyRenderStateOptionEnum.values, n /= "GHOSTTY_RENDER_STATE_OPT_INVALID"]
+        @?= sort [optionNumber GhosttyRenderStateOptDirty, optionNumber GhosttyRenderStateOptOverscan]
+      [v | (n :: Text, v) <- ghosttyRenderStateRowOptionEnum.values, n /= "GHOSTTY_RENDER_STATE_ROW_OPT_INVALID"]
+        @?= [rowOptionNumber GhosttyRenderStateRowOptDirty]
   ]
 
 -- | Every frame key.

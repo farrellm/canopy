@@ -78,6 +78,15 @@ tests =
         failures <- ghostty $ withTerminal config $ \t ->
           concat <$> traverse (\(Some o) -> written t o) allOptions
         failures @?= [],
+      -- Regression 11 (DESIGN.md §4.4): at libghostty-vt 1.0 a null value
+      -- restores an option's default, and the byte limit's default is
+      -- 10,000 bytes, so 'Nothing' set that limit instead of removing it.
+      testCase "regression 11: no byte limit is none, not the default" $ do
+        r <- ghostty $ withTerminal config $ \t -> do
+          setT t SetScrollbackMaxBytes (Just 5000)
+          setT t SetScrollbackMaxBytes Nothing
+          getT t ScrollbackMaxBytes
+        r @?= Nothing,
       -- Regression 3 (DESIGN.md §4.5): 'setT' returns no events because
       -- none of its C calls runs a callback; were one to, its event would
       -- wait here for the next 'feed'.
@@ -88,7 +97,7 @@ tests =
         evs @?= [],
       testCase "every option is a constructor, or deferred" $
         sort (ordNub (map (\(Some o) -> optionNumber (optionKey o)) allOptions) <> map snd deferredOptions)
-          @?= sort (map snd ghosttyTerminalOptionEnum.values),
+          @?= sort [v | (n :: Text, v) <- ghosttyTerminalOptionEnum.values, n /= "GHOSTTY_TERMINAL_OPT_INVALID"],
       testCase "every option is its header row's name" $
         filter (\(c, h) -> h /= Just ("GHOSTTY_TERMINAL_OPT_" <> c)) (map (\(Some o) -> (headerName (fromMaybe "" (stripPrefix "Set" (show o))), rowName ghosttyTerminalOptionEnum (optionNumber (optionKey o)))) allOptions)
           @?= [],
@@ -132,7 +141,7 @@ allData =
     Some CursorVisible,
     Some KittyKeyboardFlags,
     Some Scrollbar,
-    Some CursorStyle,
+    Some CursorSgrStyle,
     Some MouseTracking,
     Some Title,
     Some Pwd,
@@ -197,7 +206,7 @@ fresh t k = do
     CursorVisible -> is True v
     KittyKeyboardFlags -> is noKittyFlags v
     Scrollbar -> is (ScrollState 24 0 24) v
-    CursorStyle -> is defaultStyle v
+    CursorSgrStyle -> is defaultStyle v
     MouseTracking -> is False v
     Title -> is "" v
     Pwd -> is "" v
@@ -235,11 +244,11 @@ modeOnAtStart m =
   modeCode m
     `elem` map
       (\(SomeModeKey k) -> modeCode k)
-      [ SomeModeKey ModeSrm,
+      [ SomeModeKey ModeSendReceiveMode,
         SomeModeKey ModeWraparound,
         SomeModeKey ModeCursorVisible,
-        SomeModeKey ModeAltScroll,
-        SomeModeKey ModeNumlockKeypad,
+        SomeModeKey ModeMouseAlternateScroll,
+        SomeModeKey ModeIgnoreKeypadWithNumlock,
         SomeModeKey ModeAltEscPrefix
       ]
 

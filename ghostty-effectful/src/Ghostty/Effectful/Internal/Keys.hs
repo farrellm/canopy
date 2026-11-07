@@ -1,3 +1,5 @@
+{-# LANGUAGE PatternSynonyms #-}
+
 -- | The marshalling behind the typed keys (DESIGN.md §4.4): for each
 -- 'TerminalData' constructor, the @ghostty_terminal_get@ key and a @peek@
 -- at its output type; for each 'TerminalOption', the
@@ -50,7 +52,7 @@ import Ghostty.Effectful.Terminal.Keys
 import Ghostty.FFI.Mouse
 import Ghostty.FFI.Style (ghosttyStyleDefault)
 import Ghostty.FFI.Terminal
-import Ghostty.FFI.Types (GhosttyString (..), ghosttyStringBytes)
+import Ghostty.FFI.Types (GhosttyCursorStyle, GhosttyString (..), ghosttyStringBytes, pattern GhosttyCursorStyleBar, pattern GhosttyCursorStyleBlock, pattern GhosttyCursorStyleBlockHollow, pattern GhosttyCursorStyleUnderline)
 
 -- | The header's key for a read.
 dataKey :: TerminalData a -> GhosttyTerminalData
@@ -64,7 +66,7 @@ dataKey = \case
   CursorVisible -> GhosttyTerminalDataCursorVisible
   KittyKeyboardFlags -> GhosttyTerminalDataKittyKeyboardFlags
   Scrollbar -> GhosttyTerminalDataScrollbar
-  CursorStyle -> GhosttyTerminalDataCursorStyle
+  CursorSgrStyle -> GhosttyTerminalDataCursorSgrStyle
   MouseTracking -> GhosttyTerminalDataMouseTracking
   Title -> GhosttyTerminalDataTitle
   Pwd -> GhosttyTerminalDataPwd
@@ -150,7 +152,7 @@ getData h key = case key of
   CursorVisible -> flag
   KittyKeyboardFlags -> required >>= kittyFlags
   Scrollbar -> (\(s :: GhosttyTerminalScrollbar) -> ScrollState s.total s.offset s.len) <$> required
-  CursorStyle -> style
+  CursorSgrStyle -> style
   MouseTracking -> flag
   Title -> string
   Pwd -> string
@@ -358,13 +360,15 @@ writeOption t opt v = case opt of
   SetDefaultCursorStyle -> with (cursorStyle v) (put . castPtr)
   SetDefaultCursorBlink -> flag v
   SetGlyphProtocol -> flag v
-  SetScrollbackMaxBytes -> maybeWith (toCSize <$> v) put
+  -- No byte limit is SIZE_MAX: since libghostty-vt 1.0 a null value
+  -- restores the default of 10,000 bytes (regression 11).
+  SetScrollbackMaxBytes -> with (maybe maxBound toCSize v) (put . castPtr)
   SetScrollbackMaxLines -> maybeWith (toCSize <$> v) put
   SetContinuationMaxBytes -> with (toCSize v) (put . castPtr)
   SetTitleReport -> flag v
   SetModeDefault m -> modeValue m v
-  SetMode ModeSyncOutput -> do
-    modeValue ModeSyncOutput v
+  SetMode ModeSynchronizedOutput -> do
+    modeValue ModeSynchronizedOutput v
     unless v $ captureRelease t.installed
   SetMode m -> modeValue m v
   SetUnknownMaxBytes -> with (toCSize v) (put . castPtr)
@@ -409,12 +413,12 @@ text t f = BS.useAsCStringLen (encodeUtf8 t) $ \(p, n) ->
   with (GhosttyString {ptr = castPtr p, len = fromIntegral n}) (f . castPtr)
 
 -- | A cursor shape as the binding's.
-cursorStyle :: CursorShape -> GhosttyTerminalCursorStyle
+cursorStyle :: CursorShape -> GhosttyCursorStyle
 cursorStyle = \case
-  BarCursor -> GhosttyTerminalCursorStyleBar
-  BlockCursor -> GhosttyTerminalCursorStyleBlock
-  UnderlineCursor -> GhosttyTerminalCursorStyleUnderline
-  HollowBlockCursor -> GhosttyTerminalCursorStyleBlockHollow
+  BarCursor -> GhosttyCursorStyleBar
+  BlockCursor -> GhosttyCursorStyleBlock
+  UnderlineCursor -> GhosttyCursorStyleUnderline
+  HollowBlockCursor -> GhosttyCursorStyleBlockHollow
 
 -- | XTCHECKSUM's bits.
 checksumBits :: ChecksumExtension -> Word8

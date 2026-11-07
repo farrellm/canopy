@@ -71,7 +71,7 @@ import Data.Bits ((.|.))
 import Data.ByteString qualified as BS
 import Data.ByteString.Unsafe qualified as BSU
 import Data.Text qualified as T
-import Foreign.C.Types (CBool, CChar, CSize)
+import Foreign.C.Types (CBool, CSize)
 import Foreign.Marshal.Alloc (alloca, allocaBytes)
 import Foreign.Marshal.Utils (fromBool, toBool, with)
 import Foreign.Ptr (Ptr, castPtr, nullPtr)
@@ -80,7 +80,7 @@ import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), ResultCode (..
 import Ghostty.Effectful.Event (TerminalEvent)
 import Ghostty.Effectful.Input
 import Ghostty.Effectful.Internal.Convert (modeCode, withSize)
-import Ghostty.Effectful.Internal.Error (newHandle, resultCode)
+import Ghostty.Effectful.Internal.Error (expectSuccess, newHandle, resultCode)
 import Ghostty.Effectful.Internal.Feed (drainEvents)
 import Ghostty.Effectful.Internal.Size (CellPixels (..), Extent, GridSize (..), fromExtent)
 import Ghostty.Effectful.Internal.Terminal (Terminal (..))
@@ -117,13 +117,13 @@ import Ghostty.FFI.Types (GhosttyResult, GhosttyString (..))
 -- more (@GHOSTTY_OUT_OF_SPACE@, with the size), again into one of that
 -- size. So a too-small buffer never escapes (DESIGN.md §4.7). Running out
 -- of memory throws 'OutOfMemory'; any other result, 'Invariant'.
-bytesVia :: CallSite -> (Ptr CChar -> CSize -> Ptr CSize -> IO GhosttyResult) -> IO ByteString
+bytesVia :: CallSite -> (Ptr Word8 -> CSize -> Ptr CSize -> IO GhosttyResult) -> IO ByteString
 bytesVia site call = alloca $ \written -> attempt written 64 >>= maybe (peek written >>= retry written) pure
   where
     attempt written n = allocaBytes n $ \buf -> do
       r <- call buf (fromIntegral n) written
       case resultCode r of
-        ResultSuccess -> Just <$> (peek written >>= \m -> BS.packCStringLen (buf, fromIntegral m))
+        ResultSuccess -> Just <$> (peek written >>= \m -> BS.packCStringLen (castPtr buf, fromIntegral m))
         ResultOutOfSpace -> pure Nothing
         ResultOutOfMemory -> throwIO (OutOfMemory site)
         other -> throwIO (Invariant site other)
@@ -206,7 +206,8 @@ openKeyEncoder o = do
 closeKeyEncoder :: KeyEncoder k -> IO ()
 closeKeyEncoder enc = ghosttyKeyEventFree enc.event >> ghosttyKeyEncoderFree enc.encoder
 
--- | @ghostty_key_encoder_setopt@, for every option.
+-- | @ghostty_key_encoder_set@, for every option. Each value is one the option
+-- takes, so a refusal is an invariant.
 setKeyOptions :: KeyEncoder k -> KeyOptions -> IO ()
 setKeyOptions enc o = do
   flag GhosttyKeyEncoderOptCursorKeyApplication o.cursorKeyApplication
@@ -219,39 +220,49 @@ setKeyOptions enc o = do
   flag GhosttyKeyEncoderOptBackarrowKeyMode o.backarrowKeyMode
   where
     set :: (Storable a) => GhosttyKeyEncoderOption -> a -> IO ()
-    set opt v = with v $ \p -> ghosttyKeyEncoderSetopt enc.encoder opt (castPtr p)
+    set opt v = with v $ \p -> expectSuccess (CallSite "ghostty_key_encoder_set") =<< ghosttyKeyEncoderSet enc.encoder opt (castPtr p)
     flag opt b = set opt (fromBool b :: CBool)
 
--- | @ghostty_key_encoder_setopt_from_terminal@: the options the terminal's
+-- | @ghostty_key_encoder_set_from_terminal@: the options the terminal's
 -- modes and keyboard flags set. Option-as-Alt is not a terminal's, and
 -- becomes 'OptionNotAlt'.
 keyOptionsFromTerminal :: KeyEncoder k -> Terminal s -> IO ()
-keyOptionsFromTerminal enc t = ghosttyKeyEncoderSetoptFromTerminal enc.encoder t.handle
+keyOptionsFromTerminal enc t =
+  expectSuccess (CallSite "ghostty_key_encoder_set_from_terminal")
+    =<< ghosttyKeyEncoderSetFromTerminal enc.encoder t.handle
 
 -- | Fill in the encoder's event, and @ghostty_key_encoder_encode@ it. The
 -- event borrows the text, which is alive until the encode returns.
 encodeKeyEvent :: KeyEncoder k -> KeyEvent -> IO ByteString
 encodeKeyEvent enc e = do
-  ghosttyKeyEventSetAction enc.event $ case e.action of
+  -- Each setter refuses only a null event or a value it does not know, and
+  -- every value here is one the binding names: a refusal is an invariant.
+  setEvent "ghostty_key_event_set_action" . ghosttyKeyEventSetAction enc.event $ case e.action of
     KeyRelease -> GhosttyKeyActionRelease
     KeyPress -> GhosttyKeyActionPress
     KeyRepeat -> GhosttyKeyActionRepeat
-  ghosttyKeyEventSetKey enc.event (keyCode e.key)
-  ghosttyKeyEventSetMods enc.event (modsBits e.mods)
-  ghosttyKeyEventSetConsumedMods enc.event (modsBits e.consumedMods)
-  ghosttyKeyEventSetComposing enc.event (fromBool e.composing)
-  ghosttyKeyEventSetUnshiftedCodepoint enc.event (maybe 0 (fromIntegral . ord) e.unshifted)
+  setEvent "ghostty_key_event_set_key" $ ghosttyKeyEventSetKey enc.event (keyCode e.key)
+  setEvent "ghostty_key_event_set_mods" $ ghosttyKeyEventSetMods enc.event (modsBits e.mods)
+  setEvent "ghostty_key_event_set_consumed_mods" $ ghosttyKeyEventSetConsumedMods enc.event (modsBits e.consumedMods)
+  setEvent "ghostty_key_event_set_composing" $ ghosttyKeyEventSetComposing enc.event (fromBool e.composing)
+  setEvent "ghostty_key_event_set_unshifted_codepoint" $
+    ghosttyKeyEventSetUnshiftedCodepoint enc.event (maybe 0 (fromIntegral . ord) e.unshifted)
   -- The header asks for no C0 control or DEL in the text: the encoder
   -- derives a control key from the key itself.
   let utf8 = encodeUtf8 (T.filter (\c -> c >= ' ' && c /= '\DEL') e.text) :: ByteString
       encode = bytesVia (CallSite "ghostty_key_encoder_encode") (ghosttyKeyEncoderEncode enc.encoder enc.event)
+      setText str = setEvent "ghostty_key_event_set_utf8" $ with str (ghosttyKeyEventSetUtf8 enc.event)
+      -- A string of length zero clears the text; its pointer is not read.
+      noText = GhosttyString {ptr = nullPtr, len = 0}
   if BS.null utf8
-    then ghosttyKeyEventSetUtf8 enc.event nullPtr 0 >> encode
+    then setText noText >> encode
     else BSU.unsafeUseAsCStringLen utf8 $ \(p, n) -> do
-      ghosttyKeyEventSetUtf8 enc.event p (fromIntegral n)
+      setText GhosttyString {ptr = castPtr p, len = fromIntegral n}
       -- The event keeps the pointer; leave none behind that outlives it,
       -- even when the encode throws.
-      encode `finally` ghosttyKeyEventSetUtf8 enc.event nullPtr 0
+      encode `finally` setText noText
+  where
+    setEvent site call = expectSuccess (CallSite site) =<< call
 
 -- | The binding's key.
 keyCode :: Key -> GhosttyKey
@@ -595,8 +606,10 @@ openMouseEncoder o = do
 closeMouseEncoder :: MouseEncoder m -> IO ()
 closeMouseEncoder enc = ghosttyMouseEventFree enc.event >> ghosttyMouseEncoderFree enc.encoder
 
--- | @ghostty_mouse_encoder_setopt@, for every option. A change of tracking,
--- format or geometry forgets the last cell reported.
+-- | @ghostty_mouse_encoder_set@, for every option. A change of tracking,
+-- format or geometry forgets the last cell reported. Each value is one the
+-- option takes (the geometry's cell sizes are 'Extent's, never zero), so a
+-- refusal is an invariant.
 setMouseOptions :: MouseEncoder m -> MouseOptions -> IO ()
 setMouseOptions enc o = do
   set GhosttyMouseEncoderOptEvent (trackingCode o.tracking)
@@ -606,31 +619,40 @@ setMouseOptions enc o = do
   set GhosttyMouseEncoderOptTrackLastCell (fromBool o.trackLastCell :: CBool)
   where
     set :: (Storable a) => GhosttyMouseEncoderOption -> a -> IO ()
-    set opt v = with v $ \p -> ghosttyMouseEncoderSetopt enc.encoder opt (castPtr p)
+    set opt v = with v $ \p -> expectSuccess (CallSite "ghostty_mouse_encoder_set") =<< ghosttyMouseEncoderSet enc.encoder opt (castPtr p)
 
--- | @ghostty_mouse_encoder_setopt_from_terminal@: the tracking and format
+-- | @ghostty_mouse_encoder_set_from_terminal@: the tracking and format
 -- the terminal's program asked for. The geometry and the held button stay;
 -- the last cell reported is forgotten.
 mouseOptionsFromTerminal :: MouseEncoder m -> Terminal s -> IO ()
-mouseOptionsFromTerminal enc t = ghosttyMouseEncoderSetoptFromTerminal enc.encoder t.handle
+mouseOptionsFromTerminal enc t =
+  expectSuccess (CallSite "ghostty_mouse_encoder_set_from_terminal")
+    =<< ghosttyMouseEncoderSetFromTerminal enc.encoder t.handle
 
 -- | @ghostty_mouse_encoder_reset@: forget the last cell reported.
 resetMouse :: MouseEncoder m -> IO ()
-resetMouse enc = ghosttyMouseEncoderReset enc.encoder
+resetMouse enc = expectSuccess (CallSite "ghostty_mouse_encoder_reset") =<< ghosttyMouseEncoderReset enc.encoder
 
 -- | Fill in the encoder's event, and @ghostty_mouse_encoder_encode@ it.
 -- An event the options do not report encodes as nothing.
 encodeMouseEvent :: MouseEncoder m -> MouseEvent -> IO ByteString
 encodeMouseEvent enc e = do
-  ghosttyMouseEventSetAction enc.event $ case e.action of
+  -- As for keys: every value here is one the binding names, so a refusal
+  -- is an invariant.
+  setEvent "ghostty_mouse_event_set_action" . ghosttyMouseEventSetAction enc.event $ case e.action of
     MousePress -> GhosttyMouseActionPress
     MouseRelease -> GhosttyMouseActionRelease
     MouseMotion -> GhosttyMouseActionMotion
-  maybe (ghosttyMouseEventClearButton enc.event) (ghosttyMouseEventSetButton enc.event . buttonCode) e.button
-  ghosttyMouseEventSetMods enc.event (modsBits e.mods)
-  with (GhosttyMousePosition (realToFrac e.position.x) (realToFrac e.position.y)) $
-    ghosttyMouseEventSetPosition enc.event
+  case e.button of
+    Nothing -> setEvent "ghostty_mouse_event_clear_button" $ ghosttyMouseEventClearButton enc.event
+    Just b -> setEvent "ghostty_mouse_event_set_button" $ ghosttyMouseEventSetButton enc.event (buttonCode b)
+  setEvent "ghostty_mouse_event_set_mods" $ ghosttyMouseEventSetMods enc.event (modsBits e.mods)
+  setEvent "ghostty_mouse_event_set_position" $
+    with (GhosttyMousePosition (realToFrac e.position.x) (realToFrac e.position.y)) $
+      ghosttyMouseEventSetPosition enc.event
   bytesVia (CallSite "ghostty_mouse_encoder_encode") (ghosttyMouseEncoderEncode enc.encoder enc.event)
+  where
+    setEvent site call = expectSuccess (CallSite site) =<< call
 
 -- | The binding's tracking mode.
 trackingCode :: MouseTracking -> GhosttyMouseTrackingMode

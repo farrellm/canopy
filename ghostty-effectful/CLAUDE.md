@@ -25,8 +25,7 @@ events instead of callbacks. No export may expose a pointer.
   C (`cbits/gveff_terminal.c`, with the terminal's `USERDATA` struct), since they return a struct by
   value. Any operation whose C call can run a callback returns the events it caused, as `feed`,
   `resize` and `reset` do (`Internal.Feed`, which can read the terminal's keys); `setT`'s cannot,
-  and a test holds that. A sized struct a callback
-  receives is read only after checking its `size` (`ShortStruct` otherwise).
+  and a test holds that. Every struct a callback receives is frozen (no `size`), so it is read whole.
 - **Render states and frames** (§4.3, `Internal.Render`, public `Render`): a render state is its
   own rank-2 region inside its terminal's; a frame (`withFrame`, tag `f`) is shorter still, and what
   leaves it is copied (`Cell`). A frame that returns cleans the dirty state; one that throws does
@@ -37,9 +36,11 @@ events instead of callbacks. No export may expose a pointer.
   terminal or its viewport must call `wrote`, since a frame reads hyperlinks from the terminal only
   while that count is unchanged.
 - **Formatting** (`Internal.Format`, public `Format`) has no handle: each call makes a formatter,
-  resolves its range to untracked grid references, formats and frees, so the references cannot go
-  stale. Goldens are in `test/golden/format/`, control bytes written visibly (`\e`, `\r`); read
-  each before accepting it (`--accept`). A call taking a point checks a `History` row with
+  sets every option on it (`EMIT`, `UNWRAP`, `TRIM`, `EXTRAS`, `SELECTION`: a new formatter's
+  defaults are the library's, not canopy's, regression 10), resolves its range to untracked grid
+  references, formats and frees, so the references cannot go stale. Goldens are in
+  `test/golden/format/`, control bytes written visibly (`\e`, `\r`); read each before accepting it
+  (`--accept`). A call taking a point checks a `History` row with
   `Internal.Keys.pastHistory` first, since the library does not refuse one past the scrollback.
 - **Encoders, parsers, widths** (§4.8, M1.9). Key and mouse encoders are handles (`withKeyEncoder`,
   `withMouseEncoder`, `Internal.Encode`), each owning the event handle it fills in per encode; their
