@@ -213,6 +213,13 @@ Written as changes land, not at release (DESIGN.md §2.9).
 - Found while testing: ghostty's Kitty encoder finds a text key by its unshifted character, so a
   `KeyEvent` without one sends its press as text and no release at all. Documented on
   `KeyEvent.unshifted` and in DESIGN.md §11.2, for M2.8's roundtrip generator.
+- `ghostty-effectful-bench` (M1.10, DESIGN.md §12.3): `feed` throughput over about 1 MiB each of
+  plain ASCII, SGR-coloured words, wide and combining text, and a REPL transcript of OSC 133 blocks,
+  plus plain text in 4 KiB writes and a terminal opened and closed with nothing fed. CI step 8
+  (§2.8) gates its allocation against `ghostty-effectful/bench/baseline/ghc-9.12.4.csv` with
+  `scripts/check-allocation.py` (cassini's, 10% and a 4 KiB slack); time is reported. First
+  figures: plain text at about 700 MB/s; the OSC 133 transcript at about 3.2 µs and 2.9 KB per
+  stop, linear in the stops.
 
 ### M0: infrastructure
 

@@ -130,3 +130,28 @@ test-suite ghostty-effectful-test
     canopy-prelude (Canopy.Prelude as Prelude)
 
   default-language: GHC2024
+
+-- DESIGN.md §12.3. Compiled with -O2, and -T so allocation is reported beside
+-- time; the library is at cabal's default optimization, as in every build.
+-- CI gates allocation against bench/baseline/ (§2.8 step 8).
+benchmark ghostty-effectful-bench
+  import:           warnings, extensions
+  type:             exitcode-stdio-1.0
+  hs-source-dirs:   bench
+  main-is:          Main.hs
+  other-modules:    Bench.Ghostty.Effectful.Feed
+  ghc-options:      -O2 -with-rtsopts=-T
+  build-depends:
+    , base ^>=4.21.2.0
+    , bytestring ^>=0.12
+    , canopy-prelude
+    , effectful-core ^>=2.7.1
+    , ghostty-effectful
+    , tasty-bench ^>=0.5.1
+    , text ^>=2.1
+
+  mixins:
+    base hiding (Prelude),
+    canopy-prelude (Canopy.Prelude as Prelude)
+
+  default-language: GHC2024
