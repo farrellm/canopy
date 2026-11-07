@@ -34,6 +34,19 @@ tests =
           write t (BS.replicate 30 10)
           (,,) <$> refPoint @'Active ref <*> refPoint @'Grid ref <*> refPoint @'History ref
         r @?= (Nothing, Just (Point 0 0), Just (Point 0 0)),
+      -- Regression 6: the library resolves a scrollback row past the
+      -- scrollback to the active row that many rows down. With 5 rows of
+      -- scrollback, History row 5 was tracked as Active row 0.
+      testCase "a scrollback row past the scrollback is refused" $ do
+        r <- ghostty $ withTerminal config $ \t -> do
+          write t (BS.replicate 28 10)
+          past <- track t (Point 0 5 :: Point 'History)
+          lastRow <- track t (Point 0 4 :: Point 'History)
+          ref <- tracked t (Point 0 0 :: Point 'Active)
+          moved <- moveRef ref (Point 0 5 :: Point 'History)
+          p <- refPoint @'Active ref
+          pure (isJust past, isJust lastRow, moved, p)
+        r @?= (False, True, False, Just (Point 0 0)),
       testCase "a reference moves, and stays when the point is outside" $ do
         r <- ghostty $ withTerminal config $ \t -> do
           ref <- tracked t (Point 0 0 :: Point 'Active)

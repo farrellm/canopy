@@ -4,7 +4,7 @@ The milestones of DESIGN.md §13, broken into steps. **Each step is one CR**: it
 `-Werror`, passes every CI step, adds its `CHANGELOG.md` line, and updates `DESIGN.md` in the same
 commit if it changes a decision (§2.9). Section references (§) are to DESIGN.md.
 
-M0 is done (PR #1), and M1.1–M1.7 (PRs #2–#9). Steps are numbered `M<n>.<k>`
+M0 is done (PR #1), and M1.1–M1.8 (PRs #2–#10). Steps are numbered `M<n>.<k>`
 and are in dependency order within a milestone.
 
 ## Tracks
@@ -120,6 +120,12 @@ Exit: formatter goldens; every typed key exercised (§13).
 - `Ghostty.Effectful.Format`: plain / VT / HTML of a terminal, a selection, a row range.
 - tasty-golden goldens over canned VT streams (colours, wide chars, wraps, hyperlinks).
   **The other half of M1's exit condition.**
+- A formatter is not a handle: `format` (the active screen, scrollback included) and `formatRange`
+  (`Span`, `Block`, `WholeRows` in any coordinate system) each make, use and free one, so a range's
+  untracked grid references cannot go stale (DESIGN.md §4.2). "A selection" is a span or block of
+  caller's points; the terminal's own selection waits for M6.5. Goldens show control bytes visibly.
+  Found on the way: a `History` point past the scrollback resolved to an active row, now refused by
+  `track`, `moveRef` and `formatRange` (regression 6, DESIGN.md §4.4). **Done.**
 
 ### M1.9 Encoders, parsers, unicode
 

@@ -36,6 +36,11 @@ events instead of callbacks. No export may expose a pointer.
   to the terminal, then calls the Haskell callback, which only appends. A call that changes the
   terminal or its viewport must call `wrote`, since a frame reads hyperlinks from the terminal only
   while that count is unchanged.
+- **Formatting** (`Internal.Format`, public `Format`) has no handle: each call makes a formatter,
+  resolves its range to untracked grid references, formats and frees, so the references cannot go
+  stale. Goldens are in `test/golden/format/`, control bytes written visibly (`\e`, `\r`); read
+  each before accepting it (`--accept`). A call taking a point checks a `History` row with
+  `Internal.Keys.pastHistory` first, since the library does not refuse one past the scrollback.
 - **A C enum is closed at this level, with no unknown case**: an unnamed value is `UnknownEnum`
   (`Internal.Convert.unknownEnum`), because the version check and the layout test rule it out.
 - Tests may import `Internal` (to build values or reach `runGhosttyPinnedTo`).

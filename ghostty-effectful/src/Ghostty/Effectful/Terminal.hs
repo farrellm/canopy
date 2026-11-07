@@ -46,14 +46,14 @@ import Ghostty.Effectful.Event (TerminalEvent)
 import Ghostty.Effectful.Internal.Convert (fromCoordinate, pointTag, toPoint)
 import Ghostty.Effectful.Internal.Effect (Ghostty, Handles (..), owned)
 import Ghostty.Effectful.Internal.Feed (feedTerminal, resetTerminal, resizeTerminal)
-import Ghostty.Effectful.Internal.Keys (getData, setOption)
+import Ghostty.Effectful.Internal.Keys (getData, pastHistory, setOption)
 import Ghostty.Effectful.Internal.Terminal
   ( CellPixels (..),
     Extent,
     GridSize (..),
     Terminal (..),
     TerminalConfig (..),
-    TrackedRef,
+    TrackedRef (..),
     closeTerminal,
     extent,
     fromExtent,
@@ -157,7 +157,10 @@ setT t opt v = do
 track :: (Ghostty :> es, KnownCoord c) => Terminal s -> Point c -> Eff es (Maybe (TrackedRef s))
 track t p = do
   hs <- owned "track"
-  unsafeEff_ (trackPoint hs.refCount t (toPoint p))
+  unsafeEff_ $
+    pastHistory t.handle (toPoint p) >>= \case
+      True -> pure Nothing
+      False -> trackPoint hs.refCount t (toPoint p)
 
 -- | Free a reference now rather than with its terminal. Each live reference
 -- costs the terminal work on every scroll, so a long session untracks what
@@ -184,7 +187,10 @@ refPoint ref = do
 moveRef :: (Ghostty :> es, KnownCoord c) => TrackedRef s -> Point c -> Eff es Bool
 moveRef ref p = do
   _ <- owned "moveRef"
-  unsafeEff_ (moveTrackedRef ref (toPoint p))
+  unsafeEff_ $
+    pastHistory ref.terminal.handle (toPoint p) >>= \case
+      True -> pure False
+      False -> moveTrackedRef ref (toPoint p)
 
 -- | Whether the reference still names a cell.
 refAlive :: (Ghostty :> es) => TrackedRef s -> Eff es Bool
