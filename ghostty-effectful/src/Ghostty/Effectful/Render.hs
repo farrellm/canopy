@@ -42,7 +42,7 @@ module Ghostty.Effectful.Render
   )
 where
 
-import Control.Exception (bracket, onException)
+import Control.Exception (bracket, mask, onException)
 import Data.Vector (Vector)
 import Effectful (Eff, (:>))
 import Effectful.Dispatch.Static (unsafeEff_, unsafeSeqUnliftIO)
@@ -98,13 +98,15 @@ openRenderStates = do
 withFrame :: (Ghostty :> es) => RenderState s -> (forall f. Frame s f -> Eff es a) -> Eff es a
 withFrame rs k = do
   _ <- owned "withFrame"
-  unsafeSeqUnliftIO $ \unlift -> do
+  -- Masked between opening the frame and arming its close, so an
+  -- asynchronous exception cannot leave the frame marked open for good.
+  unsafeSeqUnliftIO $ \unlift -> mask $ \restore -> do
     (info, outer) <- beginFrame rs
     let f = Frame {state = rs, info}
     if not outer
-      then unlift (k f)
+      then restore (unlift (k f))
       else do
-        a <- unlift (k f) `onException` abandonFrame rs
+        a <- restore (unlift (k f)) `onException` abandonFrame rs
         a <$ endFrame rs
 
 -- | Whether the frame is the one captured when a synchronized-output hold

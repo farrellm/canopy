@@ -238,7 +238,8 @@ dirtyRowsOf f = do
 allRowsOf :: Frame s f -> IO [Row s f]
 allRowsOf f = do
   n <- getFrameData f.state RenderRows
-  pure [Row {frame = f, y} | y <- [0 .. n - 1]]
+  -- Counted in Int: @n - 1@ in 'Word16' wraps when there are no rows.
+  pure [Row {frame = f, y = fromIntegral y} | y <- [0 .. fromIntegral n - 1 :: Int]]
 
 -- | Put the row iterator on the row, moving forward, or filling it again
 -- first to go back.
@@ -250,6 +251,9 @@ seek row = do
     readIORef rs.advanced >>= \case
       Just n | n <= target -> pure n
       _ -> fill rs >> pure 0
+  -- Unknown until the moves succeed: a failed one leaves the iterator
+  -- somewhere else, and the next seek fills it again.
+  writeIORef rs.advanced Nothing
   replicateM_ (target - from) $ do
     moved <- ghosttyRenderStateRowIteratorNext rs.rowIterator
     when (moved == 0) $
@@ -565,12 +569,7 @@ copyCell rs live y x = do
               ResultSuccess -> Right <$> bytesAt buf (fromIntegral b.len)
               ResultOutOfSpace -> pure (Left (fromIntegral b.len))
               other -> throwIO (Invariant (site d) other)
-      allocaBytes smallBuffer (into smallBuffer) >>= \case
-        Right bs -> pure bs
-        Left need ->
-          allocaBytes need (into need) >>= \case
-            Right bs -> pure bs
-            Left _ -> throwIO (Invariant (site d) ResultOutOfSpace)
+      retrySized (site d) into
 
 -- | The URI of the link at a viewport cell of the terminal
 -- (@ghostty_terminal_grid_ref@, then @ghostty_grid_ref_hyperlink_uri@).
@@ -589,12 +588,18 @@ linkUri rs x y = do
               ResultSuccess -> Right <$> bytesAt buf n
               ResultOutOfSpace -> pure (Left n)
               other -> throwIO (Invariant uriSite other)
-      allocaBytes smallBuffer (into smallBuffer) >>= \case
+      retrySized uriSite into
+
+-- | Read into a small buffer, or, if the read asks for more ('Left' with the
+-- size it needs), once more into a buffer of that size.
+retrySized :: CallSite -> (Int -> Ptr Word8 -> IO (Either Int ByteString)) -> IO ByteString
+retrySized site into =
+  allocaBytes smallBuffer (into smallBuffer) >>= \case
+    Right bs -> pure bs
+    Left need ->
+      allocaBytes need (into need) >>= \case
         Right bs -> pure bs
-        Left need ->
-          allocaBytes need (into need) >>= \case
-            Right bs -> pure bs
-            Left _ -> throwIO (Invariant uriSite ResultOutOfSpace)
+        Left _ -> throwIO (Invariant site ResultOutOfSpace)
 
 -- | The first try's buffer size, enough for nearly every grapheme.
 smallBuffer :: Int
