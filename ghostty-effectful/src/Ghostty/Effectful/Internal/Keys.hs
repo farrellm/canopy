@@ -1,5 +1,3 @@
-{-# LANGUAGE PatternSynonyms #-}
-
 -- | The marshalling behind the typed keys (DESIGN.md §4.4): for each
 -- 'TerminalData' constructor, the @ghostty_terminal_get@ key and a @peek@
 -- at its output type; for each 'TerminalOption', the
@@ -16,9 +14,6 @@ module Ghostty.Effectful.Internal.Keys
     -- * Calls
     getData,
     setOption,
-
-    -- * Bounds
-    pastHistory,
   )
 where
 
@@ -53,7 +48,6 @@ import Ghostty.Effectful.Terminal.Keys
     fromTerminfoName,
   )
 import Ghostty.FFI.Mouse
-import Ghostty.FFI.Point (GhosttyPoint (..), GhosttyPointCoordinate (..), pattern GhosttyPointTagHistory)
 import Ghostty.FFI.Style (ghosttyStyleDefault)
 import Ghostty.FFI.Terminal
 import Ghostty.FFI.Types (GhosttyString (..), ghosttyStringBytes)
@@ -428,14 +422,3 @@ checksumBits c =
   foldl' (.|.) 0 [if set then 1 `shiftL` i else 0 | (i, set) <- zip [0 ..] bits]
   where
     bits = [c.dontNegate, c.dontAddAttributes, c.dontOmitBlanks, c.unwrittenAsSpaces, c.fullCodepoints]
-
--- | Whether a point is a scrollback row past the end of the scrollback.
--- The library does not refuse one (at the pin, @PageList.pin@ checks a
--- history row only against the whole screen): it names the active row that
--- many rows down. So every call that takes a point checks this first, and
--- treats such a point as the outside of its coordinate system that it is.
--- Regression 6.
-pastHistory :: GhosttyTerminal -> GhosttyPoint -> IO Bool
-pastHistory h p
-  | p.tag == GhosttyPointTagHistory = (\n -> fromIntegral p.coordinate.y >= n) <$> getData h ScrollbackRows
-  | otherwise = pure False

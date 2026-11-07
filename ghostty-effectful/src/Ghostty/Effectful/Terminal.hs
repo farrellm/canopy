@@ -46,7 +46,7 @@ import Ghostty.Effectful.Event (TerminalEvent)
 import Ghostty.Effectful.Internal.Convert (fromCoordinate, pointTag, toPoint)
 import Ghostty.Effectful.Internal.Effect (Ghostty, Handles (..), owned)
 import Ghostty.Effectful.Internal.Feed (feedTerminal, resetTerminal, resizeTerminal)
-import Ghostty.Effectful.Internal.Keys (getData, pastHistory, setOption)
+import Ghostty.Effectful.Internal.Keys (getData, setOption)
 import Ghostty.Effectful.Internal.Terminal
   ( CellPixels (..),
     Extent,
@@ -66,7 +66,7 @@ import Ghostty.Effectful.Internal.Terminal
     trackPoint,
     untrackRef,
   )
-import Ghostty.Effectful.Point (KnownCoord (..), Point, SCoord (..))
+import Ghostty.Effectful.Point (KnownCoord (..), Point)
 import Ghostty.Effectful.Terminal.Keys
 
 -- | Open a terminal for the duration of the action, and free it when the
@@ -157,10 +157,7 @@ setT t opt v = do
 track :: (Ghostty :> es, KnownCoord c) => Terminal s -> Point c -> Eff es (Maybe (TrackedRef s))
 track t p = do
   hs <- owned "track"
-  unsafeEff_ $
-    pastHistory t.handle (toPoint p) >>= \case
-      True -> pure Nothing
-      False -> trackPoint hs.refCount t (toPoint p)
+  unsafeEff_ (trackPoint hs.refCount t (toPoint p))
 
 -- | Free a reference now rather than with its terminal. Each live reference
 -- costs the terminal work on every scroll, so a long session untracks what
@@ -179,17 +176,7 @@ untrack ref = do
 refPoint :: forall c s es. (Ghostty :> es, KnownCoord c) => TrackedRef s -> Eff es (Maybe (Point c))
 refPoint ref = do
   _ <- owned "refPoint"
-  unsafeEff_ $ case coordSing @c of
-    -- The library gives a cell of the active area a scrollback row past the
-    -- scrollback (its screen row), the converse of 'pastHistory'. A cell
-    -- with an active position is not in the scrollback. Regression 7.
-    SHistory ->
-      refCoordinate ref (pointTag SActive) >>= \case
-        Just _ -> pure Nothing
-        Nothing -> coordinate
-    _ -> coordinate
-  where
-    coordinate = fmap fromCoordinate <$> refCoordinate ref (pointTag (coordSing @c))
+  unsafeEff_ (fmap fromCoordinate <$> refCoordinate ref (pointTag (coordSing @c)))
 
 -- | Move a reference to the cell at a point of the active screen. 'False',
 -- and the reference unchanged, if the point is outside its coordinate
@@ -197,10 +184,7 @@ refPoint ref = do
 moveRef :: (Ghostty :> es, KnownCoord c) => TrackedRef s -> Point c -> Eff es Bool
 moveRef ref p = do
   _ <- owned "moveRef"
-  unsafeEff_ $
-    pastHistory ref.terminal.handle (toPoint p) >>= \case
-      True -> pure False
-      False -> moveTrackedRef ref (toPoint p)
+  unsafeEff_ (moveTrackedRef ref (toPoint p))
 
 -- | Whether the reference still names a cell.
 refAlive :: (Ghostty :> es) => TrackedRef s -> Eff es Bool

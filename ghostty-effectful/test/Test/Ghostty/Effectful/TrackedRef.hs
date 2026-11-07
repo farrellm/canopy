@@ -4,11 +4,11 @@
 module Test.Ghostty.Effectful.TrackedRef (tests) where
 
 import Data.ByteString qualified as BS
-import Effectful (Eff, IOE, runEff)
-import Ghostty.Effectful (Ghostty, runGhostty)
-import Ghostty.Effectful.Internal.Terminal (Extent (..))
+import Effectful (Eff, IOE)
+import Ghostty.Effectful (Ghostty)
 import Ghostty.Effectful.Point (Coord (..), Point (..))
 import Ghostty.Effectful.Terminal
+import Test.Ghostty.Effectful.Support (config, ghostty)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
@@ -87,14 +87,6 @@ tests =
           pure (inside, after)
         r @?= (3, 0)
     ]
-
--- | Run under the effect, failing the test on a version mismatch.
-ghostty :: Eff '[Ghostty, IOE] a -> IO a
-ghostty act = runEff (runGhostty act) >>= either (assertFailure . show) pure
-
--- | An 80×24 terminal.
-config :: TerminalConfig
-config = terminalConfig GridSize {cols = Extent 80, rows = Extent 24}
 
 -- | Track a point that must be inside the grid.
 tracked :: Terminal s -> Point 'Active -> Eff '[Ghostty, IOE] (TrackedRef s)

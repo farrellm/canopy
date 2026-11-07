@@ -36,10 +36,10 @@ import Foreign.Marshal.Utils (fromBool, with)
 import Foreign.Ptr (Ptr, castPtr, nullPtr)
 import Foreign.Storable (peek)
 import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), ResultCode (..))
-import Ghostty.Effectful.Internal.Convert (refTemplate, sized, toPoint)
+import Ghostty.Effectful.Internal.Convert (refTemplate, toPoint, withSize)
 import Ghostty.Effectful.Internal.Error (expectSuccess, resultCode)
-import Ghostty.Effectful.Internal.Keys (getData, pastHistory)
-import Ghostty.Effectful.Internal.Terminal (Terminal (..))
+import Ghostty.Effectful.Internal.Keys (getData)
+import Ghostty.Effectful.Internal.Terminal (Terminal (..), pastHistory)
 import Ghostty.Effectful.Point (KnownCoord, Point (..))
 import Ghostty.Effectful.Terminal.Keys (TerminalData (..))
 import Ghostty.FFI.Allocator (ghosttyFree)
@@ -211,11 +211,8 @@ formatTerminalRange t o range = do
       gridRef t to >>= \case
         Nothing -> pure Nothing
         Just end ->
-          let sel = GhosttySelection {size = sized selectionTemplate, start, end, rectangle = fromBool rectangle}
+          let sel = withSize $ \size -> GhosttySelection {size, start, end, rectangle = fromBool rectangle}
            in Just <$> with sel (formatWith t o)
-  where
-    selectionTemplate n =
-      GhosttySelection {size = n, start = refTemplate 0, end = refTemplate 0, rectangle = 0}
 
 -- | @ghostty_terminal_grid_ref@: the untracked reference to the cell at a
 -- point; 'Nothing' if the point is outside its coordinate system, which is
@@ -225,7 +222,7 @@ gridRef :: (KnownCoord c) => Terminal s -> Point c -> IO (Maybe GhosttyGridRef)
 gridRef t p =
   pastHistory t.handle point >>= \case
     True -> pure Nothing
-    False -> with point $ \pp -> with (refTemplate (sized refTemplate)) $ \rp -> do
+    False -> with point $ \pp -> with (withSize refTemplate) $ \rp -> do
       r <- ghosttyTerminalGridRef t.handle pp rp
       case resultCode r of
         ResultSuccess -> Just <$> peek rp
@@ -236,40 +233,35 @@ gridRef t p =
 
 -- | The library's options, the selection pointer included.
 terminalOptions :: FormatOptions -> Ptr GhosttySelection -> GhosttyFormatterTerminalOptions
-terminalOptions o sel =
+terminalOptions o sel = withSize $ \size ->
   GhosttyFormatterTerminalOptions
-    { size = sized (\n -> GhosttyFormatterTerminalOptions {size = n, emit = code, unwrap = 0, trim = 0, extra = extra, selection = nullPtr}),
-      emit = code,
+    { size,
+      emit = formatCode o.emit,
       unwrap = fromBool o.unwrap,
       trim = fromBool o.trim,
-      extra,
+      extra = terminalExtra o.extras,
       selection = sel
     }
-  where
-    code = formatCode o.emit
-    extra = terminalExtra o.extras
 
 -- | The library's terminal extras.
 terminalExtra :: TerminalExtras -> GhosttyFormatterTerminalExtra
-terminalExtra e =
+terminalExtra e = withSize $ \size ->
   GhosttyFormatterTerminalExtra
-    { size = sized (\n -> GhosttyFormatterTerminalExtra {size = n, palette = 0, modes = 0, scrollingRegion = 0, tabstops = 0, pwd = 0, keyboard = 0, screen = screen}),
+    { size,
       palette = fromBool e.palette,
       modes = fromBool e.modes,
       scrollingRegion = fromBool e.scrollingRegion,
       tabstops = fromBool e.tabstops,
       pwd = fromBool e.pwd,
       keyboard = fromBool e.keyboard,
-      screen
+      screen = screenExtra e.screen
     }
-  where
-    screen = screenExtra e.screen
 
 -- | The library's screen extras.
 screenExtra :: ScreenExtras -> GhosttyFormatterScreenExtra
-screenExtra e =
+screenExtra e = withSize $ \size ->
   GhosttyFormatterScreenExtra
-    { size = sized (\n -> GhosttyFormatterScreenExtra {size = n, cursor = 0, style = 0, hyperlink = 0, protection = 0, kittyKeyboard = 0, charsets = 0}),
+    { size,
       cursor = fromBool e.cursor,
       style = fromBool e.style,
       hyperlink = fromBool e.hyperlink,

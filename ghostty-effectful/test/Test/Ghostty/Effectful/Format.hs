@@ -12,13 +12,13 @@ module Test.Ghostty.Effectful.Format (tests) where
 import Data.ByteString qualified as BS
 import Data.ByteString.Char8 qualified as BC
 import Data.List (lookup)
-import Effectful (Eff, IOE, runEff)
-import Ghostty.Effectful (Ghostty, runGhostty)
+import Effectful (Eff, IOE)
+import Ghostty.Effectful (Ghostty)
 import Ghostty.Effectful.Format
-import Ghostty.Effectful.Internal.Terminal (Extent (..))
 import Ghostty.Effectful.Point (Coord (..), Point (..))
 import Ghostty.Effectful.Terminal
 import Numeric (showHex)
+import Test.Ghostty.Effectful.Support (ghostty, grid)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
@@ -150,7 +150,7 @@ ranges =
       r @?= Just "line 4\nline 5"
   ]
   where
-    scrolled = mconcat (intersperse "\r\n" ["line " <> show i | i <- [1 .. 8 :: Int]])
+    scrolled = maybe "" encodeUtf8 (lookup "scrollback" streams)
 
 -- * Options
 
@@ -197,10 +197,6 @@ plain = formatOptions Plain
 formatted :: ByteString -> (forall s. Terminal s -> Eff '[Ghostty, IOE] a) -> IO a
 formatted bytes k = ghostty $ withTerminal config $ \t -> feed t bytes *> k t
 
--- | Run against the pinned build, failing the test otherwise.
-ghostty :: Eff '[Ghostty, IOE] a -> IO a
-ghostty act = runEff (runGhostty act) >>= either (assertFailure . show) pure
-
 -- | A 20×5 terminal: narrow enough to wrap, short enough to scroll.
 config :: TerminalConfig
-config = terminalConfig GridSize {cols = Extent 20, rows = Extent 5}
+config = terminalConfig (grid 20 5)

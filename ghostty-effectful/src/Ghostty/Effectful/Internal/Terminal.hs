@@ -1,3 +1,5 @@
+{-# LANGUAGE PatternSynonyms #-}
+
 -- | A terminal's representation and its raw calls (DESIGN.md §4.2). The
 -- public API is "Ghostty.Effectful.Terminal", which exports these types
 -- without their constructors; the calls here are what the 'Ghostty'
@@ -33,6 +35,9 @@ module Ghostty.Effectful.Internal.Terminal
     wrote,
     forgetRegion,
 
+    -- * Points
+    pastHistory,
+
     -- * Tracked references
     trackPoint,
     untrackRef,
@@ -44,9 +49,10 @@ where
 
 import Control.Exception (onException, throwIO)
 import Data.IntMap.Strict qualified as IntMap
+import Foreign.C.Types (CSize)
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Marshal.Utils (toBool, with)
-import Foreign.Ptr (nullPtr)
+import Foreign.Ptr (castPtr, nullPtr)
 import Foreign.Storable (peek)
 import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), ResultCode (..))
 import Ghostty.Effectful.Internal.Callbacks
@@ -66,12 +72,20 @@ import Ghostty.FFI.GridRef
     ghosttyTrackedGridRefPoint,
     ghosttyTrackedGridRefSet,
   )
-import Ghostty.FFI.Point (GhosttyPoint, GhosttyPointCoordinate, GhosttyPointTag)
+import Ghostty.FFI.Point
+  ( GhosttyPoint (..),
+    GhosttyPointCoordinate (..),
+    GhosttyPointTag,
+    pattern GhosttyPointTagActive,
+    pattern GhosttyPointTagHistory,
+  )
 import Ghostty.FFI.Terminal
   ( GhosttyTerminal,
     ghosttyTerminalFree,
+    ghosttyTerminalGet,
     ghosttyTerminalGridRefTrack,
     ghosttyTerminalNew,
+    pattern GhosttyTerminalDataScrollbackRows,
   )
 
 -- | A terminal, alive in the region @s@ that
@@ -213,12 +227,36 @@ closeTerminal open t = do
   ghosttyTerminalFree t.handle
   releaseCallbacks t.installed
 
+-- | Whether a point is a scrollback row past the end of the scrollback.
+-- The library does not refuse one (at the pin, @PageList.pin@ checks a
+-- history row only against the whole screen): it names the active row that
+-- many rows down. So every call here that takes a point checks this first,
+-- and treats such a point as the outside of its coordinate system that it
+-- is. Regression 6.
+pastHistory :: GhosttyTerminal -> GhosttyPoint -> IO Bool
+pastHistory h p
+  | p.tag == GhosttyPointTagHistory = (\n -> fromIntegral p.coordinate.y >= n) <$> scrollbackRows
+  | otherwise = pure False
+  where
+    scrollbackRows = alloca $ \out -> do
+      expectSuccess (CallSite "ghostty_terminal_get GHOSTTY_TERMINAL_DATA_SCROLLBACK_ROWS")
+        =<< ghosttyTerminalGet h GhosttyTerminalDataScrollbackRows (castPtr out)
+      peek out :: IO CSize
+
 -- | @ghostty_terminal_grid_ref_track@: a tracked reference to the cell at a
 -- point of the active screen, registered with the terminal and counted;
 -- 'Nothing' if the point is outside its coordinate system, which is the
--- header's @GHOSTTY_INVALID_VALUE@ for a valid terminal.
+-- header's @GHOSTTY_INVALID_VALUE@ for a valid terminal, or is past the
+-- scrollback ('pastHistory').
 trackPoint :: IORef Int -> Terminal s -> GhosttyPoint -> IO (Maybe (TrackedRef s))
-trackPoint open t p = alloca $ \out -> do
+trackPoint open t p =
+  pastHistory t.handle p >>= \case
+    True -> pure Nothing
+    False -> trackValid open t p
+
+-- | 'trackPoint' for a point known not to be past the scrollback.
+trackValid :: IORef Int -> Terminal s -> GhosttyPoint -> IO (Maybe (TrackedRef s))
+trackValid open t p = alloca $ \out -> do
   r <- with p $ \pp -> ghosttyTerminalGridRefTrack t.handle pp out
   case resultCode r of
     ResultSuccess -> do
@@ -250,8 +288,22 @@ registered ref = IntMap.lookup ref.key <$> readIORef ref.terminal.refs
 -- | @ghostty_tracked_grid_ref_point@: the reference's position in a
 -- coordinate system; 'Nothing' if it has lost its cell, has no position
 -- there, or was untracked.
+--
+-- The library gives a cell of the active area a scrollback row past the
+-- scrollback (its screen row), the converse of 'pastHistory'. A cell with
+-- an active position is not in the scrollback, so it has no scrollback
+-- position here. Regression 7.
 refCoordinate :: TrackedRef s -> GhosttyPointTag -> IO (Maybe GhosttyPointCoordinate)
-refCoordinate ref tag =
+refCoordinate ref tag
+  | tag == GhosttyPointTagHistory =
+      rawCoordinate ref GhosttyPointTagActive >>= \case
+        Just _ -> pure Nothing
+        Nothing -> rawCoordinate ref tag
+  | otherwise = rawCoordinate ref tag
+
+-- | 'refCoordinate' as the library answers it.
+rawCoordinate :: TrackedRef s -> GhosttyPointTag -> IO (Maybe GhosttyPointCoordinate)
+rawCoordinate ref tag =
   registered ref >>= \case
     Nothing -> pure Nothing
     Just h -> alloca $ \out -> do
@@ -264,18 +316,19 @@ refCoordinate ref tag =
 -- | @ghostty_tracked_grid_ref_set@: move the reference to a point of the
 -- terminal's active screen. 'False' if the point is outside its coordinate
 -- system (@GHOSTTY_INVALID_VALUE@, the reference and terminal being valid)
--- or the reference was untracked; the reference is then unchanged.
+-- or past the scrollback ('pastHistory'), or the reference was untracked;
+-- the reference is then unchanged.
 moveTrackedRef :: TrackedRef s -> GhosttyPoint -> IO Bool
 moveTrackedRef ref p =
-  registered ref >>= \case
-    Nothing -> pure False
-    Just h -> do
+  (,) <$> registered ref <*> pastHistory ref.terminal.handle p >>= \case
+    (Just h, False) -> do
       r <- with p (ghosttyTrackedGridRefSet h ref.terminal.handle)
       case resultCode r of
         ResultSuccess -> pure True
         ResultInvalidValue -> pure False
         ResultOutOfMemory -> throwIO (OutOfMemory site)
         other -> throwIO (Invariant site other)
+    _ -> pure False
   where
     site = CallSite "ghostty_tracked_grid_ref_set"
 

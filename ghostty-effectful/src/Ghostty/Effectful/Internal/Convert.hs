@@ -24,6 +24,7 @@ module Ghostty.Effectful.Internal.Convert
 
     -- * Sized structs
     sized,
+    withSize,
     refTemplate,
   )
 where
@@ -193,6 +194,12 @@ modeCode = \case
 -- the size of the struct it makes ('sizeOf' ignores its argument).
 sized :: (Storable b) => (CSize -> b) -> CSize
 sized mk = fromIntegral (sizeOf (mk 0))
+
+-- | A sized struct made at its own size: @withSize (\\size -> S {size, ..})@
+-- writes the struct once, where @S {size = sized (\\n -> S {size = n, ..}),
+-- ..}@ writes it twice.
+withSize :: (Storable b) => (CSize -> b) -> b
+withSize mk = mk (sized mk)
 
 -- | An empty grid reference of the given size.
 refTemplate :: CSize -> GhosttyGridRef

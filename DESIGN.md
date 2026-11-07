@@ -583,9 +583,9 @@ its `free`. `bracket`-style release runs on exceptions. The same pattern scopes 
 sessions. A formatter is not a handle at this level (M1.8): it reads its terminal afresh at each
 format, so keeping one buys nothing, and a range to format is a pair of untracked grid references,
 valid only until the terminal next changes. So `format` and `formatRange` each make a formatter,
-resolve the range's points, format and free it in one call. Handles that the application needs to keep for the whole session (the child
-terminal) are opened once at the top of `Canopy.App.Run` inside the region, which is fine: the region
-is the session.
+resolve the range's points, format and free it in one call. Handles that the application needs to
+keep for the whole session (the child terminal) are opened once at the top of `Canopy.App.Run`
+inside the region, which is fine: the region is the session.
 
 ### 4.3 Borrowed data: frames
 
