@@ -34,35 +34,49 @@ library
     Ghostty.Effectful
     Ghostty.Effectful.Cell
     Ghostty.Effectful.Color
+    Ghostty.Effectful.Encode
     Ghostty.Effectful.Error
     Ghostty.Effectful.Event
     Ghostty.Effectful.Format
+    Ghostty.Effectful.Input
     Ghostty.Effectful.Internal.Callbacks
     Ghostty.Effectful.Internal.Convert
     Ghostty.Effectful.Internal.Effect
+    Ghostty.Effectful.Internal.Encode
     Ghostty.Effectful.Internal.Error
     Ghostty.Effectful.Internal.Feed
     Ghostty.Effectful.Internal.Format
     Ghostty.Effectful.Internal.Keys
+    Ghostty.Effectful.Internal.Parse
     Ghostty.Effectful.Internal.Render
     Ghostty.Effectful.Internal.Size
     Ghostty.Effectful.Internal.Terminal
+    Ghostty.Effectful.Internal.Unicode
     Ghostty.Effectful.Mode
+    Ghostty.Effectful.Parse
     Ghostty.Effectful.Point
     Ghostty.Effectful.Render
     Ghostty.Effectful.Render.Keys
     Ghostty.Effectful.Style
     Ghostty.Effectful.Terminal
     Ghostty.Effectful.Terminal.Keys
+    Ghostty.Effectful.Unicode
 
   hs-source-dirs:   src
 
   -- ENQ and XTVERSION's answers return a struct by value, which no Haskell
   -- callback can (DESIGN.md §3.3, §4.5); a render hold captures its frame
-  -- with a C call inside the callback (§4.3).
+  -- with a C call inside the callback (§4.3); a paste's MIME reader receives
+  -- structs by value (§3.3).
   include-dirs:     include
-  includes:         gveff_terminal.h
-  c-sources:        cbits/gveff_terminal.c
+  includes:
+    gveff_terminal.h
+    gveff_paste.h
+
+  c-sources:
+    cbits/gveff_terminal.c
+    cbits/gveff_paste.c
+
   build-depends:
     , array ^>=0.5.8
     , base ^>=4.21.2.0
@@ -71,6 +85,7 @@ library
     , containers ^>=0.7
     , effectful-core ^>=2.7.1
     , ghostty-vt-ffi
+    , text ^>=2.1
     , vector ^>=0.13
 
   mixins:
@@ -86,13 +101,16 @@ test-suite ghostty-effectful-test
   main-is:          Main.hs
   other-modules:
     Test.Ghostty.Effectful
+    Test.Ghostty.Effectful.Encode
     Test.Ghostty.Effectful.Events
     Test.Ghostty.Effectful.Format
     Test.Ghostty.Effectful.Keys
+    Test.Ghostty.Effectful.Parse
     Test.Ghostty.Effectful.Render
     Test.Ghostty.Effectful.Support
     Test.Ghostty.Effectful.Terminal
     Test.Ghostty.Effectful.TrackedRef
+    Test.Ghostty.Effectful.Unicode
 
   build-depends:
     , base ^>=4.21.2.0

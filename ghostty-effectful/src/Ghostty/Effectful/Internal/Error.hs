@@ -4,10 +4,14 @@
 module Ghostty.Effectful.Internal.Error
   ( resultCode,
     expectSuccess,
+    newHandle,
   )
 where
 
 import Control.Exception (throwIO)
+import Foreign.Marshal.Alloc (alloca)
+import Foreign.Ptr (Ptr, nullPtr)
+import Foreign.Storable (Storable, peek)
 import Ghostty.Effectful.Error (CallSite, GhosttyError (..), ResultCode (..))
 import Ghostty.FFI.Types
   ( GhosttyResult (..),
@@ -43,3 +47,11 @@ expectSuccess site r = case resultCode r of
   ResultSuccess -> pass
   ResultOutOfMemory -> throwIO (OutOfMemory site)
   other -> throwIO (Invariant site other)
+
+-- | A handle from a @…_new(allocator, &out)@ call, with the default
+-- allocator (DESIGN.md §3.3); its only documented failure is running out of
+-- memory ('expectSuccess').
+newHandle :: (Storable h) => CallSite -> (Ptr allocator -> Ptr h -> IO GhosttyResult) -> IO h
+newHandle site new = alloca $ \out -> do
+  expectSuccess site =<< new nullPtr out
+  peek out

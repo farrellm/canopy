@@ -41,6 +41,14 @@ events instead of callbacks. No export may expose a pointer.
   stale. Goldens are in `test/golden/format/`, control bytes written visibly (`\e`, `\r`); read
   each before accepting it (`--accept`). A call taking a point checks a `History` row with
   `Internal.Keys.pastHistory` first, since the library does not refuse one past the scrollback.
+- **Encoders, parsers, widths** (§4.8, M1.9). Key and mouse encoders are handles (`withKeyEncoder`,
+  `withMouseEncoder`, `Internal.Encode`), each owning the event handle it fills in per encode; their
+  inputs are plain values in `Input`. Reports, `encodePaste` and the parsers have no handle: a
+  parser is made, fed one sequence, copied out of and freed in one call. Encode buffers go through
+  `Internal.Encode.bytesVia`, which retries on `OUT_OF_SPACE`, so a short buffer never escapes.
+  `paste` reads its text through the C MIME reader `cbits/gveff_paste.c` (a struct by value) and
+  returns its `WritePty` as an event, `Either Rejected`. `Key` and `OscCommand` are held against
+  their header enums by the tests, as typed keys are.
 - **A C enum is closed at this level, with no unknown case**: an unnamed value is `UnknownEnum`
   (`Internal.Convert.unknownEnum`), because the version check and the layout test rule it out.
 - Tests may import `Internal` (to build values or reach `runGhosttyPinnedTo`).

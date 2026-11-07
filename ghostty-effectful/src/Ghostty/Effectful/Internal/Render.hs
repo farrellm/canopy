@@ -55,14 +55,14 @@ import Foreign.C.Types (CBool, CSize)
 import Foreign.Marshal.Alloc (alloca, allocaBytes)
 import Foreign.Marshal.Array (allocaArray, peekArray)
 import Foreign.Marshal.Utils (toBool, with)
-import Foreign.Ptr (Ptr, castPtr, nullPtr)
+import Foreign.Ptr (Ptr, castPtr)
 import Foreign.Storable (Storable (..))
 import Ghostty.Effectful.Cell (Cell (..), CellWidth (..), Hyperlink (..), SemanticContent (..))
 import Ghostty.Effectful.Color (Palette, paletteFromList)
 import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), ResultCode (..))
 import Ghostty.Effectful.Internal.Callbacks (captureAttach, captureDetach, captureFraming, captureHeld)
 import Ghostty.Effectful.Internal.Convert (enumName, fromRgb, fromStyle, refTemplate, sized, toPoint, unknownEnum)
-import Ghostty.Effectful.Internal.Error (expectSuccess, resultCode)
+import Ghostty.Effectful.Internal.Error (expectSuccess, newHandle, resultCode)
 import Ghostty.Effectful.Internal.Terminal (Terminal (..), forgetRegion)
 import Ghostty.Effectful.Point (Coord (..), Point (..))
 import Ghostty.Effectful.Render.Keys
@@ -74,7 +74,7 @@ import Ghostty.FFI.Render
 import Ghostty.FFI.Screen
 import Ghostty.FFI.Style (GhosttyStyle, ghosttyStyleDefault)
 import Ghostty.FFI.Terminal (ghosttyTerminalGridRef)
-import Ghostty.FFI.Types (GhosttyBuffer (..), GhosttyResult)
+import Ghostty.FFI.Types (GhosttyBuffer (..))
 
 -- | A render state of one terminal, alive in the region @s@ that
 -- 'Ghostty.Effectful.Render.withRenderState' opens.
@@ -128,11 +128,11 @@ data Row s f = Row
 -- terminal's frame capture. What was made is freed if a later step fails.
 openRenderState :: Terminal t -> IO (RenderState s)
 openRenderState t = do
-  h <- newHandle "ghostty_render_state_new" ghosttyRenderStateNew
+  h <- newHandle (CallSite "ghostty_render_state_new") ghosttyRenderStateNew
   let undoState = ghosttyRenderStateFree h
-  it <- newHandle "ghostty_render_state_row_iterator_new" ghosttyRenderStateRowIteratorNew `onException` undoState
+  it <- newHandle (CallSite "ghostty_render_state_row_iterator_new") ghosttyRenderStateRowIteratorNew `onException` undoState
   let undoRows = ghosttyRenderStateRowIteratorFree it >> undoState
-  cs <- newHandle "ghostty_render_state_row_cells_new" ghosttyRenderStateRowCellsNew `onException` undoRows
+  cs <- newHandle (CallSite "ghostty_render_state_row_cells_new") ghosttyRenderStateRowCellsNew `onException` undoRows
   let undoCells = ghosttyRenderStateRowCellsFree cs >> undoRows
   captureAttach t.installed h `onException` undoCells
   advanced <- newIORef Nothing
@@ -146,11 +146,6 @@ openRenderState t = do
         advanced,
         open
       }
-  where
-    newHandle :: (Storable h) => Text -> (Ptr a -> Ptr h -> IO GhosttyResult) -> IO h
-    newHandle site mk = alloca $ \out -> do
-      expectSuccess (CallSite site) =<< mk nullPtr out
-      peek out
 
 -- | Detach the render state from the capture, then free its iterators and
 -- itself.
