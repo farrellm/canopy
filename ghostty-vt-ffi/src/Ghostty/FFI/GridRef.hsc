@@ -42,15 +42,13 @@ import Ghostty.FFI.Types (GhosttyResult (..))
 
 #include <gvtffi_shims.h>
 
--- | @GhosttyGridRef@: A resolved reference to a terminal cell position.
+-- | @GhosttyGridRef@: A reference to a single cell in the terminal grid.
 data GhosttyGridRef = GhosttyGridRef
-  { -- | @size@.
-    size :: CSize,
-    -- | @node@.
+  { -- | @node@: The internal storage page that holds the cell.
     node :: Ptr (),
-    -- | @x@.
+    -- | @x@: The cell\'s column within its page.
     x :: Word16,
-    -- | @y@.
+    -- | @y@: The cell\'s row within its page.
     y :: Word16
   }
   deriving stock (Eq, Show)
@@ -60,12 +58,10 @@ instance Storable GhosttyGridRef where
   alignment _ = (#alignment GhosttyGridRef)
   peek p =
     GhosttyGridRef
-      <$> (#peek GhosttyGridRef, size) p
-      <*> (#peek GhosttyGridRef, node) p
+      <$> (#peek GhosttyGridRef, node) p
       <*> (#peek GhosttyGridRef, x) p
       <*> (#peek GhosttyGridRef, y) p
   poke p s = do
-    (#poke GhosttyGridRef, size) p s.size
     (#poke GhosttyGridRef, node) p s.node
     (#poke GhosttyGridRef, x) p s.x
     (#poke GhosttyGridRef, y) p s.y
@@ -78,8 +74,7 @@ ghosttyGridRefLayout =
       size = (#size GhosttyGridRef),
       align = (#alignment GhosttyGridRef),
       fields =
-        [ CField "size" (#offset GhosttyGridRef, size) (#const GVTFFI_FIELD_SIZE(GhosttyGridRef, size)),
-          CField "node" (#offset GhosttyGridRef, node) (#const GVTFFI_FIELD_SIZE(GhosttyGridRef, node)),
+        [ CField "node" (#offset GhosttyGridRef, node) (#const GVTFFI_FIELD_SIZE(GhosttyGridRef, node)),
           CField "x" (#offset GhosttyGridRef, x) (#const GVTFFI_FIELD_SIZE(GhosttyGridRef, x)),
           CField "y" (#offset GhosttyGridRef, y) (#const GVTFFI_FIELD_SIZE(GhosttyGridRef, y))
         ]

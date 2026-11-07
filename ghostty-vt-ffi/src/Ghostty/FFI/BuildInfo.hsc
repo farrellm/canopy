@@ -5,7 +5,8 @@
 {-# LANGUAGE ViewPatterns #-}
 
 -- | @include/ghostty/vt/build_info.h@: compile-time facts about the linked
--- library (DESIGN.md §3.4).
+-- library, and @include/ghostty/vt/version.h@: the version of the headers
+-- (DESIGN.md §3.4).
 module Ghostty.FFI.BuildInfo
   ( -- * Keys
     GhosttyBuildInfo (..),
@@ -20,6 +21,15 @@ module Ghostty.FFI.BuildInfo
     pattern GhosttyBuildInfoVersionPatch,
     pattern GhosttyBuildInfoVersionPre,
     pattern GhosttyBuildInfoVersionBuild,
+    pattern GhosttyBuildInfoFeatureSnapshot,
+    pattern GhosttyBuildInfoFeatureFormatter,
+    pattern GhosttyBuildInfoFeatureSelection,
+    pattern GhosttyBuildInfoFeatureSearch,
+    pattern GhosttyBuildInfoFeatureRenderState,
+    pattern GhosttyBuildInfoFeatureInputEncode,
+    pattern GhosttyBuildInfoFeatureColor,
+    pattern GhosttyBuildInfoFeatureGridIntrospection,
+    pattern GhosttyBuildInfoFeatureGlyphProtocol,
     pattern GhosttyBuildInfoUnknown,
     ghosttyBuildInfoEnum,
 
@@ -34,13 +44,16 @@ module Ghostty.FFI.BuildInfo
 
     -- * Calls
     ghosttyBuildInfo,
+    ghosttyVersion,
 
-    -- * The pin
-    ghosttyPinnedCommit,
+    -- * Versions
+    ghosttyVtVersion,
+    ghosttyPinnedVersion,
   )
 where
 
-import Foreign.C.Types (CInt (..))
+import Foreign.C.ConstPtr (ConstPtr (..))
+import Foreign.C.Types (CChar, CInt (..))
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (Storable (..))
 import Ghostty.FFI.Layout (CEnum (..), unnamed)
@@ -63,7 +76,7 @@ pattern GhosttyBuildInfoInvalid = GhosttyBuildInfo (#const GHOSTTY_BUILD_INFO_IN
 pattern GhosttyBuildInfoSimd :: GhosttyBuildInfo
 pattern GhosttyBuildInfoSimd = GhosttyBuildInfo (#const GHOSTTY_BUILD_INFO_SIMD)
 
--- | @GHOSTTY_BUILD_INFO_KITTY_GRAPHICS@: Whether Kitty graphics protocol support is available.
+-- | @GHOSTTY_BUILD_INFO_KITTY_GRAPHICS@: Whether this build includes the @%kitty_graphics@ feature, which provides the Kitty graphics protocol and the @ghostty_kitty_graphics_*@ functions. It is always false on targets without an operating system, such as wasm32-freestanding. See @features@.
 --
 -- Output type: @bool *@.
 pattern GhosttyBuildInfoKittyGraphics :: GhosttyBuildInfo
@@ -117,6 +130,60 @@ pattern GhosttyBuildInfoVersionPre = GhosttyBuildInfo (#const GHOSTTY_BUILD_INFO
 pattern GhosttyBuildInfoVersionBuild :: GhosttyBuildInfo
 pattern GhosttyBuildInfoVersionBuild = GhosttyBuildInfo (#const GHOSTTY_BUILD_INFO_VERSION_BUILD)
 
+-- | @GHOSTTY_BUILD_INFO_FEATURE_SNAPSHOT@: Whether this build includes the @%snapshot@ feature, which provides the @ghostty_snapshot_*@ functions. See @features@.
+--
+-- Output type: @bool *@.
+pattern GhosttyBuildInfoFeatureSnapshot :: GhosttyBuildInfo
+pattern GhosttyBuildInfoFeatureSnapshot = GhosttyBuildInfo (#const GHOSTTY_BUILD_INFO_FEATURE_SNAPSHOT)
+
+-- | @GHOSTTY_BUILD_INFO_FEATURE_FORMATTER@: Whether this build includes the @%formatter@ feature, which provides the @ghostty_formatter_*@ functions. See @features@.
+--
+-- Output type: @bool *@.
+pattern GhosttyBuildInfoFeatureFormatter :: GhosttyBuildInfo
+pattern GhosttyBuildInfoFeatureFormatter = GhosttyBuildInfo (#const GHOSTTY_BUILD_INFO_FEATURE_FORMATTER)
+
+-- | @GHOSTTY_BUILD_INFO_FEATURE_SELECTION@: Whether this build includes the @%selection@ feature, which provides the @ghostty_terminal_select_*@, @ghostty_terminal_selection_*@ and @ghostty_selection_gesture_*@ functions. See @features@.
+--
+-- Output type: @bool *@.
+pattern GhosttyBuildInfoFeatureSelection :: GhosttyBuildInfo
+pattern GhosttyBuildInfoFeatureSelection = GhosttyBuildInfo (#const GHOSTTY_BUILD_INFO_FEATURE_SELECTION)
+
+-- | @GHOSTTY_BUILD_INFO_FEATURE_SEARCH@: Whether this build includes the @%search@ feature, which provides the @ghostty_search_*@ functions. See @features@.
+--
+-- Output type: @bool *@.
+pattern GhosttyBuildInfoFeatureSearch :: GhosttyBuildInfo
+pattern GhosttyBuildInfoFeatureSearch = GhosttyBuildInfo (#const GHOSTTY_BUILD_INFO_FEATURE_SEARCH)
+
+-- | @GHOSTTY_BUILD_INFO_FEATURE_RENDER_STATE@: Whether this build includes the @%render_state@ feature, which provides the @ghostty_render_state_*@ functions. See @features@.
+--
+-- Output type: @bool *@.
+pattern GhosttyBuildInfoFeatureRenderState :: GhosttyBuildInfo
+pattern GhosttyBuildInfoFeatureRenderState = GhosttyBuildInfo (#const GHOSTTY_BUILD_INFO_FEATURE_RENDER_STATE)
+
+-- | @GHOSTTY_BUILD_INFO_FEATURE_INPUT_ENCODE@: Whether this build includes the @%input_encode@ feature, which provides the key, mouse, focus and paste encoding functions. See @features@ for the full list.
+--
+-- Output type: @bool *@.
+pattern GhosttyBuildInfoFeatureInputEncode :: GhosttyBuildInfo
+pattern GhosttyBuildInfoFeatureInputEncode = GhosttyBuildInfo (#const GHOSTTY_BUILD_INFO_FEATURE_INPUT_ENCODE)
+
+-- | @GHOSTTY_BUILD_INFO_FEATURE_COLOR@: Whether this build includes the @%color@ feature, which provides the @ghostty_color_*@ functions. See @features@.
+--
+-- Output type: @bool *@.
+pattern GhosttyBuildInfoFeatureColor :: GhosttyBuildInfo
+pattern GhosttyBuildInfoFeatureColor = GhosttyBuildInfo (#const GHOSTTY_BUILD_INFO_FEATURE_COLOR)
+
+-- | @GHOSTTY_BUILD_INFO_FEATURE_GRID_INTROSPECTION@: Whether this build includes the @%grid_introspection@ feature, which provides the @ghostty_grid_ref_*@, @ghostty_tracked_grid_ref_*@, @ghostty_cell_get*@ and @ghostty_row_get*@ functions. See @features@ for the full list.
+--
+-- Output type: @bool *@.
+pattern GhosttyBuildInfoFeatureGridIntrospection :: GhosttyBuildInfo
+pattern GhosttyBuildInfoFeatureGridIntrospection = GhosttyBuildInfo (#const GHOSTTY_BUILD_INFO_FEATURE_GRID_INTROSPECTION)
+
+-- | @GHOSTTY_BUILD_INFO_FEATURE_GLYPH_PROTOCOL@: Whether this build includes the @%glyph_protocol@ feature, which lets applications register custom glyphs with Ghostty\'s glyph protocol. It has no functions of its own. See @features@.
+--
+-- Output type: @bool *@.
+pattern GhosttyBuildInfoFeatureGlyphProtocol :: GhosttyBuildInfo
+pattern GhosttyBuildInfoFeatureGlyphProtocol = GhosttyBuildInfo (#const GHOSTTY_BUILD_INFO_FEATURE_GLYPH_PROTOCOL)
+
 -- | Any value this binding does not name: a newer library's.
 pattern GhosttyBuildInfoUnknown :: CInt -> GhosttyBuildInfo
 pattern GhosttyBuildInfoUnknown n <- GhosttyBuildInfo (unnamed ghosttyBuildInfoEnum -> Just n)
@@ -135,6 +202,15 @@ pattern GhosttyBuildInfoUnknown n <- GhosttyBuildInfo (unnamed ghosttyBuildInfoE
   GhosttyBuildInfoVersionPatch,
   GhosttyBuildInfoVersionPre,
   GhosttyBuildInfoVersionBuild,
+  GhosttyBuildInfoFeatureSnapshot,
+  GhosttyBuildInfoFeatureFormatter,
+  GhosttyBuildInfoFeatureSelection,
+  GhosttyBuildInfoFeatureSearch,
+  GhosttyBuildInfoFeatureRenderState,
+  GhosttyBuildInfoFeatureInputEncode,
+  GhosttyBuildInfoFeatureColor,
+  GhosttyBuildInfoFeatureGridIntrospection,
+  GhosttyBuildInfoFeatureGlyphProtocol,
   GhosttyBuildInfoUnknown
   #-}
 
@@ -156,7 +232,16 @@ ghosttyBuildInfoEnum =
           ("GHOSTTY_BUILD_INFO_VERSION_MINOR", (#const GHOSTTY_BUILD_INFO_VERSION_MINOR)),
           ("GHOSTTY_BUILD_INFO_VERSION_PATCH", (#const GHOSTTY_BUILD_INFO_VERSION_PATCH)),
           ("GHOSTTY_BUILD_INFO_VERSION_PRE", (#const GHOSTTY_BUILD_INFO_VERSION_PRE)),
-          ("GHOSTTY_BUILD_INFO_VERSION_BUILD", (#const GHOSTTY_BUILD_INFO_VERSION_BUILD))
+          ("GHOSTTY_BUILD_INFO_VERSION_BUILD", (#const GHOSTTY_BUILD_INFO_VERSION_BUILD)),
+          ("GHOSTTY_BUILD_INFO_FEATURE_SNAPSHOT", (#const GHOSTTY_BUILD_INFO_FEATURE_SNAPSHOT)),
+          ("GHOSTTY_BUILD_INFO_FEATURE_FORMATTER", (#const GHOSTTY_BUILD_INFO_FEATURE_FORMATTER)),
+          ("GHOSTTY_BUILD_INFO_FEATURE_SELECTION", (#const GHOSTTY_BUILD_INFO_FEATURE_SELECTION)),
+          ("GHOSTTY_BUILD_INFO_FEATURE_SEARCH", (#const GHOSTTY_BUILD_INFO_FEATURE_SEARCH)),
+          ("GHOSTTY_BUILD_INFO_FEATURE_RENDER_STATE", (#const GHOSTTY_BUILD_INFO_FEATURE_RENDER_STATE)),
+          ("GHOSTTY_BUILD_INFO_FEATURE_INPUT_ENCODE", (#const GHOSTTY_BUILD_INFO_FEATURE_INPUT_ENCODE)),
+          ("GHOSTTY_BUILD_INFO_FEATURE_COLOR", (#const GHOSTTY_BUILD_INFO_FEATURE_COLOR)),
+          ("GHOSTTY_BUILD_INFO_FEATURE_GRID_INTROSPECTION", (#const GHOSTTY_BUILD_INFO_FEATURE_GRID_INTROSPECTION)),
+          ("GHOSTTY_BUILD_INFO_FEATURE_GLYPH_PROTOCOL", (#const GHOSTTY_BUILD_INFO_FEATURE_GLYPH_PROTOCOL))
         ]
     }
 
@@ -214,8 +299,21 @@ ghosttyOptimizeModeEnum =
 foreign import capi unsafe "ghostty/vt.h ghostty_build_info"
   ghosttyBuildInfo :: GhosttyBuildInfo -> Ptr () -> IO GhosttyResult
 
--- | @GHOSTTY_COMMIT@, the libghostty-vt commit this binding was generated
--- against. The linked library's @VERSION_BUILD@ must be exactly this
--- (DESIGN.md §3.4, §4.7).
-ghosttyPinnedCommit :: ByteString
-ghosttyPinnedCommit = "c7f68a7f48c6a5b357689eb8c2328bc2dab5d8ed"
+-- | @ghostty_version@: the linked library's full version, as a static
+-- NUL-terminated string owned by the library (a release's is exactly its
+-- number, @1.0.0@; a development build's has a @-dev+…@ suffix). @unsafe@: it
+-- does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_version"
+  ghosttyVersion :: IO (ConstPtr CChar)
+
+-- | @GHOSTTY_VT_VERSION@: the version of the headers this binding was compiled
+-- against, three numbers with no suffix. The version check compares it with
+-- the pin, which catches headers left over from another pin (§3.4).
+ghosttyVtVersion :: ByteString
+ghosttyVtVersion = (#const_str GHOSTTY_VT_VERSION)
+
+-- | @LIBGHOSTTY_VT_VERSION@, the libghostty-vt release this binding was
+-- generated against. The linked library's 'ghosttyVersion' must be exactly
+-- this (DESIGN.md §3.4, §4.7).
+ghosttyPinnedVersion :: ByteString
+ghosttyPinnedVersion = "1.0.0"

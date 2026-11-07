@@ -34,6 +34,7 @@ module Ghostty.FFI.Key.Encoder
     pattern GhosttyOptionAsAltUnknown,
     ghosttyOptionAsAltEnum,
     GhosttyKeyEncoderOption (..),
+    pattern GhosttyKeyEncoderOptInvalid,
     pattern GhosttyKeyEncoderOptCursorKeyApplication,
     pattern GhosttyKeyEncoderOptKeypadKeyApplication,
     pattern GhosttyKeyEncoderOptIgnoreKeypadWithNumlock,
@@ -48,13 +49,13 @@ module Ghostty.FFI.Key.Encoder
     -- * Encoders
     ghosttyKeyEncoderNew,
     ghosttyKeyEncoderFree,
-    ghosttyKeyEncoderSetopt,
-    ghosttyKeyEncoderSetoptFromTerminal,
+    ghosttyKeyEncoderSet,
+    ghosttyKeyEncoderSetFromTerminal,
     ghosttyKeyEncoderEncode,
   )
 where
 
-import Foreign.C.Types (CChar, CInt (..), CSize (..))
+import Foreign.C.Types (CInt (..), CSize (..))
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (Storable (..))
 import Ghostty.FFI.Allocator (GhosttyAllocator)
@@ -83,7 +84,7 @@ newtype GhosttyKeyEncoder = GhosttyKeyEncoder (Ptr GhosttyKeyEncoderImpl)
 -- terminal reports its own through @GHOSTTY_TERMINAL_DATA_KITTY_KEYBOARD_FLAGS@.
 type GhosttyKittyKeyFlags = Word8
 
--- | @GHOSTTY_KITTY_KEY_DISABLED@: Kitty keyboard protocol disabled (all flags off)
+-- | @GHOSTTY_KITTY_KEY_DISABLED@: Kitty keyboard protocol disabled (all flags off).
 pattern GhosttyKittyKeyDisabled :: GhosttyKittyKeyFlags
 pattern GhosttyKittyKeyDisabled = (#const GHOSTTY_KITTY_KEY_DISABLED)
 
@@ -168,31 +169,35 @@ newtype GhosttyKeyEncoderOption = GhosttyKeyEncoderOption CInt
   deriving stock (Eq, Show)
   deriving newtype (Storable)
 
--- | @GHOSTTY_KEY_ENCODER_OPT_CURSOR_KEY_APPLICATION@: Terminal DEC mode 1: cursor key application mode (value: bool)
+-- | @GHOSTTY_KEY_ENCODER_OPT_INVALID@: Not a real option. ghostty\_key\_encoder\_set() returns GHOSTTY\_INVALID\_VALUE for it. Its value is 0, so a zeroed or uninitialized variable is never mistaken for a real option.
+pattern GhosttyKeyEncoderOptInvalid :: GhosttyKeyEncoderOption
+pattern GhosttyKeyEncoderOptInvalid = GhosttyKeyEncoderOption (#const GHOSTTY_KEY_ENCODER_OPT_INVALID)
+
+-- | @GHOSTTY_KEY_ENCODER_OPT_CURSOR_KEY_APPLICATION@: Terminal DEC mode 1: cursor key application mode (value: bool, default: false)
 pattern GhosttyKeyEncoderOptCursorKeyApplication :: GhosttyKeyEncoderOption
 pattern GhosttyKeyEncoderOptCursorKeyApplication = GhosttyKeyEncoderOption (#const GHOSTTY_KEY_ENCODER_OPT_CURSOR_KEY_APPLICATION)
 
--- | @GHOSTTY_KEY_ENCODER_OPT_KEYPAD_KEY_APPLICATION@: Terminal DEC mode 66: keypad key application mode (value: bool)
+-- | @GHOSTTY_KEY_ENCODER_OPT_KEYPAD_KEY_APPLICATION@: Terminal DEC mode 66: keypad key application mode (value: bool, default: false)
 pattern GhosttyKeyEncoderOptKeypadKeyApplication :: GhosttyKeyEncoderOption
 pattern GhosttyKeyEncoderOptKeypadKeyApplication = GhosttyKeyEncoderOption (#const GHOSTTY_KEY_ENCODER_OPT_KEYPAD_KEY_APPLICATION)
 
--- | @GHOSTTY_KEY_ENCODER_OPT_IGNORE_KEYPAD_WITH_NUMLOCK@: Terminal DEC mode 1035: ignore keypad with numlock (value: bool)
+-- | @GHOSTTY_KEY_ENCODER_OPT_IGNORE_KEYPAD_WITH_NUMLOCK@: Terminal DEC mode 1035: ignore keypad with numlock (value: bool, default: false)
 pattern GhosttyKeyEncoderOptIgnoreKeypadWithNumlock :: GhosttyKeyEncoderOption
 pattern GhosttyKeyEncoderOptIgnoreKeypadWithNumlock = GhosttyKeyEncoderOption (#const GHOSTTY_KEY_ENCODER_OPT_IGNORE_KEYPAD_WITH_NUMLOCK)
 
--- | @GHOSTTY_KEY_ENCODER_OPT_ALT_ESC_PREFIX@: Terminal DEC mode 1036: alt sends escape prefix (value: bool)
+-- | @GHOSTTY_KEY_ENCODER_OPT_ALT_ESC_PREFIX@: Terminal DEC mode 1036: alt sends escape prefix (value: bool, default: false)
 pattern GhosttyKeyEncoderOptAltEscPrefix :: GhosttyKeyEncoderOption
 pattern GhosttyKeyEncoderOptAltEscPrefix = GhosttyKeyEncoderOption (#const GHOSTTY_KEY_ENCODER_OPT_ALT_ESC_PREFIX)
 
--- | @GHOSTTY_KEY_ENCODER_OPT_MODIFY_OTHER_KEYS_STATE_2@: xterm modifyOtherKeys mode 2 (value: bool)
+-- | @GHOSTTY_KEY_ENCODER_OPT_MODIFY_OTHER_KEYS_STATE_2@: xterm modifyOtherKeys mode 2 (value: bool, default: false)
 pattern GhosttyKeyEncoderOptModifyOtherKeysState2 :: GhosttyKeyEncoderOption
 pattern GhosttyKeyEncoderOptModifyOtherKeysState2 = GhosttyKeyEncoderOption (#const GHOSTTY_KEY_ENCODER_OPT_MODIFY_OTHER_KEYS_STATE_2)
 
--- | @GHOSTTY_KEY_ENCODER_OPT_KITTY_FLAGS@: Kitty keyboard protocol flags (value: GhosttyKittyKeyFlags bitmask)
+-- | @GHOSTTY_KEY_ENCODER_OPT_KITTY_FLAGS@: Kitty keyboard protocol flags (value: GhosttyKittyKeyFlags bitmask, default: GHOSTTY\_KITTY\_KEY\_DISABLED)
 pattern GhosttyKeyEncoderOptKittyFlags :: GhosttyKeyEncoderOption
 pattern GhosttyKeyEncoderOptKittyFlags = GhosttyKeyEncoderOption (#const GHOSTTY_KEY_ENCODER_OPT_KITTY_FLAGS)
 
--- | @GHOSTTY_KEY_ENCODER_OPT_MACOS_OPTION_AS_ALT@: macOS option-as-alt setting (value: GhosttyOptionAsAlt)
+-- | @GHOSTTY_KEY_ENCODER_OPT_MACOS_OPTION_AS_ALT@: macOS option-as-alt setting (value: GhosttyOptionAsAlt, default: GHOSTTY\_OPTION\_AS\_ALT\_FALSE)
 pattern GhosttyKeyEncoderOptMacosOptionAsAlt :: GhosttyKeyEncoderOption
 pattern GhosttyKeyEncoderOptMacosOptionAsAlt = GhosttyKeyEncoderOption (#const GHOSTTY_KEY_ENCODER_OPT_MACOS_OPTION_AS_ALT)
 
@@ -207,6 +212,7 @@ pattern GhosttyKeyEncoderOptionUnknown n <- GhosttyKeyEncoderOption (unnamed gho
     GhosttyKeyEncoderOptionUnknown n = GhosttyKeyEncoderOption n
 
 {-# COMPLETE
+  GhosttyKeyEncoderOptInvalid,
   GhosttyKeyEncoderOptCursorKeyApplication,
   GhosttyKeyEncoderOptKeypadKeyApplication,
   GhosttyKeyEncoderOptIgnoreKeypadWithNumlock,
@@ -226,7 +232,8 @@ ghosttyKeyEncoderOptionEnum =
     { name = "GhosttyKeyEncoderOption",
       size = (#size GhosttyKeyEncoderOption),
       values =
-        [ ("GHOSTTY_KEY_ENCODER_OPT_CURSOR_KEY_APPLICATION", (#const GHOSTTY_KEY_ENCODER_OPT_CURSOR_KEY_APPLICATION)),
+        [ ("GHOSTTY_KEY_ENCODER_OPT_INVALID", (#const GHOSTTY_KEY_ENCODER_OPT_INVALID)),
+          ("GHOSTTY_KEY_ENCODER_OPT_CURSOR_KEY_APPLICATION", (#const GHOSTTY_KEY_ENCODER_OPT_CURSOR_KEY_APPLICATION)),
           ("GHOSTTY_KEY_ENCODER_OPT_KEYPAD_KEY_APPLICATION", (#const GHOSTTY_KEY_ENCODER_OPT_KEYPAD_KEY_APPLICATION)),
           ("GHOSTTY_KEY_ENCODER_OPT_IGNORE_KEYPAD_WITH_NUMLOCK", (#const GHOSTTY_KEY_ENCODER_OPT_IGNORE_KEYPAD_WITH_NUMLOCK)),
           ("GHOSTTY_KEY_ENCODER_OPT_ALT_ESC_PREFIX", (#const GHOSTTY_KEY_ENCODER_OPT_ALT_ESC_PREFIX)),
@@ -250,24 +257,25 @@ foreign import capi unsafe "ghostty/vt.h ghostty_key_encoder_new"
 foreign import capi unsafe "ghostty/vt.h ghostty_key_encoder_free"
   ghosttyKeyEncoderFree :: GhosttyKeyEncoder -> IO ()
 
--- | @ghostty_key_encoder_setopt@: set an option, the value's type depending
--- on the option ('GhosttyKeyEncoderOption' says which). A null value does
--- nothing; it does not restore the default. @unsafe@: it does not call back
--- into Haskell.
-foreign import capi unsafe "ghostty/vt.h ghostty_key_encoder_setopt"
-  ghosttyKeyEncoderSetopt :: GhosttyKeyEncoder -> GhosttyKeyEncoderOption -> Ptr () -> IO ()
+-- | @ghostty_key_encoder_set@: set an option, the value's type depending
+-- on the option ('GhosttyKeyEncoderOption' says which). A null value restores
+-- the option's default. @GHOSTTY_INVALID_VALUE@ for a value out of range.
+-- @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_key_encoder_set"
+  ghosttyKeyEncoderSet :: GhosttyKeyEncoder -> GhosttyKeyEncoderOption -> Ptr () -> IO GhosttyResult
 
--- | @ghostty_key_encoder_setopt_from_terminal@: set every option a terminal's
--- modes and flags decide (cursor and keypad application modes, alt's escape
--- prefix, modifyOtherKeys, the Kitty flags), and reset
+-- | @ghostty_key_encoder_set_from_terminal@: set every option a terminal's
+-- modes and flags decide (cursor and keypad application modes, backarrow
+-- key mode, ignore-keypad-with-numlock, alt's escape prefix,
+-- modifyOtherKeys, the Kitty flags), and reset
 -- @GHOSTTY_KEY_ENCODER_OPT_MACOS_OPTION_AS_ALT@, which no terminal state
 -- decides. @unsafe@: it reads the terminal and calls nothing back.
-foreign import capi unsafe "ghostty/vt.h ghostty_key_encoder_setopt_from_terminal"
-  ghosttyKeyEncoderSetoptFromTerminal :: GhosttyKeyEncoder -> GhosttyTerminal -> IO ()
+foreign import capi unsafe "ghostty/vt.h ghostty_key_encoder_set_from_terminal"
+  ghosttyKeyEncoderSetFromTerminal :: GhosttyKeyEncoder -> GhosttyTerminal -> IO GhosttyResult
 
 -- | @ghostty_key_encoder_encode@: encode an event into a buffer. Some events
 -- encode to nothing (a bare modifier, say). A null buffer, or one too small,
 -- returns @GHOSTTY_OUT_OF_SPACE@ with the size needed. @unsafe@: it does not
 -- call back into Haskell.
 foreign import capi unsafe "ghostty/vt.h ghostty_key_encoder_encode"
-  ghosttyKeyEncoderEncode :: GhosttyKeyEncoder -> GhosttyKeyEvent -> Ptr CChar -> CSize -> Ptr CSize -> IO GhosttyResult
+  ghosttyKeyEncoderEncode :: GhosttyKeyEncoder -> GhosttyKeyEvent -> Ptr Word8 -> CSize -> Ptr CSize -> IO GhosttyResult

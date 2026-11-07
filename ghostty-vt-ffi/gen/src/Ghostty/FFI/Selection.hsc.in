@@ -5,17 +5,15 @@
 
 -- | @include/ghostty/vt/selection.h@: selections of a terminal's content,
 -- deriving them (word, line, command output, all), adjusting and comparing
--- them, formatting one in a single call, and the gesture state machine that
--- turns pointer events into selections.
+-- them, and the gesture state machine that turns pointer events into
+-- selections. A selection is formatted through the formatter's
+-- @GHOSTTY_FORMATTER_OPT_SELECTION@ ("Ghostty.FFI.Formatter").
 --
 -- A 'GhosttySelection' holds two untracked grid references, so it is valid
 -- only until the next call that mutates its terminal ("Ghostty.FFI.GridRef").
 --
--- __@safe@ and @unsafe@.__ No call here runs a callback. The two formatting
--- calls are @safe@ anyway, as the formatter's are ("Ghostty.FFI.Formatter"):
--- a selection may span the whole scrollback, and an @unsafe@ call that long
--- would hold up every other Haskell thread at the next garbage collection.
--- The rest are @unsafe@.
+-- __@safe@ and @unsafe@.__ No call here runs a callback, and none walks the
+-- scrollback, so all are @unsafe@.
 module Ghostty.FFI.Selection
   ( -- * Selections
     {{xstruct selection.h GhosttySelection}}
@@ -39,11 +37,6 @@ module Ghostty.FFI.Selection
     ghosttyTerminalSelectionOrdered,
     ghosttyTerminalSelectionContains,
     ghosttyTerminalSelectionEqual,
-
-    -- * Formatting
-    {{xstruct selection.h GhosttyTerminalSelectionFormatOptions}}
-    ghosttyTerminalSelectionFormatBuf,
-    ghosttyTerminalSelectionFormatAlloc,
 
     -- * Gestures
     GhosttySelectionGesture (..),
@@ -79,7 +72,7 @@ import Ghostty.FFI.GridRef (GhosttyGridRef (..))
 import Ghostty.FFI.Layout (CEnum (..), CField (..), CStruct (..), unnamed)
 import Ghostty.FFI.Point (GhosttyPoint)
 import Ghostty.FFI.Terminal.Handle (GhosttyTerminal (..))
-import Ghostty.FFI.Types (GhosttyFormatterFormat (..), GhosttyResult (..))
+import Ghostty.FFI.Types (GhosttyResult (..))
 
 #include <gvtffi_shims.h>
 
@@ -117,10 +110,9 @@ foreign import capi unsafe "ghostty/vt.h ghostty_terminal_select_all"
   ghosttyTerminalSelectAll :: GhosttyTerminal -> Ptr GhosttySelection -> IO GhosttyResult
 
 -- | @ghostty_terminal_select_output@: the command output (OSC 133) under a
--- grid reference. @GHOSTTY_NO_VALUE@ when it is not in command output. The C
--- function takes the reference by value, so this calls a pointer shim
--- (@gvtffi_shims.h@, §3.3). @unsafe@: it does not call back into Haskell.
-foreign import capi unsafe "gvtffi_shims.h gvtffi_terminal_select_output"
+-- grid reference. @GHOSTTY_NO_VALUE@ when it is not in command output.
+-- @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_terminal_select_output"
   ghosttyTerminalSelectOutput :: GhosttyTerminal -> Ptr GhosttyGridRef -> Ptr GhosttySelection -> IO GhosttyResult
 
 -- * Adjusting and comparing
@@ -154,26 +146,6 @@ foreign import capi unsafe "gvtffi_shims.h gvtffi_terminal_selection_contains"
 -- @unsafe@: it does not call back into Haskell.
 foreign import capi unsafe "ghostty/vt.h ghostty_terminal_selection_equal"
   ghosttyTerminalSelectionEqual :: GhosttyTerminal -> Ptr GhosttySelection -> Ptr GhosttySelection -> Ptr CBool -> IO GhosttyResult
-
--- * Formatting
-
-{{struct selection.h GhosttyTerminalSelectionFormatOptions}}
--- | @ghostty_terminal_selection_format_buf@: format a selection (the options'
--- or, when that is null, the terminal's) into a buffer;
--- @GHOSTTY_OUT_OF_SPACE@ reports the size needed, and @GHOSTTY_NO_VALUE@ that
--- there is no selection. The C function takes the options by value, so this
--- calls a pointer shim (@gvtffi_shims.h@, §3.3). @safe@: it calls nothing
--- back, but a selection can span the whole scrollback.
-foreign import capi safe "gvtffi_shims.h gvtffi_terminal_selection_format_buf"
-  ghosttyTerminalSelectionFormatBuf :: GhosttyTerminal -> Ptr GhosttyTerminalSelectionFormatOptions -> Ptr Word8 -> CSize -> Ptr CSize -> IO GhosttyResult
-
--- | @ghostty_terminal_selection_format_alloc@: format a selection into an
--- allocated buffer, to be released with 'Ghostty.FFI.Allocator.ghosttyFree';
--- empty output is a null pointer. Through a pointer shim, as
--- 'ghosttyTerminalSelectionFormatBuf'. @safe@: as
--- 'ghosttyTerminalSelectionFormatBuf'.
-foreign import capi safe "gvtffi_shims.h gvtffi_terminal_selection_format_alloc"
-  ghosttyTerminalSelectionFormatAlloc :: GhosttyTerminal -> Ptr GhosttyAllocator -> Ptr GhosttyTerminalSelectionFormatOptions -> Ptr (Ptr Word8) -> Ptr CSize -> IO GhosttyResult
 
 -- * Gestures
 

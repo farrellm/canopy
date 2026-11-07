@@ -4,7 +4,8 @@
 {-# LANGUAGE ViewPatterns #-}
 
 -- | @include/ghostty/vt/build_info.h@: compile-time facts about the linked
--- library (DESIGN.md §3.4).
+-- library, and @include/ghostty/vt/version.h@: the version of the headers
+-- (DESIGN.md §3.4).
 module Ghostty.FFI.BuildInfo
   ( -- * Keys
     {{xenum build_info.h GhosttyBuildInfo}}
@@ -14,13 +15,16 @@ module Ghostty.FFI.BuildInfo
 
     -- * Calls
     ghosttyBuildInfo,
+    ghosttyVersion,
 
-    -- * The pin
-    ghosttyPinnedCommit,
+    -- * Versions
+    ghosttyVtVersion,
+    ghosttyPinnedVersion,
   )
 where
 
-import Foreign.C.Types (CInt (..))
+import Foreign.C.ConstPtr (ConstPtr (..))
+import Foreign.C.Types (CChar, CInt (..))
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (Storable (..))
 import Ghostty.FFI.Layout (CEnum (..), unnamed)
@@ -33,5 +37,18 @@ import Ghostty.FFI.Types (GhosttyResult (..))
 -- | @ghostty_build_info@. @unsafe@: it does not call back into Haskell.
 foreign import capi unsafe "ghostty/vt.h ghostty_build_info"
   ghosttyBuildInfo :: GhosttyBuildInfo -> Ptr () -> IO GhosttyResult
+
+-- | @ghostty_version@: the linked library's full version, as a static
+-- NUL-terminated string owned by the library (a release's is exactly its
+-- number, @1.0.0@; a development build's has a @-dev+…@ suffix). @unsafe@: it
+-- does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_version"
+  ghosttyVersion :: IO (ConstPtr CChar)
+
+-- | @GHOSTTY_VT_VERSION@: the version of the headers this binding was compiled
+-- against, three numbers with no suffix. The version check compares it with
+-- the pin, which catches headers left over from another pin (§3.4).
+ghosttyVtVersion :: ByteString
+ghosttyVtVersion = (#const_str GHOSTTY_VT_VERSION)
 
 {{pin}}

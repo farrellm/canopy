@@ -67,16 +67,18 @@ structs =
     -- types.h
     StructRow ghosttyCodepointsLayout (GhosttyCodepoints (addr 0x0102030405) 3),
     StructRow ghosttyBufferLayout (GhosttyBuffer (addr 0x0102030405) 0x0a0b 0x0c),
+    StructRow ghosttyCodepointBufferLayout (GhosttyCodepointBuffer (addr 0x0102030405) 0x0a0b 0x0c),
     StructRow ghosttySurfacePositionLayout (GhosttySurfacePosition 12.5 (-3.25)),
     -- color.h, style.h
     StructRow ghosttyColorRgbLayout aRgb,
     StructRow ghosttyStyleColorLayout (StyleColorRgb aRgb),
     StructRow ghosttyStyleLayout $
-      GhosttyStyle 0x48 (StyleColorPalette 7) (StyleColorRgb aRgb) (StyleColorPalette 9) 1 1 1 1 1 1 1 1 2,
+      -- Flags: bold, faint, invisible and overline, with a curly underline.
+      GhosttyStyle (StyleColorPalette 7) (StyleColorRgb aRgb) (StyleColorPalette 9) 0x03a5 0x0102,
     -- point.h, grid_ref.h
     StructRow ghosttyPointCoordinateLayout aCoordinate,
     StructRow ghosttyPointLayout (GhosttyPoint GhosttyPointTagScreen aCoordinate),
-    StructRow ghosttyGridRefLayout (GhosttyGridRef 0x18 (addr 0x0102030405) 0x0a0b 0x0c0d),
+    StructRow ghosttyGridRefLayout aGridRef,
     -- device.h, size_report.h, io.h
     StructRow ghosttyDeviceAttributesPrimaryLayout aPrimary,
     StructRow ghosttyDeviceAttributesSecondaryLayout aSecondary,
@@ -107,7 +109,6 @@ structs =
     StructRow ghosttyClipboardWriteReplyLayout (GhosttyClipboardWriteReply 0x10 GhosttyClipboardWriteResultBusy 1),
     StructRow ghosttyClipboardWriteLayout $
       GhosttyClipboardWrite
-        0x48
         GhosttyClipboardLocationPrimary
         (addr 0x0102030405)
         3
@@ -127,7 +128,6 @@ structs =
         1,
     StructRow ghosttyClipboardReadLayout $
       GhosttyClipboardRead
-        0x50
         GhosttyClipboardLocationSelection
         (addr 0x0102030405)
         2
@@ -138,12 +138,11 @@ structs =
         (addr 0x0b0c0d0e0f)
         (funAddr 0x1011121314),
     StructRow ghosttyTerminalDesktopNotificationLayout $
-      GhosttyTerminalDesktopNotification 0x28 (string 0x0102030405) (string 0x060708090a),
+      GhosttyTerminalDesktopNotification (string 0x0102030405) (string 0x060708090a),
     StructRow ghosttyTerminalProgressReportLayout $
-      GhosttyTerminalProgressReport 0x10 GhosttyTerminalProgressStateIndeterminate 42,
+      GhosttyTerminalProgressReport GhosttyTerminalProgressStateIndeterminate 42,
     StructRow ghosttyTerminalProgramStatusLayout $
       GhosttyTerminalProgramStatus
-        0x58
         GhosttyProgramStatusStateBlocked
         GhosttyProgramStatusKindAuth
         42
@@ -153,7 +152,6 @@ structs =
         (string 0x1011121314),
     StructRow ghosttyTerminalSemanticPromptLayout $
       GhosttyTerminalSemanticPrompt
-        0x38
         GhosttySemanticPromptCommandEnd
         GhosttySemanticPromptPromptSecondary
         1
@@ -167,7 +165,7 @@ structs =
     -- render.h
     StructRow ghosttyRenderStateOverscanLayout (GhosttyRenderStateOverscan 0x0a0b 0x0c0d),
     StructRow ghosttyRenderStateCursorLayout $
-      GhosttyRenderStateCursor 0x18 1 0x0a0b 0x0c0d 1 1 1 1 GhosttyRenderStateCursorVisualStyleBlockHollow,
+      GhosttyRenderStateCursor 0x18 1 0x0a0b 0x0c0d 1 1 1 1 GhosttyCursorStyleBlockHollow,
     StructRow ghosttyRenderStateColorsLayout $
       GhosttyRenderStateColors
         0x0310
@@ -187,19 +185,12 @@ structs =
       GhosttyTerminalSelectWordBetweenOptions 0x48 aGridRef anotherGridRef (addr 0x0102030405) 3,
     StructRow ghosttyTerminalSelectLineOptionsLayout $
       GhosttyTerminalSelectLineOptions 0x38 aGridRef (addr 0x0102030405) 3 1,
-    StructRow ghosttyTerminalSelectionFormatOptionsLayout $
-      GhosttyTerminalSelectionFormatOptions 0x20 GhosttyFormatterFormatHtml 1 1 (addr 0x0102030405),
     StructRow ghosttySelectionGestureBehaviorsLayout $
       GhosttySelectionGestureBehaviors
         GhosttySelectionGestureBehaviorWord
         GhosttySelectionGestureBehaviorLine
         GhosttySelectionGestureBehaviorOutput,
     StructRow ghosttySelectionGestureGeometryLayout (GhosttySelectionGestureGeometry 80 0x0a0b 0x0c0d 0x0e0f10),
-    -- formatter.h
-    StructRow ghosttyFormatterScreenExtraLayout aScreenExtra,
-    StructRow ghosttyFormatterTerminalExtraLayout aTerminalExtra,
-    StructRow ghosttyFormatterTerminalOptionsLayout $
-      GhosttyFormatterTerminalOptions 0x40 GhosttyFormatterFormatVt 1 1 aTerminalExtra (addr 0x0102030405),
     -- color.h
     StructRow ghosttyColorPaletteMaskLayout (GhosttyColorPaletteMask [0x0102030405, 0x0607, 0x08, 0x090a0b0c0d0e0f10]),
     StructRow ghosttyColorX11EntryLayout (GhosttyColorX11Entry (addr 0x0102030405) aRgb),
@@ -236,11 +227,9 @@ structs =
     anOscSequence = GhosttyTerminalUnknownOscSequence 1 (string 0x0102030405) GhosttyOscTerminatorBel
     aContent = GhosttyClipboardContent (string 0x0102030405) (string 0x060708090a)
     aGrid = GhosttyTerminalResizeWindowGrid 24 80
-    aGridRef = GhosttyGridRef 0x18 (addr 0x0102030405) 0x0a0b 0x0c0d
-    anotherGridRef = GhosttyGridRef 0x18 (addr 0x060708090a) 0x0e0f 0x1011
-    aSelection = GhosttySelection 0x40 aGridRef anotherGridRef 1
-    aScreenExtra = GhosttyFormatterScreenExtra 0x10 1 1 1 1 1 1
-    aTerminalExtra = GhosttyFormatterTerminalExtra 0x28 1 1 1 1 1 1 aScreenExtra
+    aGridRef = GhosttyGridRef (addr 0x0102030405) 0x0a0b 0x0c0d
+    anotherGridRef = GhosttyGridRef (addr 0x060708090a) 0x0e0f 0x1011
+    aSelection = GhosttySelection aGridRef anotherGridRef 1
     aMimeReader = GhosttyMimeReader (funAddr 0x0b0c0d0e0f) (addr 0x1011121314)
     anSgrUnknown = GhosttySgrUnknown (addr 0x0102030405) 3 (addr 0x060708090a) 2
 
@@ -271,6 +260,15 @@ enums =
       GhosttyBuildInfoVersionPatch -> True
       GhosttyBuildInfoVersionPre -> True
       GhosttyBuildInfoVersionBuild -> True
+      GhosttyBuildInfoFeatureSnapshot -> True
+      GhosttyBuildInfoFeatureFormatter -> True
+      GhosttyBuildInfoFeatureSelection -> True
+      GhosttyBuildInfoFeatureSearch -> True
+      GhosttyBuildInfoFeatureRenderState -> True
+      GhosttyBuildInfoFeatureInputEncode -> True
+      GhosttyBuildInfoFeatureColor -> True
+      GhosttyBuildInfoFeatureGridIntrospection -> True
+      GhosttyBuildInfoFeatureGlyphProtocol -> True
       GhosttyBuildInfoUnknown _ -> False,
     EnumRow ghosttyOptimizeModeEnum $ \n -> case GhosttyOptimizeMode (fromInteger n) of
       GhosttyOptimizeDebug -> True
@@ -286,6 +284,14 @@ enums =
       GhosttyFocusGained -> True
       GhosttyFocusLost -> True
       GhosttyFocusEventUnknown _ -> False,
+    EnumRow ghosttyFormatterOptionEnum $ \n -> case GhosttyFormatterOption (fromInteger n) of
+      GhosttyFormatterOptInvalid -> True
+      GhosttyFormatterOptEmit -> True
+      GhosttyFormatterOptUnwrap -> True
+      GhosttyFormatterOptTrim -> True
+      GhosttyFormatterOptSelection -> True
+      GhosttyFormatterOptExtras -> True
+      GhosttyFormatterOptionUnknown _ -> False,
     EnumRow ghosttyOptionAsAltEnum $ \n -> case GhosttyOptionAsAlt (fromInteger n) of
       GhosttyOptionAsAltFalse -> True
       GhosttyOptionAsAltTrue -> True
@@ -293,6 +299,7 @@ enums =
       GhosttyOptionAsAltRight -> True
       GhosttyOptionAsAltUnknown _ -> False,
     EnumRow ghosttyKeyEncoderOptionEnum $ \n -> case GhosttyKeyEncoderOption (fromInteger n) of
+      GhosttyKeyEncoderOptInvalid -> True
       GhosttyKeyEncoderOptCursorKeyApplication -> True
       GhosttyKeyEncoderOptKeypadKeyApplication -> True
       GhosttyKeyEncoderOptIgnoreKeypadWithNumlock -> True
@@ -543,6 +550,7 @@ enums =
       GhosttyMouseFormatSgrPixels -> True
       GhosttyMouseFormatUnknown _ -> False,
     EnumRow ghosttyMouseEncoderOptionEnum $ \n -> case GhosttyMouseEncoderOption (fromInteger n) of
+      GhosttyMouseEncoderOptInvalid -> True
       GhosttyMouseEncoderOptEvent -> True
       GhosttyMouseEncoderOptFormat -> True
       GhosttyMouseEncoderOptSize -> True
@@ -573,6 +581,7 @@ enums =
       GhosttyOscTerminatorBel -> True
       GhosttyOscTerminatorUnknown _ -> False,
     EnumRow ghosttyOscOptionEnum $ \n -> case GhosttyOscOption (fromInteger n) of
+      GhosttyOscOptInvalid -> True
       GhosttyOscOptUnknownMaxBytes -> True
       GhosttyOscOptionUnknown _ -> False,
     EnumRow ghosttyOscCommandTypeEnum $ \n -> case GhosttyOscCommandType (fromInteger n) of
@@ -650,20 +659,15 @@ enums =
       GhosttyRenderStateDataImagePlacementsGeneration -> True
       GhosttyRenderStateDataUnknown _ -> False,
     EnumRow ghosttyRenderStateOptionEnum $ \n -> case GhosttyRenderStateOption (fromInteger n) of
-      GhosttyRenderStateOptionDirty -> True
-      GhosttyRenderStateOptionOverscan -> True
+      GhosttyRenderStateOptInvalid -> True
+      GhosttyRenderStateOptDirty -> True
+      GhosttyRenderStateOptOverscan -> True
       GhosttyRenderStateOptionUnknown _ -> False,
     EnumRow ghosttyRenderStateDirtyEnum $ \n -> case GhosttyRenderStateDirty (fromInteger n) of
       GhosttyRenderStateDirtyFalse -> True
       GhosttyRenderStateDirtyPartial -> True
       GhosttyRenderStateDirtyFull -> True
       GhosttyRenderStateDirtyUnknown _ -> False,
-    EnumRow ghosttyRenderStateCursorVisualStyleEnum $ \n -> case GhosttyRenderStateCursorVisualStyle (fromInteger n) of
-      GhosttyRenderStateCursorVisualStyleBar -> True
-      GhosttyRenderStateCursorVisualStyleBlock -> True
-      GhosttyRenderStateCursorVisualStyleUnderline -> True
-      GhosttyRenderStateCursorVisualStyleBlockHollow -> True
-      GhosttyRenderStateCursorVisualStyleUnknown _ -> False,
     EnumRow ghosttyRenderStateRowDataEnum $ \n -> case GhosttyRenderStateRowData (fromInteger n) of
       GhosttyRenderStateRowDataInvalid -> True
       GhosttyRenderStateRowDataDirty -> True
@@ -675,7 +679,8 @@ enums =
       GhosttyRenderStateRowDataId -> True
       GhosttyRenderStateRowDataUnknown _ -> False,
     EnumRow ghosttyRenderStateRowOptionEnum $ \n -> case GhosttyRenderStateRowOption (fromInteger n) of
-      GhosttyRenderStateRowOptionDirty -> True
+      GhosttyRenderStateRowOptInvalid -> True
+      GhosttyRenderStateRowOptDirty -> True
       GhosttyRenderStateRowOptionUnknown _ -> False,
     EnumRow ghosttyRenderStateRowCellsDataEnum $ \n -> case GhosttyRenderStateRowCellsData (fromInteger n) of
       GhosttyRenderStateRowCellsDataInvalid -> True
@@ -714,11 +719,6 @@ enums =
     EnumRow ghosttyImageProtocolEnum $ \n -> case GhosttyImageProtocol (fromInteger n) of
       GhosttyImageProtocolKitty -> True
       GhosttyImageProtocolUnknown _ -> False,
-    EnumRow ghosttyRenderStateImageLayerEnum $ \n -> case GhosttyRenderStateImageLayer (fromInteger n) of
-      GhosttyRenderStateImageLayerBelowBackground -> True
-      GhosttyRenderStateImageLayerBelowText -> True
-      GhosttyRenderStateImageLayerAboveText -> True
-      GhosttyRenderStateImageLayerUnknown _ -> False,
     EnumRow ghosttyRenderStateKittyPlacementKindEnum $ \n -> case GhosttyRenderStateKittyPlacementKind (fromInteger n) of
       GhosttyRenderStateKittyPlacementKindVirtual -> True
       GhosttyRenderStateKittyPlacementKindRelative -> True
@@ -790,6 +790,7 @@ enums =
       GhosttySelectionOrderMirroredReverse -> True
       GhosttySelectionOrderUnknown _ -> False,
     EnumRow ghosttySelectionGestureDataEnum $ \n -> case GhosttySelectionGestureData (fromInteger n) of
+      GhosttySelectionGestureDataInvalid -> True
       GhosttySelectionGestureDataClickCount -> True
       GhosttySelectionGestureDataDragged -> True
       GhosttySelectionGestureDataAutoscroll -> True
@@ -815,6 +816,7 @@ enums =
       GhosttySelectionGestureEventTypeDeepPress -> True
       GhosttySelectionGestureEventTypeUnknown _ -> False,
     EnumRow ghosttySelectionGestureEventOptionEnum $ \n -> case GhosttySelectionGestureEventOption (fromInteger n) of
+      GhosttySelectionGestureEventOptInvalid -> True
       GhosttySelectionGestureEventOptRef -> True
       GhosttySelectionGestureEventOptPosition -> True
       GhosttySelectionGestureEventOptRepeatDistance -> True
@@ -880,6 +882,7 @@ enums =
       GhosttyStyleColorRgb -> True
       GhosttyStyleColorTagUnknown _ -> False,
     EnumRow ghosttyTerminalOptionEnum $ \n -> case GhosttyTerminalOption (fromInteger n) of
+      GhosttyTerminalOptInvalid -> True
       GhosttyTerminalOptUserdata -> True
       GhosttyTerminalOptWritePty -> True
       GhosttyTerminalOptBell -> True
@@ -940,7 +943,7 @@ enums =
       GhosttyTerminalDataCursorVisible -> True
       GhosttyTerminalDataKittyKeyboardFlags -> True
       GhosttyTerminalDataScrollbar -> True
-      GhosttyTerminalDataCursorStyle -> True
+      GhosttyTerminalDataCursorSgrStyle -> True
       GhosttyTerminalDataMouseTracking -> True
       GhosttyTerminalDataTitle -> True
       GhosttyTerminalDataPwd -> True
@@ -978,12 +981,6 @@ enums =
       GhosttyTerminalScreenPrimary -> True
       GhosttyTerminalScreenAlternate -> True
       GhosttyTerminalScreenUnknown _ -> False,
-    EnumRow ghosttyTerminalCursorStyleEnum $ \n -> case GhosttyTerminalCursorStyle (fromInteger n) of
-      GhosttyTerminalCursorStyleBar -> True
-      GhosttyTerminalCursorStyleBlock -> True
-      GhosttyTerminalCursorStyleUnderline -> True
-      GhosttyTerminalCursorStyleBlockHollow -> True
-      GhosttyTerminalCursorStyleUnknown _ -> False,
     EnumRow ghosttyTerminalBoundaryEnum $ \n -> case GhosttyTerminalBoundary (fromInteger n) of
       GhosttyTerminalBoundaryGround -> True
       GhosttyTerminalBoundaryApcStart -> True
@@ -1010,11 +1007,11 @@ enums =
       GhosttyTerminalStringEndBel -> True
       GhosttyTerminalStringEndUnknown _ -> False,
     EnumRow ghosttyTerminalScrollViewportTagEnum $ \n -> case GhosttyTerminalScrollViewportTag (fromInteger n) of
-      GhosttyScrollViewportTop -> True
-      GhosttyScrollViewportBottom -> True
-      GhosttyScrollViewportDelta -> True
-      GhosttyScrollViewportRow -> True
-      GhosttyScrollViewportDeltaPrompt -> True
+      GhosttyTerminalScrollViewportTop -> True
+      GhosttyTerminalScrollViewportBottom -> True
+      GhosttyTerminalScrollViewportDelta -> True
+      GhosttyTerminalScrollViewportRow -> True
+      GhosttyTerminalScrollViewportDeltaPrompt -> True
       GhosttyTerminalScrollViewportTagUnknown _ -> False,
     EnumRow ghosttyTerminalCompressionModeEnum $ \n -> case GhosttyTerminalCompressionMode (fromInteger n) of
       GhosttyTerminalCompressionModeIncremental -> True
@@ -1095,12 +1092,24 @@ enums =
       GhosttyIoError -> True
       GhosttyLimitExceeded -> True
       GhosttyRejected -> True
+      GhosttyUnsupported -> True
       GhosttyResultUnknown _ -> False,
     EnumRow ghosttyFormatterFormatEnum $ \n -> case GhosttyFormatterFormat (fromInteger n) of
       GhosttyFormatterFormatPlain -> True
       GhosttyFormatterFormatVt -> True
       GhosttyFormatterFormatHtml -> True
-      GhosttyFormatterFormatUnknown _ -> False
+      GhosttyFormatterFormatUnknown _ -> False,
+    EnumRow ghosttyCursorStyleEnum $ \n -> case GhosttyCursorStyle (fromInteger n) of
+      GhosttyCursorStyleBar -> True
+      GhosttyCursorStyleBlock -> True
+      GhosttyCursorStyleUnderline -> True
+      GhosttyCursorStyleBlockHollow -> True
+      GhosttyCursorStyleUnknown _ -> False,
+    EnumRow ghosttyImageLayerEnum $ \n -> case GhosttyImageLayer (fromInteger n) of
+      GhosttyImageLayerBelowBackground -> True
+      GhosttyImageLayerBelowText -> True
+      GhosttyImageLayerAboveText -> True
+      GhosttyImageLayerUnknown _ -> False
   ]
 
 tests :: TestTree

@@ -1,12 +1,14 @@
 -- | What the behavioural tests of the raw binding share: a terminal for the
--- length of a test, callbacks freed after it, feeding bytes, and sized
--- structs initialised as @GHOSTTY_INIT_SIZED@ does.
+-- length of a test, callbacks freed after it, feeding bytes, sized structs
+-- initialised as @GHOSTTY_INIT_SIZED@ does, and frozen ones zeroed as @{0}@
+-- does.
 module Test.Ghostty.FFI.Support
   ( withTerminal,
     withCallback,
     feed,
     pokeSized,
     withSized,
+    withZeroed,
     bytesVia,
   )
 where
@@ -51,12 +53,17 @@ pokeSized l p = do
 withSized :: CStruct -> (Ptr a -> IO b) -> IO b
 withSized l act = allocaBytesAligned l.size l.align $ \p -> pokeSized l p >> act (castPtr p)
 
+-- | Room for a frozen struct (one with no @size@ field, such as
+-- @GhosttyGridRef@ or @GhosttySelection@), zeroed as @{0}@ does.
+withZeroed :: CStruct -> (Ptr a -> IO b) -> IO b
+withZeroed l act = allocaBytesAligned l.size l.align $ \p -> fillBytes p 0 l.size >> act (castPtr p)
+
 -- | Call a @…_buf@ function twice, as its protocol says: with a null buffer
 -- for the size, which must be @GHOSTTY_OUT_OF_SPACE@ (or success when the
 -- output is empty), then with a buffer of that size.
 --
--- The buffer's element type is the header's (@uint8_t@ or @char@), so it is
--- left open.
+-- The buffer's element type is the header's (@uint8_t@ for bytes, @uint32_t@
+-- for codepoints), so it is left open.
 bytesVia :: (Ptr c -> CSize -> Ptr CSize -> IO GhosttyResult) -> IO ByteString
 bytesVia call = alloca $ \np -> do
   call nullPtr 0 np >>= \case

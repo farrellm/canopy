@@ -39,7 +39,7 @@ module Ghostty.FFI.Osc
   )
 where
 
-import Foreign.C.Types (CBool (..), CInt (..))
+import Foreign.C.Types (CInt (..))
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (Storable (..))
 import Ghostty.FFI.Allocator (GhosttyAllocator)
@@ -120,7 +120,7 @@ foreign import capi unsafe "ghostty/vt.h ghostty_osc_command_type"
 
 -- | @ghostty_osc_command_data@: read one datum of a command into the out
 -- pointer, whose type depends on the datum ('GhosttyOscCommandData' says
--- which). False if the command has no such datum. @unsafe@: it does not call
--- back into Haskell.
+-- which). @GHOSTTY_NO_VALUE@ if the command has no such datum. @unsafe@: it
+-- does not call back into Haskell.
 foreign import capi unsafe "ghostty/vt.h ghostty_osc_command_data"
-  ghosttyOscCommandData :: GhosttyOscCommand -> GhosttyOscCommandData -> Ptr () -> IO CBool
+  ghosttyOscCommandData :: GhosttyOscCommand -> GhosttyOscCommandData -> Ptr () -> IO GhosttyResult

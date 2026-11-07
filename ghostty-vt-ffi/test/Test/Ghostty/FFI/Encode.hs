@@ -9,7 +9,6 @@ module Test.Ghostty.FFI.Encode (tests) where
 
 import Control.Exception (bracket)
 import Data.ByteString qualified as BS
-import Foreign.C.ConstPtr (ConstPtr (..))
 import Foreign.C.String (CString, withCString)
 import Foreign.C.Types (CBool)
 import Foreign.Marshal.Alloc (alloca)
@@ -48,24 +47,29 @@ tests =
         "keys"
         [ testCase "a key event keeps what is set on it" $
             withKeyEvent $ \e -> do
-              ghosttyKeyEventSetAction e GhosttyKeyActionRepeat
-              ghosttyKeyEventSetKey e GhosttyKeyF5
-              ghosttyKeyEventSetMods e (GhosttyModsCtrl + GhosttyModsCtrlSide)
-              ghosttyKeyEventSetConsumedMods e GhosttyModsShift
-              ghosttyKeyEventSetComposing e 1
-              ghosttyKeyEventSetUnshiftedCodepoint e 0x61
+              ghosttyKeyEventSetAction e GhosttyKeyActionRepeat >>= (@?= GhosttySuccess)
+              ghosttyKeyEventSetKey e GhosttyKeyF5 >>= (@?= GhosttySuccess)
+              ghosttyKeyEventSetMods e (GhosttyModsCtrl + GhosttyModsCtrlSide) >>= (@?= GhosttySuccess)
+              ghosttyKeyEventSetConsumedMods e GhosttyModsShift >>= (@?= GhosttySuccess)
+              ghosttyKeyEventSetComposing e 1 >>= (@?= GhosttySuccess)
+              ghosttyKeyEventSetUnshiftedCodepoint e 0x61 >>= (@?= GhosttySuccess)
               ghosttyKeyEventGetAction e >>= (@?= GhosttyKeyActionRepeat)
               ghosttyKeyEventGetKey e >>= (@?= GhosttyKeyF5)
               ghosttyKeyEventGetMods e >>= (@?= GhosttyModsCtrl + GhosttyModsCtrlSide)
               ghosttyKeyEventGetConsumedMods e >>= (@?= GhosttyModsShift)
               ghosttyKeyEventGetComposing e >>= (@?= 1)
               ghosttyKeyEventGetUnshiftedCodepoint e >>= (@?= 0x61)
-              withCString "é" $ \s -> do
-                ghosttyKeyEventSetUtf8 e s 2
-                alloca $ \np -> do
-                  ConstPtr p <- ghosttyKeyEventGetUtf8 e np
-                  n <- peek np
-                  BS.packCStringLen (p, fromIntegral n) >>= (@?= "\xc3\xa9"),
+              BS.useAsCStringLen "\xc3\xa9" $ \(s, n) -> do
+                with (GhosttyString (castPtr s) (fromIntegral n)) (ghosttyKeyEventSetUtf8 e) >>= (@?= GhosttySuccess)
+                utf8 e >>= (@?= "\xc3\xa9")
+                -- A string of length zero clears the text; its pointer is not read.
+                with (GhosttyString nullPtr 0) (ghosttyKeyEventSetUtf8 e) >>= (@?= GhosttySuccess)
+                utf8 e >>= (@?= ""),
+          testCase "a key event refuses a key it does not know, unchanged" $
+            withKeyEvent $ \e -> do
+              ghosttyKeyEventSetKey e GhosttyKeyF5 >>= (@?= GhosttySuccess)
+              ghosttyKeyEventSetKey e (GhosttyKey 0x7fff) >>= (@?= GhosttyInvalidValue)
+              ghosttyKeyEventGetKey e >>= (@?= GhosttyKeyF5),
           testCase "legacy: text, Ctrl-C, an arrow" $
             withKeyEncoder $ \enc -> do
               keyBytes enc GhosttyKeyA 0 (Just "a") >>= (@?= "a")
@@ -74,51 +78,54 @@ tests =
           testCase "options from a terminal: cursor-key application mode (DECCKM)" $
             withTerminal 80 24 $ \t -> withKeyEncoder $ \enc -> do
               feed t "\ESC[?1h"
-              ghosttyKeyEncoderSetoptFromTerminal enc t
+              ghosttyKeyEncoderSetFromTerminal enc t >>= (@?= GhosttySuccess)
               keyBytes enc GhosttyKeyArrowUp 0 Nothing >>= (@?= "\ESCOA"),
           testCase "an option set directly: the Kitty protocol's disambiguate flag" $
             withKeyEncoder $ \enc -> do
               with GhosttyKittyKeyDisambiguate $ \v ->
-                ghosttyKeyEncoderSetopt enc GhosttyKeyEncoderOptKittyFlags (castPtr v)
+                ghosttyKeyEncoderSet enc GhosttyKeyEncoderOptKittyFlags (castPtr v) >>= (@?= GhosttySuccess)
               keyBytes enc GhosttyKeyEscape 0 Nothing >>= (@?= "\ESC[27u")
+              -- A null value restores the default: no Kitty flags.
+              ghosttyKeyEncoderSet enc GhosttyKeyEncoderOptKittyFlags nullPtr >>= (@?= GhosttySuccess)
+              keyBytes enc GhosttyKeyEscape 0 Nothing >>= (@?= "\ESC")
         ],
       testGroup
         "mice"
         [ testCase "the position shims set and get a position" $
             withMouseEvent $ \e -> do
-              with (GhosttyMousePosition 12.5 3.25) (ghosttyMouseEventSetPosition e)
+              with (GhosttyMousePosition 12.5 3.25) (ghosttyMouseEventSetPosition e) >>= (@?= GhosttySuccess)
               alloca $ \pp -> do
                 ghosttyMouseEventGetPosition e pp
                 peek pp >>= (@?= GhosttyMousePosition 12.5 3.25),
           testCase "a mouse event keeps its button, or none" $
             withMouseEvent $ \e -> do
-              ghosttyMouseEventSetButton e GhosttyMouseButtonRight
+              ghosttyMouseEventSetButton e GhosttyMouseButtonRight >>= (@?= GhosttySuccess)
               alloca $ \bp -> do
-                ghosttyMouseEventGetButton e bp >>= (@?= 1)
+                ghosttyMouseEventGetButton e bp >>= (@?= GhosttySuccess)
                 peek bp >>= (@?= GhosttyMouseButtonRight)
-              ghosttyMouseEventClearButton e
-              ghosttyMouseEventGetButton e nullPtr >>= (@?= 0)
-              ghosttyMouseEventSetMods e GhosttyModsAlt
+                ghosttyMouseEventClearButton e >>= (@?= GhosttySuccess)
+                ghosttyMouseEventGetButton e bp >>= (@?= GhosttyNoValue)
+              ghosttyMouseEventSetMods e GhosttyModsAlt >>= (@?= GhosttySuccess)
               ghosttyMouseEventGetMods e >>= (@?= GhosttyModsAlt),
           testCase "SGR: a left press, in cells counted from 1" $
             withMouseEncoder $ \enc -> withMouseEvent $ \e -> do
               setMouseOpt enc GhosttyMouseEncoderOptEvent GhosttyMouseTrackingNormal
               setMouseOpt enc GhosttyMouseEncoderOptFormat GhosttyMouseFormatSgr
               setMouseOpt enc GhosttyMouseEncoderOptSize (GhosttyMouseEncoderSize 0x28 800 480 10 20 0 0 0 0)
-              ghosttyMouseEventSetAction e GhosttyMouseActionPress
-              ghosttyMouseEventSetButton e GhosttyMouseButtonLeft
-              with (GhosttyMousePosition 25 45) (ghosttyMouseEventSetPosition e)
+              ghosttyMouseEventSetAction e GhosttyMouseActionPress >>= (@?= GhosttySuccess)
+              ghosttyMouseEventSetButton e GhosttyMouseButtonLeft >>= (@?= GhosttySuccess)
+              with (GhosttyMousePosition 25 45) (ghosttyMouseEventSetPosition e) >>= (@?= GhosttySuccess)
               bytesVia (ghosttyMouseEncoderEncode enc e) >>= (@?= "\ESC[<0;3;3M"),
           testCase "options from a terminal: no tracking until the program asks" $
             withTerminal 80 24 $ \t -> withMouseEncoder $ \enc -> withMouseEvent $ \e -> do
               setMouseOpt enc GhosttyMouseEncoderOptSize (GhosttyMouseEncoderSize 0x28 800 480 10 20 0 0 0 0)
-              ghosttyMouseEventSetAction e GhosttyMouseActionPress
-              ghosttyMouseEventSetButton e GhosttyMouseButtonLeft
-              ghosttyMouseEncoderSetoptFromTerminal enc t
+              ghosttyMouseEventSetAction e GhosttyMouseActionPress >>= (@?= GhosttySuccess)
+              ghosttyMouseEventSetButton e GhosttyMouseButtonLeft >>= (@?= GhosttySuccess)
+              ghosttyMouseEncoderSetFromTerminal enc t >>= (@?= GhosttySuccess)
               bytesVia (ghosttyMouseEncoderEncode enc e) >>= (@?= "")
               feed t "\ESC[?1000h\ESC[?1006h"
-              ghosttyMouseEncoderSetoptFromTerminal enc t
-              ghosttyMouseEncoderReset enc
+              ghosttyMouseEncoderSetFromTerminal enc t >>= (@?= GhosttySuccess)
+              ghosttyMouseEncoderReset enc >>= (@?= GhosttySuccess)
               bytesVia (ghosttyMouseEncoderEncode enc e) >>= (@?= "\ESC[<0;1;1M")
         ],
       testGroup
@@ -130,7 +137,7 @@ tests =
             with (GhosttySizeReportSize 24 80 9 18) $ \sp ->
               bytesVia (ghosttySizeReportEncode GhosttySizeReportCsi18T sp) >>= (@?= "\ESC[8;24;80t"),
           testCase "mode reports, DEC private and ANSI" $ do
-            bytesVia (ghosttyModeReportEncode GhosttyModeDecckm GhosttyModeReportSet) >>= (@?= "\ESC[?1;1$y")
+            bytesVia (ghosttyModeReportEncode GhosttyModeCursorKeys GhosttyModeReportSet) >>= (@?= "\ESC[?1;1$y")
             bytesVia (ghosttyModeReportEncode GhosttyModeInsert GhosttyModeReportReset) >>= (@?= "\ESC[4;2$y"),
           testCase "a colour-scheme report" $
             bytesVia (ghosttyColorSchemeReportEncode GhosttyColorSchemeDark) >>= (@?= "\ESC[?997;1n")
@@ -171,13 +178,19 @@ withKeyEncoder = bracket (newHandle ghosttyKeyEncoderNew) ghosttyKeyEncoderFree
 -- | A key press, with its text if it has any.
 keyBytes :: GhosttyKeyEncoder -> GhosttyKey -> GhosttyMods -> Maybe ByteString -> IO ByteString
 keyBytes enc key mods text = withKeyEvent $ \e -> do
-  ghosttyKeyEventSetAction e GhosttyKeyActionPress
-  ghosttyKeyEventSetKey e key
-  ghosttyKeyEventSetMods e mods
+  ghosttyKeyEventSetAction e GhosttyKeyActionPress >>= (@?= GhosttySuccess)
+  ghosttyKeyEventSetKey e key >>= (@?= GhosttySuccess)
+  ghosttyKeyEventSetMods e mods >>= (@?= GhosttySuccess)
   let encode = bytesVia (ghosttyKeyEncoderEncode enc e)
   case text of
     Nothing -> encode
-    Just b -> BS.useAsCStringLen b $ \(p, n) -> ghosttyKeyEventSetUtf8 e p (fromIntegral n) >> encode
+    Just b -> BS.useAsCStringLen b $ \(p, n) -> do
+      with (GhosttyString (castPtr p) (fromIntegral n)) (ghosttyKeyEventSetUtf8 e) >>= (@?= GhosttySuccess)
+      encode
+
+-- | A key event's text, copied out.
+utf8 :: GhosttyKeyEvent -> IO ByteString
+utf8 e = alloca $ \sp -> ghosttyKeyEventGetUtf8 e sp >> peek sp >>= ghosttyStringBytes
 
 -- * Mice
 
@@ -188,7 +201,7 @@ withMouseEncoder :: (GhosttyMouseEncoder -> IO a) -> IO a
 withMouseEncoder = bracket (newHandle ghosttyMouseEncoderNew) ghosttyMouseEncoderFree
 
 setMouseOpt :: (Storable a) => GhosttyMouseEncoder -> GhosttyMouseEncoderOption -> a -> IO ()
-setMouseOpt enc o v = with v $ \p -> ghosttyMouseEncoderSetopt enc o (castPtr p)
+setMouseOpt enc o v = with v $ \p -> ghosttyMouseEncoderSet enc o (castPtr p) >>= (@?= GhosttySuccess)
 
 -- * Paste
 

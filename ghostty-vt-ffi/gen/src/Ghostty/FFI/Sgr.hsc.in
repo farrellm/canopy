@@ -282,10 +282,8 @@ foreign import capi unsafe "gvtffi_shims.h gvtffi_sgr_unknown_partial"
   ghosttySgrUnknownPartial :: Ptr GhosttySgrUnknown -> Ptr (ConstPtr Word16) -> IO CSize
 
 -- | @ghostty_sgr_attribute_tag@: an attribute's tag. For a binding that cannot
--- read struct fields. The C function takes the attribute by value, so this
--- calls a pointer shim (@gvtffi_shims.h@, §3.3). @unsafe@: it does not call
--- back into Haskell.
-foreign import capi unsafe "gvtffi_shims.h gvtffi_sgr_attribute_tag"
+-- read struct fields. @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_sgr_attribute_tag"
   ghosttySgrAttributeTag :: Ptr GhosttySgrAttribute -> IO GhosttySgrAttributeTag
 
 -- | @ghostty_sgr_attribute_value@: the address of an attribute's value union,

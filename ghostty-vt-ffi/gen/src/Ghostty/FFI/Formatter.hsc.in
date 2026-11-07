@@ -1,11 +1,16 @@
 {-# LANGUAGE CApiFFI #-}
 {-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE ViewPatterns #-}
 
 -- | @include/ghostty/vt/formatter.h@: formatting a terminal's active screen,
 -- or a selection of it, as plain text, VT sequences or HTML.
 --
 -- A formatter borrows its terminal, which must outlive it, and reads the
--- terminal's current state at each format call. The output format is
+-- terminal's current state at each format call. Its options are keyed, set
+-- with 'ghosttyFormatterSet' and read with 'ghosttyFormatterGet'; a new
+-- formatter starts with the library's defaults, listed on
+-- 'GhosttyFormatterOption'. The output format is
 -- 'Ghostty.FFI.Types.GhosttyFormatterFormat'.
 --
 -- __@safe@ and @unsafe@.__ 'ghosttyFormatterFormat' calls its writer, so it is
@@ -13,35 +18,37 @@
 -- format walks the whole screen including the scrollback, which can be
 -- large, and an @unsafe@ call that long would hold up every other Haskell
 -- thread at the next garbage collection (as 'Ghostty.FFI.Terminal.ghosttyTerminalCompress').
--- Creating and freeing a formatter are @unsafe@.
+-- Creating and freeing a formatter, and setting and reading its options, are
+-- @unsafe@.
 module Ghostty.FFI.Formatter
   ( -- * Handles
     GhosttyFormatter (..),
     GhosttyFormatterImpl,
 
     -- * Options
-    {{xstruct formatter.h GhosttyFormatterScreenExtra}}
-    {{xstruct formatter.h GhosttyFormatterTerminalExtra}}
-    {{xstruct formatter.h GhosttyFormatterTerminalOptions}}
+    {{xenum formatter.h GhosttyFormatterOption}}
+    GhosttyFormatterExtras,
+    {{xdefines formatter.h GhosttyFormatterExtras GHOSTTY_FORMATTER_EXTRA}}
 
     -- * Formatters
     ghosttyFormatterTerminalNew,
     ghosttyFormatterFree,
+    ghosttyFormatterSet,
+    ghosttyFormatterGet,
     ghosttyFormatterFormat,
     ghosttyFormatterFormatBuf,
     ghosttyFormatterFormatAlloc,
   )
 where
 
-import Foreign.C.Types (CBool (..), CInt (..), CSize (..))
+import Foreign.C.Types (CInt (..), CSize (..))
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (Storable (..))
 import Ghostty.FFI.Allocator (GhosttyAllocator)
 import Ghostty.FFI.Io (GhosttyWriter)
-import Ghostty.FFI.Layout (CField (..), CStruct (..))
-import Ghostty.FFI.Selection (GhosttySelection)
+import Ghostty.FFI.Layout (CEnum (..), unnamed)
 import Ghostty.FFI.Terminal.Handle (GhosttyTerminal (..))
-import Ghostty.FFI.Types (GhosttyFormatterFormat (..), GhosttyResult (..))
+import Ghostty.FFI.Types (GhosttyResult (..))
 
 #include <gvtffi_shims.h>
 
@@ -58,17 +65,33 @@ newtype GhosttyFormatter = GhosttyFormatter (Ptr GhosttyFormatterImpl)
 
 -- * Options
 
-{{struct formatter.h GhosttyFormatterScreenExtra}}
-{{struct formatter.h GhosttyFormatterTerminalExtra}}
-{{struct formatter.h GhosttyFormatterTerminalOptions}}
+{{enumT formatter.h GhosttyFormatterOption}}
+-- | @GhosttyFormatterExtras@: terminal state to add to VT output, a bit set
+-- of the @GHOSTTY_FORMATTER_EXTRA_*@ flags below. Plain text and HTML ignore
+-- it.
+type GhosttyFormatterExtras = Word32
+
+{{defines formatter.h GhosttyFormatterExtras GHOSTTY_FORMATTER_EXTRA}}
 -- * Formatters
 
 -- | @ghostty_formatter_terminal_new@: a formatter for a terminal's active
--- screen, with the allocator (null for the default). The C function takes the
--- options by value, so this calls a pointer shim (@gvtffi_shims.h@, §3.3).
--- @unsafe@: it does not call back into Haskell.
-foreign import capi unsafe "gvtffi_shims.h gvtffi_formatter_terminal_new"
-  ghosttyFormatterTerminalNew :: Ptr GhosttyAllocator -> Ptr GhosttyFormatter -> GhosttyTerminal -> Ptr GhosttyFormatterTerminalOptions -> IO GhosttyResult
+-- screen, with the allocator (null for the default), starting with every
+-- option at its default. @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_formatter_terminal_new"
+  ghosttyFormatterTerminalNew :: Ptr GhosttyAllocator -> Ptr GhosttyFormatter -> GhosttyTerminal -> IO GhosttyResult
+
+-- | @ghostty_formatter_set@: set an option from a pointer to its value type
+-- ('GhosttyFormatterOption' names it), which the formatter copies; null puts
+-- the option back to its default. @unsafe@: it does not call back into
+-- Haskell, and copies one value.
+foreign import capi unsafe "ghostty/vt.h ghostty_formatter_set"
+  ghosttyFormatterSet :: GhosttyFormatter -> GhosttyFormatterOption -> Ptr () -> IO GhosttyResult
+
+-- | @ghostty_formatter_get@: read an option into a pointer to its value type;
+-- @GHOSTTY_NO_VALUE@ for an unset selection. @unsafe@: it does not call back
+-- into Haskell, and copies one value.
+foreign import capi unsafe "ghostty/vt.h ghostty_formatter_get"
+  ghosttyFormatterGet :: GhosttyFormatter -> GhosttyFormatterOption -> Ptr () -> IO GhosttyResult
 
 -- | @ghostty_formatter_free@ (null is a no-op). @unsafe@: it does not call back
 -- into Haskell.
@@ -84,7 +107,8 @@ foreign import capi safe "gvtffi_shims.h gvtffi_formatter_format"
   ghosttyFormatterFormat :: GhosttyFormatter -> Ptr GhosttyWriter -> IO GhosttyResult
 
 -- | @ghostty_formatter_format_buf@: format into a buffer; a null buffer, or
--- one too small, returns @GHOSTTY_OUT_OF_SPACE@ with the size needed.
+-- one too small, returns @GHOSTTY_OUT_OF_SPACE@ with the size needed, except
+-- that empty output is @GHOSTTY_SUCCESS@ with 0.
 -- @safe@: it calls nothing back, but a format can take long (above).
 foreign import capi safe "ghostty/vt.h ghostty_formatter_format_buf"
   ghosttyFormatterFormatBuf :: GhosttyFormatter -> Ptr Word8 -> CSize -> Ptr CSize -> IO GhosttyResult

@@ -17,18 +17,18 @@ module Ghostty.FFI.Modes
     ghosttyModeAnsi,
 
     -- * Named modes
-    pattern GhosttyModeKam,
+    pattern GhosttyModeDisableKeyboard,
     pattern GhosttyModeInsert,
-    pattern GhosttyModeSrm,
+    pattern GhosttyModeSendReceiveMode,
     pattern GhosttyModeLinefeed,
-    pattern GhosttyModeDecckm,
+    pattern GhosttyModeCursorKeys,
     pattern GhosttyMode132Column,
     pattern GhosttyModeSlowScroll,
     pattern GhosttyModeReverseColors,
     pattern GhosttyModeOrigin,
     pattern GhosttyModeWraparound,
     pattern GhosttyModeAutorepeat,
-    pattern GhosttyModeX10Mouse,
+    pattern GhosttyModeMouseEventX10,
     pattern GhosttyModeCursorBlinking,
     pattern GhosttyModeCursorVisible,
     pattern GhosttyModeEnableMode3,
@@ -36,30 +36,30 @@ module Ghostty.FFI.Modes
     pattern GhosttyModeAltScreenLegacy,
     pattern GhosttyModeKeypadKeys,
     pattern GhosttyModeBackarrowKeyMode,
-    pattern GhosttyModeLeftRightMargin,
-    pattern GhosttyModeNormalMouse,
-    pattern GhosttyModeButtonMouse,
-    pattern GhosttyModeAnyMouse,
+    pattern GhosttyModeEnableLeftAndRightMargin,
+    pattern GhosttyModeMouseEventNormal,
+    pattern GhosttyModeMouseEventButton,
+    pattern GhosttyModeMouseEventAny,
     pattern GhosttyModeFocusEvent,
-    pattern GhosttyModeUtf8Mouse,
-    pattern GhosttyModeSgrMouse,
-    pattern GhosttyModeAltScroll,
-    pattern GhosttyModeUrxvtMouse,
-    pattern GhosttyModeSgrPixelsMouse,
-    pattern GhosttyModeNumlockKeypad,
+    pattern GhosttyModeMouseFormatUtf8,
+    pattern GhosttyModeMouseFormatSgr,
+    pattern GhosttyModeMouseAlternateScroll,
+    pattern GhosttyModeMouseFormatUrxvt,
+    pattern GhosttyModeMouseFormatSgrPixels,
+    pattern GhosttyModeIgnoreKeypadWithNumlock,
     pattern GhosttyModeAltEscPrefix,
-    pattern GhosttyModeAltSendsEsc,
-    pattern GhosttyModeReverseWrapExt,
+    pattern GhosttyModeAltSendsEscape,
+    pattern GhosttyModeReverseWrapExtended,
     pattern GhosttyModeAltScreen,
     pattern GhosttyModeSaveCursor,
-    pattern GhosttyModeAltScreenSave,
+    pattern GhosttyModeAltScreenSaveCursorClearEnter,
     pattern GhosttyModeBracketedPaste,
-    pattern GhosttyModeSyncOutput,
+    pattern GhosttyModeSynchronizedOutput,
     pattern GhosttyModeGraphemeCluster,
-    pattern GhosttyModeColorSchemeReport,
-    pattern GhosttyModeVisibilityReport,
-    pattern GhosttyModeInBandResize,
-    pattern GhosttyModePasteEvents,
+    pattern GhosttyModeReportColorScheme,
+    pattern GhosttyModeReportVisibility,
+    pattern GhosttyModeInBandSizeReports,
+    pattern GhosttyModeKittyPasteEvents,
 
     -- * Mode reports
     GhosttyModeReportState (..),
@@ -74,7 +74,7 @@ module Ghostty.FFI.Modes
   )
 where
 
-import Foreign.C.Types (CBool (..), CChar, CInt (..), CSize (..))
+import Foreign.C.Types (CBool (..), CInt (..), CSize (..))
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (Storable (..))
 import Ghostty.FFI.Layout (CEnum (..), unnamed)
@@ -102,25 +102,25 @@ foreign import capi unsafe "ghostty/vt.h ghostty_mode_value"
 foreign import capi unsafe "ghostty/vt.h ghostty_mode_ansi"
   ghosttyModeAnsi :: GhosttyMode -> CBool
 
--- | @GHOSTTY_MODE_KAM@: Keyboard action (disable keyboard) (ANSI mode 2).
-pattern GhosttyModeKam :: GhosttyMode
-pattern GhosttyModeKam = (#const GHOSTTY_MODE_KAM)
+-- | @GHOSTTY_MODE_DISABLE_KEYBOARD@: Keyboard action (disable keyboard) (ANSI mode 2).
+pattern GhosttyModeDisableKeyboard :: GhosttyMode
+pattern GhosttyModeDisableKeyboard = (#const GHOSTTY_MODE_DISABLE_KEYBOARD)
 
 -- | @GHOSTTY_MODE_INSERT@: Insert mode (ANSI mode 4).
 pattern GhosttyModeInsert :: GhosttyMode
 pattern GhosttyModeInsert = (#const GHOSTTY_MODE_INSERT)
 
--- | @GHOSTTY_MODE_SRM@: Send\/receive mode (ANSI mode 12).
-pattern GhosttyModeSrm :: GhosttyMode
-pattern GhosttyModeSrm = (#const GHOSTTY_MODE_SRM)
+-- | @GHOSTTY_MODE_SEND_RECEIVE_MODE@: Send\/receive mode (ANSI mode 12).
+pattern GhosttyModeSendReceiveMode :: GhosttyMode
+pattern GhosttyModeSendReceiveMode = (#const GHOSTTY_MODE_SEND_RECEIVE_MODE)
 
 -- | @GHOSTTY_MODE_LINEFEED@: Linefeed\/new line mode (ANSI mode 20).
 pattern GhosttyModeLinefeed :: GhosttyMode
 pattern GhosttyModeLinefeed = (#const GHOSTTY_MODE_LINEFEED)
 
--- | @GHOSTTY_MODE_DECCKM@: Cursor keys (DEC private mode 1).
-pattern GhosttyModeDecckm :: GhosttyMode
-pattern GhosttyModeDecckm = (#const GHOSTTY_MODE_DECCKM)
+-- | @GHOSTTY_MODE_CURSOR_KEYS@: Cursor keys (DEC private mode 1).
+pattern GhosttyModeCursorKeys :: GhosttyMode
+pattern GhosttyModeCursorKeys = (#const GHOSTTY_MODE_CURSOR_KEYS)
 
 -- | @GHOSTTY_MODE_132_COLUMN@: 132\/80 column mode (DEC private mode 3).
 pattern GhosttyMode132Column :: GhosttyMode
@@ -146,9 +146,9 @@ pattern GhosttyModeWraparound = (#const GHOSTTY_MODE_WRAPAROUND)
 pattern GhosttyModeAutorepeat :: GhosttyMode
 pattern GhosttyModeAutorepeat = (#const GHOSTTY_MODE_AUTOREPEAT)
 
--- | @GHOSTTY_MODE_X10_MOUSE@: X10 mouse reporting (DEC private mode 9).
-pattern GhosttyModeX10Mouse :: GhosttyMode
-pattern GhosttyModeX10Mouse = (#const GHOSTTY_MODE_X10_MOUSE)
+-- | @GHOSTTY_MODE_MOUSE_EVENT_X10@: X10 mouse reporting (DEC private mode 9).
+pattern GhosttyModeMouseEventX10 :: GhosttyMode
+pattern GhosttyModeMouseEventX10 = (#const GHOSTTY_MODE_MOUSE_EVENT_X10)
 
 -- | @GHOSTTY_MODE_CURSOR_BLINKING@: Cursor blink (DEC private mode 12).
 pattern GhosttyModeCursorBlinking :: GhosttyMode
@@ -178,61 +178,61 @@ pattern GhosttyModeKeypadKeys = (#const GHOSTTY_MODE_KEYPAD_KEYS)
 pattern GhosttyModeBackarrowKeyMode :: GhosttyMode
 pattern GhosttyModeBackarrowKeyMode = (#const GHOSTTY_MODE_BACKARROW_KEY_MODE)
 
--- | @GHOSTTY_MODE_LEFT_RIGHT_MARGIN@: Left\/right margin mode (DEC private mode 69).
-pattern GhosttyModeLeftRightMargin :: GhosttyMode
-pattern GhosttyModeLeftRightMargin = (#const GHOSTTY_MODE_LEFT_RIGHT_MARGIN)
+-- | @GHOSTTY_MODE_ENABLE_LEFT_AND_RIGHT_MARGIN@: Left\/right margin mode (DEC private mode 69).
+pattern GhosttyModeEnableLeftAndRightMargin :: GhosttyMode
+pattern GhosttyModeEnableLeftAndRightMargin = (#const GHOSTTY_MODE_ENABLE_LEFT_AND_RIGHT_MARGIN)
 
--- | @GHOSTTY_MODE_NORMAL_MOUSE@: Normal mouse tracking (DEC private mode 1000).
-pattern GhosttyModeNormalMouse :: GhosttyMode
-pattern GhosttyModeNormalMouse = (#const GHOSTTY_MODE_NORMAL_MOUSE)
+-- | @GHOSTTY_MODE_MOUSE_EVENT_NORMAL@: Normal mouse tracking (DEC private mode 1000).
+pattern GhosttyModeMouseEventNormal :: GhosttyMode
+pattern GhosttyModeMouseEventNormal = (#const GHOSTTY_MODE_MOUSE_EVENT_NORMAL)
 
--- | @GHOSTTY_MODE_BUTTON_MOUSE@: Button-event mouse tracking (DEC private mode 1002).
-pattern GhosttyModeButtonMouse :: GhosttyMode
-pattern GhosttyModeButtonMouse = (#const GHOSTTY_MODE_BUTTON_MOUSE)
+-- | @GHOSTTY_MODE_MOUSE_EVENT_BUTTON@: Button-event mouse tracking (DEC private mode 1002).
+pattern GhosttyModeMouseEventButton :: GhosttyMode
+pattern GhosttyModeMouseEventButton = (#const GHOSTTY_MODE_MOUSE_EVENT_BUTTON)
 
--- | @GHOSTTY_MODE_ANY_MOUSE@: Any-event mouse tracking (DEC private mode 1003).
-pattern GhosttyModeAnyMouse :: GhosttyMode
-pattern GhosttyModeAnyMouse = (#const GHOSTTY_MODE_ANY_MOUSE)
+-- | @GHOSTTY_MODE_MOUSE_EVENT_ANY@: Any-event mouse tracking (DEC private mode 1003).
+pattern GhosttyModeMouseEventAny :: GhosttyMode
+pattern GhosttyModeMouseEventAny = (#const GHOSTTY_MODE_MOUSE_EVENT_ANY)
 
 -- | @GHOSTTY_MODE_FOCUS_EVENT@: Focus in\/out events (DEC private mode 1004).
 pattern GhosttyModeFocusEvent :: GhosttyMode
 pattern GhosttyModeFocusEvent = (#const GHOSTTY_MODE_FOCUS_EVENT)
 
--- | @GHOSTTY_MODE_UTF8_MOUSE@: UTF-8 mouse format (DEC private mode 1005).
-pattern GhosttyModeUtf8Mouse :: GhosttyMode
-pattern GhosttyModeUtf8Mouse = (#const GHOSTTY_MODE_UTF8_MOUSE)
+-- | @GHOSTTY_MODE_MOUSE_FORMAT_UTF8@: UTF-8 mouse format (DEC private mode 1005).
+pattern GhosttyModeMouseFormatUtf8 :: GhosttyMode
+pattern GhosttyModeMouseFormatUtf8 = (#const GHOSTTY_MODE_MOUSE_FORMAT_UTF8)
 
--- | @GHOSTTY_MODE_SGR_MOUSE@: SGR mouse format (DEC private mode 1006).
-pattern GhosttyModeSgrMouse :: GhosttyMode
-pattern GhosttyModeSgrMouse = (#const GHOSTTY_MODE_SGR_MOUSE)
+-- | @GHOSTTY_MODE_MOUSE_FORMAT_SGR@: SGR mouse format (DEC private mode 1006).
+pattern GhosttyModeMouseFormatSgr :: GhosttyMode
+pattern GhosttyModeMouseFormatSgr = (#const GHOSTTY_MODE_MOUSE_FORMAT_SGR)
 
--- | @GHOSTTY_MODE_ALT_SCROLL@: Alternate scroll mode (DEC private mode 1007).
-pattern GhosttyModeAltScroll :: GhosttyMode
-pattern GhosttyModeAltScroll = (#const GHOSTTY_MODE_ALT_SCROLL)
+-- | @GHOSTTY_MODE_MOUSE_ALTERNATE_SCROLL@: Alternate scroll mode (DEC private mode 1007).
+pattern GhosttyModeMouseAlternateScroll :: GhosttyMode
+pattern GhosttyModeMouseAlternateScroll = (#const GHOSTTY_MODE_MOUSE_ALTERNATE_SCROLL)
 
--- | @GHOSTTY_MODE_URXVT_MOUSE@: URxvt mouse format (DEC private mode 1015).
-pattern GhosttyModeUrxvtMouse :: GhosttyMode
-pattern GhosttyModeUrxvtMouse = (#const GHOSTTY_MODE_URXVT_MOUSE)
+-- | @GHOSTTY_MODE_MOUSE_FORMAT_URXVT@: URxvt mouse format (DEC private mode 1015).
+pattern GhosttyModeMouseFormatUrxvt :: GhosttyMode
+pattern GhosttyModeMouseFormatUrxvt = (#const GHOSTTY_MODE_MOUSE_FORMAT_URXVT)
 
--- | @GHOSTTY_MODE_SGR_PIXELS_MOUSE@: SGR-Pixels mouse format (DEC private mode 1016).
-pattern GhosttyModeSgrPixelsMouse :: GhosttyMode
-pattern GhosttyModeSgrPixelsMouse = (#const GHOSTTY_MODE_SGR_PIXELS_MOUSE)
+-- | @GHOSTTY_MODE_MOUSE_FORMAT_SGR_PIXELS@: SGR-Pixels mouse format (DEC private mode 1016).
+pattern GhosttyModeMouseFormatSgrPixels :: GhosttyMode
+pattern GhosttyModeMouseFormatSgrPixels = (#const GHOSTTY_MODE_MOUSE_FORMAT_SGR_PIXELS)
 
--- | @GHOSTTY_MODE_NUMLOCK_KEYPAD@: Ignore keypad with NumLock (DEC private mode 1035).
-pattern GhosttyModeNumlockKeypad :: GhosttyMode
-pattern GhosttyModeNumlockKeypad = (#const GHOSTTY_MODE_NUMLOCK_KEYPAD)
+-- | @GHOSTTY_MODE_IGNORE_KEYPAD_WITH_NUMLOCK@: Ignore keypad with NumLock (DEC private mode 1035).
+pattern GhosttyModeIgnoreKeypadWithNumlock :: GhosttyMode
+pattern GhosttyModeIgnoreKeypadWithNumlock = (#const GHOSTTY_MODE_IGNORE_KEYPAD_WITH_NUMLOCK)
 
 -- | @GHOSTTY_MODE_ALT_ESC_PREFIX@: Alt key sends ESC prefix (DEC private mode 1036).
 pattern GhosttyModeAltEscPrefix :: GhosttyMode
 pattern GhosttyModeAltEscPrefix = (#const GHOSTTY_MODE_ALT_ESC_PREFIX)
 
--- | @GHOSTTY_MODE_ALT_SENDS_ESC@: Alt sends escape (DEC private mode 1039).
-pattern GhosttyModeAltSendsEsc :: GhosttyMode
-pattern GhosttyModeAltSendsEsc = (#const GHOSTTY_MODE_ALT_SENDS_ESC)
+-- | @GHOSTTY_MODE_ALT_SENDS_ESCAPE@: Alt sends escape (DEC private mode 1039).
+pattern GhosttyModeAltSendsEscape :: GhosttyMode
+pattern GhosttyModeAltSendsEscape = (#const GHOSTTY_MODE_ALT_SENDS_ESCAPE)
 
--- | @GHOSTTY_MODE_REVERSE_WRAP_EXT@: Extended reverse wrap (DEC private mode 1045).
-pattern GhosttyModeReverseWrapExt :: GhosttyMode
-pattern GhosttyModeReverseWrapExt = (#const GHOSTTY_MODE_REVERSE_WRAP_EXT)
+-- | @GHOSTTY_MODE_REVERSE_WRAP_EXTENDED@: Extended reverse wrap (DEC private mode 1045).
+pattern GhosttyModeReverseWrapExtended :: GhosttyMode
+pattern GhosttyModeReverseWrapExtended = (#const GHOSTTY_MODE_REVERSE_WRAP_EXTENDED)
 
 -- | @GHOSTTY_MODE_ALT_SCREEN@: Alternate screen (DEC private mode 1047).
 pattern GhosttyModeAltScreen :: GhosttyMode
@@ -242,37 +242,37 @@ pattern GhosttyModeAltScreen = (#const GHOSTTY_MODE_ALT_SCREEN)
 pattern GhosttyModeSaveCursor :: GhosttyMode
 pattern GhosttyModeSaveCursor = (#const GHOSTTY_MODE_SAVE_CURSOR)
 
--- | @GHOSTTY_MODE_ALT_SCREEN_SAVE@: Alt screen + save cursor + clear (DEC private mode 1049).
-pattern GhosttyModeAltScreenSave :: GhosttyMode
-pattern GhosttyModeAltScreenSave = (#const GHOSTTY_MODE_ALT_SCREEN_SAVE)
+-- | @GHOSTTY_MODE_ALT_SCREEN_SAVE_CURSOR_CLEAR_ENTER@: Alt screen + save cursor + clear (DEC private mode 1049).
+pattern GhosttyModeAltScreenSaveCursorClearEnter :: GhosttyMode
+pattern GhosttyModeAltScreenSaveCursorClearEnter = (#const GHOSTTY_MODE_ALT_SCREEN_SAVE_CURSOR_CLEAR_ENTER)
 
 -- | @GHOSTTY_MODE_BRACKETED_PASTE@: Bracketed paste mode (DEC private mode 2004).
 pattern GhosttyModeBracketedPaste :: GhosttyMode
 pattern GhosttyModeBracketedPaste = (#const GHOSTTY_MODE_BRACKETED_PASTE)
 
--- | @GHOSTTY_MODE_SYNC_OUTPUT@: Synchronized output (DEC private mode 2026).
-pattern GhosttyModeSyncOutput :: GhosttyMode
-pattern GhosttyModeSyncOutput = (#const GHOSTTY_MODE_SYNC_OUTPUT)
+-- | @GHOSTTY_MODE_SYNCHRONIZED_OUTPUT@: Synchronized output (DEC private mode 2026).
+pattern GhosttyModeSynchronizedOutput :: GhosttyMode
+pattern GhosttyModeSynchronizedOutput = (#const GHOSTTY_MODE_SYNCHRONIZED_OUTPUT)
 
 -- | @GHOSTTY_MODE_GRAPHEME_CLUSTER@: Grapheme cluster mode (DEC private mode 2027).
 pattern GhosttyModeGraphemeCluster :: GhosttyMode
 pattern GhosttyModeGraphemeCluster = (#const GHOSTTY_MODE_GRAPHEME_CLUSTER)
 
--- | @GHOSTTY_MODE_COLOR_SCHEME_REPORT@: Report color scheme (DEC private mode 2031).
-pattern GhosttyModeColorSchemeReport :: GhosttyMode
-pattern GhosttyModeColorSchemeReport = (#const GHOSTTY_MODE_COLOR_SCHEME_REPORT)
+-- | @GHOSTTY_MODE_REPORT_COLOR_SCHEME@: Report color scheme (DEC private mode 2031).
+pattern GhosttyModeReportColorScheme :: GhosttyMode
+pattern GhosttyModeReportColorScheme = (#const GHOSTTY_MODE_REPORT_COLOR_SCHEME)
 
--- | @GHOSTTY_MODE_VISIBILITY_REPORT@: Report terminal visibility (DEC private mode 2033).
-pattern GhosttyModeVisibilityReport :: GhosttyMode
-pattern GhosttyModeVisibilityReport = (#const GHOSTTY_MODE_VISIBILITY_REPORT)
+-- | @GHOSTTY_MODE_REPORT_VISIBILITY@: Report terminal visibility (DEC private mode 2033).
+pattern GhosttyModeReportVisibility :: GhosttyMode
+pattern GhosttyModeReportVisibility = (#const GHOSTTY_MODE_REPORT_VISIBILITY)
 
--- | @GHOSTTY_MODE_IN_BAND_RESIZE@: In-band size reports (DEC private mode 2048).
-pattern GhosttyModeInBandResize :: GhosttyMode
-pattern GhosttyModeInBandResize = (#const GHOSTTY_MODE_IN_BAND_RESIZE)
+-- | @GHOSTTY_MODE_IN_BAND_SIZE_REPORTS@: In-band size reports (DEC private mode 2048).
+pattern GhosttyModeInBandSizeReports :: GhosttyMode
+pattern GhosttyModeInBandSizeReports = (#const GHOSTTY_MODE_IN_BAND_SIZE_REPORTS)
 
--- | @GHOSTTY_MODE_PASTE_EVENTS@: Kitty clipboard protocol paste events (DEC private mode 5522).
-pattern GhosttyModePasteEvents :: GhosttyMode
-pattern GhosttyModePasteEvents = (#const GHOSTTY_MODE_PASTE_EVENTS)
+-- | @GHOSTTY_MODE_KITTY_PASTE_EVENTS@: Kitty clipboard protocol paste events (DEC private mode 5522).
+pattern GhosttyModeKittyPasteEvents :: GhosttyMode
+pattern GhosttyModeKittyPasteEvents = (#const GHOSTTY_MODE_KITTY_PASTE_EVENTS)
 
 -- * Mode reports
 
@@ -337,4 +337,4 @@ ghosttyModeReportStateEnum =
 -- null buffer, or one too small, returns @GHOSTTY_OUT_OF_SPACE@ with the size
 -- needed. @unsafe@: it does not call back into Haskell.
 foreign import capi unsafe "ghostty/vt.h ghostty_mode_report_encode"
-  ghosttyModeReportEncode :: GhosttyMode -> GhosttyModeReportState -> Ptr CChar -> CSize -> Ptr CSize -> IO GhosttyResult
+  ghosttyModeReportEncode :: GhosttyMode -> GhosttyModeReportState -> Ptr Word8 -> CSize -> Ptr CSize -> IO GhosttyResult

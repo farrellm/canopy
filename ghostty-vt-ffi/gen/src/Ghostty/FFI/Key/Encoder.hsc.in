@@ -25,13 +25,13 @@ module Ghostty.FFI.Key.Encoder
     -- * Encoders
     ghosttyKeyEncoderNew,
     ghosttyKeyEncoderFree,
-    ghosttyKeyEncoderSetopt,
-    ghosttyKeyEncoderSetoptFromTerminal,
+    ghosttyKeyEncoderSet,
+    ghosttyKeyEncoderSetFromTerminal,
     ghosttyKeyEncoderEncode,
   )
 where
 
-import Foreign.C.Types (CChar, CInt (..), CSize (..))
+import Foreign.C.Types (CInt (..), CSize (..))
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (Storable (..))
 import Ghostty.FFI.Allocator (GhosttyAllocator)
@@ -78,24 +78,25 @@ foreign import capi unsafe "ghostty/vt.h ghostty_key_encoder_new"
 foreign import capi unsafe "ghostty/vt.h ghostty_key_encoder_free"
   ghosttyKeyEncoderFree :: GhosttyKeyEncoder -> IO ()
 
--- | @ghostty_key_encoder_setopt@: set an option, the value's type depending
--- on the option ('GhosttyKeyEncoderOption' says which). A null value does
--- nothing; it does not restore the default. @unsafe@: it does not call back
--- into Haskell.
-foreign import capi unsafe "ghostty/vt.h ghostty_key_encoder_setopt"
-  ghosttyKeyEncoderSetopt :: GhosttyKeyEncoder -> GhosttyKeyEncoderOption -> Ptr () -> IO ()
+-- | @ghostty_key_encoder_set@: set an option, the value's type depending
+-- on the option ('GhosttyKeyEncoderOption' says which). A null value restores
+-- the option's default. @GHOSTTY_INVALID_VALUE@ for a value out of range.
+-- @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_key_encoder_set"
+  ghosttyKeyEncoderSet :: GhosttyKeyEncoder -> GhosttyKeyEncoderOption -> Ptr () -> IO GhosttyResult
 
--- | @ghostty_key_encoder_setopt_from_terminal@: set every option a terminal's
--- modes and flags decide (cursor and keypad application modes, alt's escape
--- prefix, modifyOtherKeys, the Kitty flags), and reset
+-- | @ghostty_key_encoder_set_from_terminal@: set every option a terminal's
+-- modes and flags decide (cursor and keypad application modes, backarrow
+-- key mode, ignore-keypad-with-numlock, alt's escape prefix,
+-- modifyOtherKeys, the Kitty flags), and reset
 -- @GHOSTTY_KEY_ENCODER_OPT_MACOS_OPTION_AS_ALT@, which no terminal state
 -- decides. @unsafe@: it reads the terminal and calls nothing back.
-foreign import capi unsafe "ghostty/vt.h ghostty_key_encoder_setopt_from_terminal"
-  ghosttyKeyEncoderSetoptFromTerminal :: GhosttyKeyEncoder -> GhosttyTerminal -> IO ()
+foreign import capi unsafe "ghostty/vt.h ghostty_key_encoder_set_from_terminal"
+  ghosttyKeyEncoderSetFromTerminal :: GhosttyKeyEncoder -> GhosttyTerminal -> IO GhosttyResult
 
 -- | @ghostty_key_encoder_encode@: encode an event into a buffer. Some events
 -- encode to nothing (a bare modifier, say). A null buffer, or one too small,
 -- returns @GHOSTTY_OUT_OF_SPACE@ with the size needed. @unsafe@: it does not
 -- call back into Haskell.
 foreign import capi unsafe "ghostty/vt.h ghostty_key_encoder_encode"
-  ghosttyKeyEncoderEncode :: GhosttyKeyEncoder -> GhosttyKeyEvent -> Ptr CChar -> CSize -> Ptr CSize -> IO GhosttyResult
+  ghosttyKeyEncoderEncode :: GhosttyKeyEncoder -> GhosttyKeyEvent -> Ptr Word8 -> CSize -> Ptr CSize -> IO GhosttyResult

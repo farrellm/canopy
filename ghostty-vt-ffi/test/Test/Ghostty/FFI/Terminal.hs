@@ -94,10 +94,23 @@ tests =
         withTerminal 10 3 $ \t -> do
           feed t "0\r\n1\r\n2\r\n3\r\n4\r\n5"
           getBool t GhosttyTerminalDataViewportActive >>= (@?= True)
-          with ScrollViewportTop (ghosttyTerminalScrollViewport t)
+          with ScrollViewportTop (ghosttyTerminalScrollViewport t) >>= (@?= GhosttySuccess)
           getBool t GhosttyTerminalDataViewportActive >>= (@?= False)
-          with (ScrollViewportDelta 100) (ghosttyTerminalScrollViewport t)
+          with (ScrollViewportDelta 100) (ghosttyTerminalScrollViewport t) >>= (@?= GhosttySuccess)
           getBool t GhosttyTerminalDataViewportActive >>= (@?= True),
+      testCase "scroll_viewport refuses a tag it does not know, and does not move" $
+        withTerminal 10 3 $ \t -> do
+          feed t "0\r\n1\r\n2\r\n3\r\n4\r\n5"
+          with (ScrollViewportOther (GhosttyTerminalScrollViewportTag 0x7fff)) (ghosttyTerminalScrollViewport t)
+            >>= (@?= GhosttyInvalidValue)
+          getBool t GhosttyTerminalDataViewportActive >>= (@?= True),
+      testCase "continuation_buf: nothing pending is SUCCESS with 0, even as a size query" $
+        withTerminal 80 24 $ \t -> do
+          with (64 :: CSize) $ setValue t GhosttyTerminalOptContinuationMaxBytes
+          feed t "ok"
+          alloca $ \np -> do
+            ghosttyTerminalContinuationBuf t nullPtr 0 np >>= (@?= GhosttySuccess)
+            peek np >>= (@?= 0),
       testCase "continuation_write (shimmed) agrees with continuation_buf" $
         withTerminal 80 24 $ \t -> do
           with (64 :: CSize) $ setValue t GhosttyTerminalOptContinuationMaxBytes

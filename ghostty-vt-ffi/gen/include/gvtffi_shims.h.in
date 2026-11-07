@@ -35,19 +35,18 @@
 {{shim ghostty_terminal_continuation_write}}
 /* formatter.h, selection.h (M1.3) */
 
-{{shim ghostty_formatter_terminal_new}}
 {{shim ghostty_formatter_format}}
-{{shim ghostty_terminal_select_output}}
-{{shim ghostty_terminal_selection_format_buf}}
-{{shim ghostty_terminal_selection_format_alloc}}
 {{shim ghostty_terminal_selection_contains}}
 
-/* size_report.h, mouse/event.h, sgr.h (M1.3) */
+/* mouse/event.h, sgr.h (M1.3) */
 
-{{shim ghostty_size_report_encode}}
 {{shim ghostty_mouse_event_set_position}}
 {{shim ghostty_mouse_event_get_position}}
 {{shim ghostty_sgr_unknown_full}}
 {{shim ghostty_sgr_unknown_partial}}
-{{shim ghostty_sgr_attribute_tag}}
+
+/* key/event.h (M1.11) */
+
+{{shim ghostty_key_event_set_utf8}}
+{{shim ghostty_key_event_get_utf8}}
 #endif /* GVTFFI_SHIMS_H */

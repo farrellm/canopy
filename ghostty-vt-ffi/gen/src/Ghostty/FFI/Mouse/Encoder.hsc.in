@@ -23,14 +23,14 @@ module Ghostty.FFI.Mouse.Encoder
     -- * Encoders
     ghosttyMouseEncoderNew,
     ghosttyMouseEncoderFree,
-    ghosttyMouseEncoderSetopt,
-    ghosttyMouseEncoderSetoptFromTerminal,
+    ghosttyMouseEncoderSet,
+    ghosttyMouseEncoderSetFromTerminal,
     ghosttyMouseEncoderReset,
     ghosttyMouseEncoderEncode,
   )
 where
 
-import Foreign.C.Types (CChar, CInt (..), CSize (..))
+import Foreign.C.Types (CInt (..), CSize (..))
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (Storable (..))
 import Ghostty.FFI.Allocator (GhosttyAllocator)
@@ -71,26 +71,28 @@ foreign import capi unsafe "ghostty/vt.h ghostty_mouse_encoder_new"
 foreign import capi unsafe "ghostty/vt.h ghostty_mouse_encoder_free"
   ghosttyMouseEncoderFree :: GhosttyMouseEncoder -> IO ()
 
--- | @ghostty_mouse_encoder_setopt@: set an option, the value's type depending
--- on the option ('GhosttyMouseEncoderOption' says which). @unsafe@: it does
--- not call back into Haskell.
-foreign import capi unsafe "ghostty/vt.h ghostty_mouse_encoder_setopt"
-  ghosttyMouseEncoderSetopt :: GhosttyMouseEncoder -> GhosttyMouseEncoderOption -> Ptr () -> IO ()
+-- | @ghostty_mouse_encoder_set@: set an option, the value's type depending
+-- on the option ('GhosttyMouseEncoderOption' says which). A null value
+-- restores the option's default. @GHOSTTY_INVALID_VALUE@ for a value that is
+-- not valid (an unknown mode or format, or a size with a zero cell
+-- dimension). @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_mouse_encoder_set"
+  ghosttyMouseEncoderSet :: GhosttyMouseEncoder -> GhosttyMouseEncoderOption -> Ptr () -> IO GhosttyResult
 
--- | @ghostty_mouse_encoder_setopt_from_terminal@: set the tracking mode and
+-- | @ghostty_mouse_encoder_set_from_terminal@: set the tracking mode and
 -- format from a terminal's modes; the size and the any-button state are left
 -- as they are. @unsafe@: it reads the terminal and calls nothing back.
-foreign import capi unsafe "ghostty/vt.h ghostty_mouse_encoder_setopt_from_terminal"
-  ghosttyMouseEncoderSetoptFromTerminal :: GhosttyMouseEncoder -> GhosttyTerminal -> IO ()
+foreign import capi unsafe "ghostty/vt.h ghostty_mouse_encoder_set_from_terminal"
+  ghosttyMouseEncoderSetFromTerminal :: GhosttyMouseEncoder -> GhosttyTerminal -> IO GhosttyResult
 
 -- | @ghostty_mouse_encoder_reset@: forget the last cell motion was reported
--- for (null is a no-op). @unsafe@: it does not call back into Haskell.
+-- for. @unsafe@: it does not call back into Haskell.
 foreign import capi unsafe "ghostty/vt.h ghostty_mouse_encoder_reset"
-  ghosttyMouseEncoderReset :: GhosttyMouseEncoder -> IO ()
+  ghosttyMouseEncoderReset :: GhosttyMouseEncoder -> IO GhosttyResult
 
 -- | @ghostty_mouse_encoder_encode@: encode an event into a buffer. An event the
 -- tracking mode does not report encodes to nothing, with success. A null
 -- buffer, or one too small, returns @GHOSTTY_OUT_OF_SPACE@ with the size
 -- needed. @unsafe@: it does not call back into Haskell.
 foreign import capi unsafe "ghostty/vt.h ghostty_mouse_encoder_encode"
-  ghosttyMouseEncoderEncode :: GhosttyMouseEncoder -> GhosttyMouseEvent -> Ptr CChar -> CSize -> Ptr CSize -> IO GhosttyResult
+  ghosttyMouseEncoderEncode :: GhosttyMouseEncoder -> GhosttyMouseEvent -> Ptr Word8 -> CSize -> Ptr CSize -> IO GhosttyResult

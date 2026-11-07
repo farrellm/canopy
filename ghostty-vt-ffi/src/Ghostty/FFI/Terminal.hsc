@@ -34,6 +34,7 @@ module Ghostty.FFI.Terminal
 
     -- * Options
     GhosttyTerminalOption (..),
+    pattern GhosttyTerminalOptInvalid,
     pattern GhosttyTerminalOptUserdata,
     pattern GhosttyTerminalOptWritePty,
     pattern GhosttyTerminalOptBell,
@@ -98,7 +99,7 @@ module Ghostty.FFI.Terminal
     pattern GhosttyTerminalDataCursorVisible,
     pattern GhosttyTerminalDataKittyKeyboardFlags,
     pattern GhosttyTerminalDataScrollbar,
-    pattern GhosttyTerminalDataCursorStyle,
+    pattern GhosttyTerminalDataCursorSgrStyle,
     pattern GhosttyTerminalDataMouseTracking,
     pattern GhosttyTerminalDataTitle,
     pattern GhosttyTerminalDataPwd,
@@ -140,13 +141,6 @@ module Ghostty.FFI.Terminal
     pattern GhosttyTerminalScreenAlternate,
     pattern GhosttyTerminalScreenUnknown,
     ghosttyTerminalScreenEnum,
-    GhosttyTerminalCursorStyle (..),
-    pattern GhosttyTerminalCursorStyleBar,
-    pattern GhosttyTerminalCursorStyleBlock,
-    pattern GhosttyTerminalCursorStyleUnderline,
-    pattern GhosttyTerminalCursorStyleBlockHollow,
-    pattern GhosttyTerminalCursorStyleUnknown,
-    ghosttyTerminalCursorStyleEnum,
     GhosttyTerminalScrollbar (..),
     ghosttyTerminalScrollbarLayout,
     GhosttyTerminalMemoryUsage (..),
@@ -196,11 +190,11 @@ module Ghostty.FFI.Terminal
 
     -- * Viewport
     GhosttyTerminalScrollViewportTag (..),
-    pattern GhosttyScrollViewportTop,
-    pattern GhosttyScrollViewportBottom,
-    pattern GhosttyScrollViewportDelta,
-    pattern GhosttyScrollViewportRow,
-    pattern GhosttyScrollViewportDeltaPrompt,
+    pattern GhosttyTerminalScrollViewportTop,
+    pattern GhosttyTerminalScrollViewportBottom,
+    pattern GhosttyTerminalScrollViewportDelta,
+    pattern GhosttyTerminalScrollViewportRow,
+    pattern GhosttyTerminalScrollViewportDeltaPrompt,
     pattern GhosttyTerminalScrollViewportTagUnknown,
     ghosttyTerminalScrollViewportTagEnum,
     GhosttyTerminalScrollViewport (..),
@@ -274,7 +268,11 @@ newtype GhosttyTerminalOption = GhosttyTerminalOption CInt
   deriving stock (Eq, Show)
   deriving newtype (Storable)
 
--- | @GHOSTTY_TERMINAL_OPT_USERDATA@: Opaque userdata pointer passed to all callbacks.
+-- | @GHOSTTY_TERMINAL_OPT_INVALID@: Not a real option. ghostty\_terminal\_set() returns GHOSTTY\_INVALID\_VALUE for it. Its value is 0, so a zeroed or uninitialized variable is never mistaken for a real option.
+pattern GhosttyTerminalOptInvalid :: GhosttyTerminalOption
+pattern GhosttyTerminalOptInvalid = GhosttyTerminalOption (#const GHOSTTY_TERMINAL_OPT_INVALID)
+
+-- | @GHOSTTY_TERMINAL_OPT_USERDATA@: Opaque userdata pointer passed to all callbacks. NULL by default.
 --
 -- Input type: @void*@.
 pattern GhosttyTerminalOptUserdata :: GhosttyTerminalOption
@@ -322,7 +320,7 @@ pattern GhosttyTerminalOptSize = GhosttyTerminalOption (#const GHOSTTY_TERMINAL_
 pattern GhosttyTerminalOptColorScheme :: GhosttyTerminalOption
 pattern GhosttyTerminalOptColorScheme = GhosttyTerminalOption (#const GHOSTTY_TERMINAL_OPT_COLOR_SCHEME)
 
--- | @GHOSTTY_TERMINAL_OPT_DEVICE_ATTRIBUTES@: Callback invoked in response to a device attributes query (CSI c, CSI \> c, or CSI = c). Return true and fill the out pointer with response data, or return false to silently ignore. Set to NULL to ignore device attributes queries.
+-- | @GHOSTTY_TERMINAL_OPT_DEVICE_ATTRIBUTES@: Callback invoked in response to a device attributes query (CSI c, CSI \> c, or CSI = c). Return true and fill the out pointer with response data, or return false to answer with the library\'s default attributes.
 --
 -- Input type: @GhosttyTerminalDeviceAttributesFn@.
 pattern GhosttyTerminalOptDeviceAttributes :: GhosttyTerminalOption
@@ -408,7 +406,7 @@ pattern GhosttyTerminalOptSelection = GhosttyTerminalOption (#const GHOSTTY_TERM
 
 -- | @GHOSTTY_TERMINAL_OPT_DEFAULT_CURSOR_STYLE@: Set the default cursor style used by DECSCUSR reset (CSI 0 q).
 --
--- Input type: @GhosttyTerminalCursorStyle*@.
+-- Input type: @GhosttyCursorStyle*@.
 pattern GhosttyTerminalOptDefaultCursorStyle :: GhosttyTerminalOption
 pattern GhosttyTerminalOptDefaultCursorStyle = GhosttyTerminalOption (#const GHOSTTY_TERMINAL_OPT_DEFAULT_CURSOR_STYLE)
 
@@ -569,6 +567,7 @@ pattern GhosttyTerminalOptionUnknown n <- GhosttyTerminalOption (unnamed ghostty
     GhosttyTerminalOptionUnknown n = GhosttyTerminalOption n
 
 {-# COMPLETE
+  GhosttyTerminalOptInvalid,
   GhosttyTerminalOptUserdata,
   GhosttyTerminalOptWritePty,
   GhosttyTerminalOptBell,
@@ -628,7 +627,8 @@ ghosttyTerminalOptionEnum =
     { name = "GhosttyTerminalOption",
       size = (#size GhosttyTerminalOption),
       values =
-        [ ("GHOSTTY_TERMINAL_OPT_USERDATA", (#const GHOSTTY_TERMINAL_OPT_USERDATA)),
+        [ ("GHOSTTY_TERMINAL_OPT_INVALID", (#const GHOSTTY_TERMINAL_OPT_INVALID)),
+          ("GHOSTTY_TERMINAL_OPT_USERDATA", (#const GHOSTTY_TERMINAL_OPT_USERDATA)),
           ("GHOSTTY_TERMINAL_OPT_WRITE_PTY", (#const GHOSTTY_TERMINAL_OPT_WRITE_PTY)),
           ("GHOSTTY_TERMINAL_OPT_BELL", (#const GHOSTTY_TERMINAL_OPT_BELL)),
           ("GHOSTTY_TERMINAL_OPT_ENQUIRY", (#const GHOSTTY_TERMINAL_OPT_ENQUIRY)),
@@ -751,11 +751,11 @@ pattern GhosttyTerminalDataKittyKeyboardFlags = GhosttyTerminalData (#const GHOS
 pattern GhosttyTerminalDataScrollbar :: GhosttyTerminalData
 pattern GhosttyTerminalDataScrollbar = GhosttyTerminalData (#const GHOSTTY_TERMINAL_DATA_SCROLLBAR)
 
--- | @GHOSTTY_TERMINAL_DATA_CURSOR_STYLE@: The current SGR style of the cursor.
+-- | @GHOSTTY_TERMINAL_DATA_CURSOR_SGR_STYLE@: The current SGR style of the cursor.
 --
 -- Output type: @GhosttyStyle *@.
-pattern GhosttyTerminalDataCursorStyle :: GhosttyTerminalData
-pattern GhosttyTerminalDataCursorStyle = GhosttyTerminalData (#const GHOSTTY_TERMINAL_DATA_CURSOR_STYLE)
+pattern GhosttyTerminalDataCursorSgrStyle :: GhosttyTerminalData
+pattern GhosttyTerminalDataCursorSgrStyle = GhosttyTerminalData (#const GHOSTTY_TERMINAL_DATA_CURSOR_SGR_STYLE)
 
 -- | @GHOSTTY_TERMINAL_DATA_MOUSE_TRACKING@: Whether any mouse tracking mode is active.
 --
@@ -966,7 +966,7 @@ pattern GhosttyTerminalDataUnknown n <- GhosttyTerminalData (unnamed ghosttyTerm
   GhosttyTerminalDataCursorVisible,
   GhosttyTerminalDataKittyKeyboardFlags,
   GhosttyTerminalDataScrollbar,
-  GhosttyTerminalDataCursorStyle,
+  GhosttyTerminalDataCursorSgrStyle,
   GhosttyTerminalDataMouseTracking,
   GhosttyTerminalDataTitle,
   GhosttyTerminalDataPwd,
@@ -1020,7 +1020,7 @@ ghosttyTerminalDataEnum =
           ("GHOSTTY_TERMINAL_DATA_CURSOR_VISIBLE", (#const GHOSTTY_TERMINAL_DATA_CURSOR_VISIBLE)),
           ("GHOSTTY_TERMINAL_DATA_KITTY_KEYBOARD_FLAGS", (#const GHOSTTY_TERMINAL_DATA_KITTY_KEYBOARD_FLAGS)),
           ("GHOSTTY_TERMINAL_DATA_SCROLLBAR", (#const GHOSTTY_TERMINAL_DATA_SCROLLBAR)),
-          ("GHOSTTY_TERMINAL_DATA_CURSOR_STYLE", (#const GHOSTTY_TERMINAL_DATA_CURSOR_STYLE)),
+          ("GHOSTTY_TERMINAL_DATA_CURSOR_SGR_STYLE", (#const GHOSTTY_TERMINAL_DATA_CURSOR_SGR_STYLE)),
           ("GHOSTTY_TERMINAL_DATA_MOUSE_TRACKING", (#const GHOSTTY_TERMINAL_DATA_MOUSE_TRACKING)),
           ("GHOSTTY_TERMINAL_DATA_TITLE", (#const GHOSTTY_TERMINAL_DATA_TITLE)),
           ("GHOSTTY_TERMINAL_DATA_PWD", (#const GHOSTTY_TERMINAL_DATA_PWD)),
@@ -1105,56 +1105,6 @@ ghosttyTerminalScreenEnum =
         ]
     }
 
--- | @GhosttyTerminalCursorStyle@: Visual style of the terminal cursor.
-newtype GhosttyTerminalCursorStyle = GhosttyTerminalCursorStyle CInt
-  deriving stock (Eq, Show)
-  deriving newtype (Storable)
-
--- | @GHOSTTY_TERMINAL_CURSOR_STYLE_BAR@: Bar cursor (DECSCUSR 5, 6).
-pattern GhosttyTerminalCursorStyleBar :: GhosttyTerminalCursorStyle
-pattern GhosttyTerminalCursorStyleBar = GhosttyTerminalCursorStyle (#const GHOSTTY_TERMINAL_CURSOR_STYLE_BAR)
-
--- | @GHOSTTY_TERMINAL_CURSOR_STYLE_BLOCK@: Block cursor (DECSCUSR 1, 2).
-pattern GhosttyTerminalCursorStyleBlock :: GhosttyTerminalCursorStyle
-pattern GhosttyTerminalCursorStyleBlock = GhosttyTerminalCursorStyle (#const GHOSTTY_TERMINAL_CURSOR_STYLE_BLOCK)
-
--- | @GHOSTTY_TERMINAL_CURSOR_STYLE_UNDERLINE@: Underline cursor (DECSCUSR 3, 4).
-pattern GhosttyTerminalCursorStyleUnderline :: GhosttyTerminalCursorStyle
-pattern GhosttyTerminalCursorStyleUnderline = GhosttyTerminalCursorStyle (#const GHOSTTY_TERMINAL_CURSOR_STYLE_UNDERLINE)
-
--- | @GHOSTTY_TERMINAL_CURSOR_STYLE_BLOCK_HOLLOW@: Hollow block cursor.
-pattern GhosttyTerminalCursorStyleBlockHollow :: GhosttyTerminalCursorStyle
-pattern GhosttyTerminalCursorStyleBlockHollow = GhosttyTerminalCursorStyle (#const GHOSTTY_TERMINAL_CURSOR_STYLE_BLOCK_HOLLOW)
-
--- | Any value this binding does not name: a newer library's.
-pattern GhosttyTerminalCursorStyleUnknown :: CInt -> GhosttyTerminalCursorStyle
-pattern GhosttyTerminalCursorStyleUnknown n <- GhosttyTerminalCursorStyle (unnamed ghosttyTerminalCursorStyleEnum -> Just n)
-  where
-    GhosttyTerminalCursorStyleUnknown n = GhosttyTerminalCursorStyle n
-
-{-# COMPLETE
-  GhosttyTerminalCursorStyleBar,
-  GhosttyTerminalCursorStyleBlock,
-  GhosttyTerminalCursorStyleUnderline,
-  GhosttyTerminalCursorStyleBlockHollow,
-  GhosttyTerminalCursorStyleUnknown
-  #-}
-
--- | Every value of @GhosttyTerminalCursorStyle@, for the layout test (§3.4). It is also what
--- 'GhosttyTerminalCursorStyleUnknown' excludes.
-ghosttyTerminalCursorStyleEnum :: CEnum
-ghosttyTerminalCursorStyleEnum =
-  CEnum
-    { name = "GhosttyTerminalCursorStyle",
-      size = (#size GhosttyTerminalCursorStyle),
-      values =
-        [ ("GHOSTTY_TERMINAL_CURSOR_STYLE_BAR", (#const GHOSTTY_TERMINAL_CURSOR_STYLE_BAR)),
-          ("GHOSTTY_TERMINAL_CURSOR_STYLE_BLOCK", (#const GHOSTTY_TERMINAL_CURSOR_STYLE_BLOCK)),
-          ("GHOSTTY_TERMINAL_CURSOR_STYLE_UNDERLINE", (#const GHOSTTY_TERMINAL_CURSOR_STYLE_UNDERLINE)),
-          ("GHOSTTY_TERMINAL_CURSOR_STYLE_BLOCK_HOLLOW", (#const GHOSTTY_TERMINAL_CURSOR_STYLE_BLOCK_HOLLOW))
-        ]
-    }
-
 -- | @GhosttyTerminalScrollbar@: Scrollbar state for the terminal viewport.
 data GhosttyTerminalScrollbar = GhosttyTerminalScrollbar
   { -- | @total@: Total size of the scrollable area in rows.
@@ -1195,7 +1145,7 @@ ghosttyTerminalScrollbarLayout =
 
 -- | @GhosttyTerminalMemoryUsage@: Memory held by a terminal.
 data GhosttyTerminalMemoryUsage = GhosttyTerminalMemoryUsage
-  { -- | @size@: Size of this struct in bytes. Set by the caller.
+  { -- | @size@: Size of this struct in bytes. Set by you.
     size :: CSize,
     -- | @compression_supported@: Whether compressing scrollback can free memory on this platform. When false, ghostty\_terminal\_compress() reports @GHOSTTY_TERMINAL_COMPRESSION_RESULT_UNSUPPORTED@ and the compressed fields are always zero. To reduce a terminal\'s memory on such a platform, you have to do something else, such as closing it.
     compressionSupported :: CBool,
@@ -1626,25 +1576,25 @@ newtype GhosttyTerminalScrollViewportTag = GhosttyTerminalScrollViewportTag CInt
   deriving stock (Eq, Show)
   deriving newtype (Storable)
 
--- | @GHOSTTY_SCROLL_VIEWPORT_TOP@: Scroll to the top of the scrollback.
-pattern GhosttyScrollViewportTop :: GhosttyTerminalScrollViewportTag
-pattern GhosttyScrollViewportTop = GhosttyTerminalScrollViewportTag (#const GHOSTTY_SCROLL_VIEWPORT_TOP)
+-- | @GHOSTTY_TERMINAL_SCROLL_VIEWPORT_TOP@: Scroll to the top of the scrollback.
+pattern GhosttyTerminalScrollViewportTop :: GhosttyTerminalScrollViewportTag
+pattern GhosttyTerminalScrollViewportTop = GhosttyTerminalScrollViewportTag (#const GHOSTTY_TERMINAL_SCROLL_VIEWPORT_TOP)
 
--- | @GHOSTTY_SCROLL_VIEWPORT_BOTTOM@: Scroll to the bottom (active area).
-pattern GhosttyScrollViewportBottom :: GhosttyTerminalScrollViewportTag
-pattern GhosttyScrollViewportBottom = GhosttyTerminalScrollViewportTag (#const GHOSTTY_SCROLL_VIEWPORT_BOTTOM)
+-- | @GHOSTTY_TERMINAL_SCROLL_VIEWPORT_BOTTOM@: Scroll to the bottom (active area).
+pattern GhosttyTerminalScrollViewportBottom :: GhosttyTerminalScrollViewportTag
+pattern GhosttyTerminalScrollViewportBottom = GhosttyTerminalScrollViewportTag (#const GHOSTTY_TERMINAL_SCROLL_VIEWPORT_BOTTOM)
 
--- | @GHOSTTY_SCROLL_VIEWPORT_DELTA@: Scroll by a delta amount (up is negative).
-pattern GhosttyScrollViewportDelta :: GhosttyTerminalScrollViewportTag
-pattern GhosttyScrollViewportDelta = GhosttyTerminalScrollViewportTag (#const GHOSTTY_SCROLL_VIEWPORT_DELTA)
+-- | @GHOSTTY_TERMINAL_SCROLL_VIEWPORT_DELTA@: Scroll by a delta amount (up is negative).
+pattern GhosttyTerminalScrollViewportDelta :: GhosttyTerminalScrollViewportTag
+pattern GhosttyTerminalScrollViewportDelta = GhosttyTerminalScrollViewportTag (#const GHOSTTY_TERMINAL_SCROLL_VIEWPORT_DELTA)
 
--- | @GHOSTTY_SCROLL_VIEWPORT_ROW@: Scroll to an absolute row offset from the top of the scrollable area. Row 0 is the top of the scrollback and the requested row becomes the first visible row of the viewport. The value is clamped so the viewport never scrolls beyond the top of the active area. If the terminal has no scrollback (e.g. the alternate screen is active), the viewport always remains on the active area.
-pattern GhosttyScrollViewportRow :: GhosttyTerminalScrollViewportTag
-pattern GhosttyScrollViewportRow = GhosttyTerminalScrollViewportTag (#const GHOSTTY_SCROLL_VIEWPORT_ROW)
+-- | @GHOSTTY_TERMINAL_SCROLL_VIEWPORT_ROW@: Scroll to an absolute row offset from the top of the scrollable area. Row 0 is the top of the scrollback and the requested row becomes the first visible row of the viewport. The value is clamped so the viewport never scrolls beyond the top of the active area. If the terminal has no scrollback (e.g. the alternate screen is active), the viewport always remains on the active area.
+pattern GhosttyTerminalScrollViewportRow :: GhosttyTerminalScrollViewportTag
+pattern GhosttyTerminalScrollViewportRow = GhosttyTerminalScrollViewportTag (#const GHOSTTY_TERMINAL_SCROLL_VIEWPORT_ROW)
 
--- | @GHOSTTY_SCROLL_VIEWPORT_DELTA_PROMPT@: Scroll by a number of prompts relative to the viewport top. Negative values move backward and positive values move forward. Requires semantic prompt markers from the shell. Zero or no matching prompt is a no-op. If fewer prompts remain than requested, move to the last matching prompt, clamped to the active area.
-pattern GhosttyScrollViewportDeltaPrompt :: GhosttyTerminalScrollViewportTag
-pattern GhosttyScrollViewportDeltaPrompt = GhosttyTerminalScrollViewportTag (#const GHOSTTY_SCROLL_VIEWPORT_DELTA_PROMPT)
+-- | @GHOSTTY_TERMINAL_SCROLL_VIEWPORT_DELTA_PROMPT@: Scroll by a number of prompts relative to the viewport top. Negative values move backward and positive values move forward. Requires semantic prompt markers from the shell. Zero or no matching prompt is a no-op. If fewer prompts remain than requested, move to the last matching prompt, clamped to the active area.
+pattern GhosttyTerminalScrollViewportDeltaPrompt :: GhosttyTerminalScrollViewportTag
+pattern GhosttyTerminalScrollViewportDeltaPrompt = GhosttyTerminalScrollViewportTag (#const GHOSTTY_TERMINAL_SCROLL_VIEWPORT_DELTA_PROMPT)
 
 -- | Any value this binding does not name: a newer library's.
 pattern GhosttyTerminalScrollViewportTagUnknown :: CInt -> GhosttyTerminalScrollViewportTag
@@ -1653,11 +1603,11 @@ pattern GhosttyTerminalScrollViewportTagUnknown n <- GhosttyTerminalScrollViewpo
     GhosttyTerminalScrollViewportTagUnknown n = GhosttyTerminalScrollViewportTag n
 
 {-# COMPLETE
-  GhosttyScrollViewportTop,
-  GhosttyScrollViewportBottom,
-  GhosttyScrollViewportDelta,
-  GhosttyScrollViewportRow,
-  GhosttyScrollViewportDeltaPrompt,
+  GhosttyTerminalScrollViewportTop,
+  GhosttyTerminalScrollViewportBottom,
+  GhosttyTerminalScrollViewportDelta,
+  GhosttyTerminalScrollViewportRow,
+  GhosttyTerminalScrollViewportDeltaPrompt,
   GhosttyTerminalScrollViewportTagUnknown
   #-}
 
@@ -1669,26 +1619,26 @@ ghosttyTerminalScrollViewportTagEnum =
     { name = "GhosttyTerminalScrollViewportTag",
       size = (#size GhosttyTerminalScrollViewportTag),
       values =
-        [ ("GHOSTTY_SCROLL_VIEWPORT_TOP", (#const GHOSTTY_SCROLL_VIEWPORT_TOP)),
-          ("GHOSTTY_SCROLL_VIEWPORT_BOTTOM", (#const GHOSTTY_SCROLL_VIEWPORT_BOTTOM)),
-          ("GHOSTTY_SCROLL_VIEWPORT_DELTA", (#const GHOSTTY_SCROLL_VIEWPORT_DELTA)),
-          ("GHOSTTY_SCROLL_VIEWPORT_ROW", (#const GHOSTTY_SCROLL_VIEWPORT_ROW)),
-          ("GHOSTTY_SCROLL_VIEWPORT_DELTA_PROMPT", (#const GHOSTTY_SCROLL_VIEWPORT_DELTA_PROMPT))
+        [ ("GHOSTTY_TERMINAL_SCROLL_VIEWPORT_TOP", (#const GHOSTTY_TERMINAL_SCROLL_VIEWPORT_TOP)),
+          ("GHOSTTY_TERMINAL_SCROLL_VIEWPORT_BOTTOM", (#const GHOSTTY_TERMINAL_SCROLL_VIEWPORT_BOTTOM)),
+          ("GHOSTTY_TERMINAL_SCROLL_VIEWPORT_DELTA", (#const GHOSTTY_TERMINAL_SCROLL_VIEWPORT_DELTA)),
+          ("GHOSTTY_TERMINAL_SCROLL_VIEWPORT_ROW", (#const GHOSTTY_TERMINAL_SCROLL_VIEWPORT_ROW)),
+          ("GHOSTTY_TERMINAL_SCROLL_VIEWPORT_DELTA_PROMPT", (#const GHOSTTY_TERMINAL_SCROLL_VIEWPORT_DELTA_PROMPT))
         ]
     }
 
 -- | @GhosttyTerminalScrollViewport@: how to scroll the viewport. A tagged union
 -- in C, so a sum here with an arm per tag (§3.3).
 data GhosttyTerminalScrollViewport
-  = -- | @GHOSTTY_SCROLL_VIEWPORT_TOP@: to the top of the scrollback.
+  = -- | @GHOSTTY_TERMINAL_SCROLL_VIEWPORT_TOP@: to the top of the scrollback.
     ScrollViewportTop
-  | -- | @GHOSTTY_SCROLL_VIEWPORT_BOTTOM@: to the active area.
+  | -- | @GHOSTTY_TERMINAL_SCROLL_VIEWPORT_BOTTOM@: to the active area.
     ScrollViewportBottom
-  | -- | @GHOSTTY_SCROLL_VIEWPORT_DELTA@: by @value.delta@ rows, up negative.
+  | -- | @GHOSTTY_TERMINAL_SCROLL_VIEWPORT_DELTA@: by @value.delta@ rows, up negative.
     ScrollViewportDelta CIntPtr
-  | -- | @GHOSTTY_SCROLL_VIEWPORT_ROW@: to the absolute row @value.row@.
+  | -- | @GHOSTTY_TERMINAL_SCROLL_VIEWPORT_ROW@: to the absolute row @value.row@.
     ScrollViewportRow CSize
-  | -- | @GHOSTTY_SCROLL_VIEWPORT_DELTA_PROMPT@: by @value.delta_prompt@
+  | -- | @GHOSTTY_TERMINAL_SCROLL_VIEWPORT_DELTA_PROMPT@: by @value.delta_prompt@
     -- semantic prompts, back negative.
     ScrollViewportDeltaPrompt CIntPtr
   | -- | A tag this binding does not name, whose value it cannot read.
@@ -1700,23 +1650,23 @@ instance Storable GhosttyTerminalScrollViewport where
   alignment _ = (#alignment GhosttyTerminalScrollViewport)
   peek p =
     (#peek GhosttyTerminalScrollViewport, tag) p >>= \case
-      GhosttyScrollViewportTop -> pure ScrollViewportTop
-      GhosttyScrollViewportBottom -> pure ScrollViewportBottom
-      GhosttyScrollViewportDelta -> ScrollViewportDelta <$> (#peek GhosttyTerminalScrollViewport, value.delta) p
-      GhosttyScrollViewportRow -> ScrollViewportRow <$> (#peek GhosttyTerminalScrollViewport, value.row) p
-      GhosttyScrollViewportDeltaPrompt -> ScrollViewportDeltaPrompt <$> (#peek GhosttyTerminalScrollViewport, value.delta_prompt) p
+      GhosttyTerminalScrollViewportTop -> pure ScrollViewportTop
+      GhosttyTerminalScrollViewportBottom -> pure ScrollViewportBottom
+      GhosttyTerminalScrollViewportDelta -> ScrollViewportDelta <$> (#peek GhosttyTerminalScrollViewport, value.delta) p
+      GhosttyTerminalScrollViewportRow -> ScrollViewportRow <$> (#peek GhosttyTerminalScrollViewport, value.row) p
+      GhosttyTerminalScrollViewportDeltaPrompt -> ScrollViewportDeltaPrompt <$> (#peek GhosttyTerminalScrollViewport, value.delta_prompt) p
       tag@(GhosttyTerminalScrollViewportTagUnknown _) -> pure (ScrollViewportOther tag)
   poke p = \case
-    ScrollViewportTop -> (#poke GhosttyTerminalScrollViewport, tag) p GhosttyScrollViewportTop
-    ScrollViewportBottom -> (#poke GhosttyTerminalScrollViewport, tag) p GhosttyScrollViewportBottom
+    ScrollViewportTop -> (#poke GhosttyTerminalScrollViewport, tag) p GhosttyTerminalScrollViewportTop
+    ScrollViewportBottom -> (#poke GhosttyTerminalScrollViewport, tag) p GhosttyTerminalScrollViewportBottom
     ScrollViewportDelta n -> do
-      (#poke GhosttyTerminalScrollViewport, tag) p GhosttyScrollViewportDelta
+      (#poke GhosttyTerminalScrollViewport, tag) p GhosttyTerminalScrollViewportDelta
       (#poke GhosttyTerminalScrollViewport, value.delta) p n
     ScrollViewportRow n -> do
-      (#poke GhosttyTerminalScrollViewport, tag) p GhosttyScrollViewportRow
+      (#poke GhosttyTerminalScrollViewport, tag) p GhosttyTerminalScrollViewportRow
       (#poke GhosttyTerminalScrollViewport, value.row) p n
     ScrollViewportDeltaPrompt n -> do
-      (#poke GhosttyTerminalScrollViewport, tag) p GhosttyScrollViewportDeltaPrompt
+      (#poke GhosttyTerminalScrollViewport, tag) p GhosttyTerminalScrollViewportDeltaPrompt
       (#poke GhosttyTerminalScrollViewport, value.delta_prompt) p n
     ScrollViewportOther tag -> (#poke GhosttyTerminalScrollViewport, tag) p tag
 
@@ -1733,11 +1683,12 @@ ghosttyTerminalScrollViewportLayout =
         ]
     }
 
--- | @ghostty_terminal_scroll_viewport@. The C function takes the behaviour by
--- value, so this calls a pointer shim (@gvtffi_shims.h@, §3.3). @unsafe@: it
--- does not call back into Haskell.
+-- | @ghostty_terminal_scroll_viewport@: @GHOSTTY_INVALID_VALUE@ (the viewport
+-- unmoved) for a tag this library does not know. The C function takes the
+-- behaviour by value, so this calls a pointer shim (@gvtffi_shims.h@, §3.3).
+-- @unsafe@: it does not call back into Haskell.
 foreign import capi unsafe "gvtffi_shims.h gvtffi_terminal_scroll_viewport"
-  ghosttyTerminalScrollViewport :: GhosttyTerminal -> Ptr GhosttyTerminalScrollViewport -> IO ()
+  ghosttyTerminalScrollViewport :: GhosttyTerminal -> Ptr GhosttyTerminalScrollViewport -> IO GhosttyResult
 
 -- * Compression
 

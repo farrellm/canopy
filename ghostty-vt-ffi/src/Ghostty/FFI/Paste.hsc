@@ -96,7 +96,7 @@ data GhosttyPaste = GhosttyPaste
     mimesLen :: CSize,
     -- | @reader@: Produces the data of a representation on demand. Required when mimes\_len is nonzero.
     reader :: GhosttyMimeReader,
-    -- | @allow_unsafe@: Write text that could inject commands. Call with false, confirm with the user on GHOSTTY\_REJECTED, and call again with true.
+    -- | @allow_unsafe@: Write text that could inject commands. Call with false, confirm with the person using your terminal on GHOSTTY\_REJECTED, and call again with true.
     allowUnsafe :: CBool
   }
   deriving stock (Eq, Show)
@@ -161,7 +161,8 @@ foreign import capi unsafe "ghostty/vt.h ghostty_paste_is_safe"
 -- | @ghostty_paste_encode@: encode paste data for the pty: unsafe control bytes
 -- become spaces, then the data is bracketed, or has its newlines made
 -- carriage returns. __It modifies the input in place.__ A null buffer, or one
--- too small, returns @GHOSTTY_OUT_OF_SPACE@ with the size needed. @unsafe@:
--- it calls nothing back, and is one pass over the data (above).
+-- too small, returns @GHOSTTY_OUT_OF_SPACE@ with the size needed; empty
+-- output is @GHOSTTY_SUCCESS@ with 0. @unsafe@: it calls nothing back, and is
+-- one pass over the data (above).
 foreign import capi unsafe "ghostty/vt.h ghostty_paste_encode"
-  ghosttyPasteEncode :: Ptr CChar -> CSize -> CBool -> Ptr CChar -> CSize -> Ptr CSize -> IO GhosttyResult
+  ghosttyPasteEncode :: Ptr CChar -> CSize -> CBool -> Ptr Word8 -> CSize -> Ptr CSize -> IO GhosttyResult

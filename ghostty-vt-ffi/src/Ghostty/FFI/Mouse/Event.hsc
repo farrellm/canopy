@@ -57,7 +57,7 @@ module Ghostty.FFI.Mouse.Event
   )
 where
 
-import Foreign.C.Types (CBool (..), CFloat (..), CInt (..))
+import Foreign.C.Types (CFloat (..), CInt (..))
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (Storable (..))
 import Ghostty.FFI.Allocator (GhosttyAllocator)
@@ -275,7 +275,7 @@ foreign import capi unsafe "ghostty/vt.h ghostty_mouse_event_free"
 -- | @ghostty_mouse_event_set_action@: press, release or motion. @unsafe@: it
 -- does not call back into Haskell.
 foreign import capi unsafe "ghostty/vt.h ghostty_mouse_event_set_action"
-  ghosttyMouseEventSetAction :: GhosttyMouseEvent -> GhosttyMouseAction -> IO ()
+  ghosttyMouseEventSetAction :: GhosttyMouseEvent -> GhosttyMouseAction -> IO GhosttyResult
 
 -- | @ghostty_mouse_event_get_action@. @unsafe@: it does not call back into
 -- Haskell.
@@ -286,23 +286,23 @@ foreign import capi unsafe "ghostty/vt.h ghostty_mouse_event_get_action"
 -- clears it instead ('ghosttyMouseEventClearButton'). @unsafe@: it does not
 -- call back into Haskell.
 foreign import capi unsafe "ghostty/vt.h ghostty_mouse_event_set_button"
-  ghosttyMouseEventSetButton :: GhosttyMouseEvent -> GhosttyMouseButton -> IO ()
+  ghosttyMouseEventSetButton :: GhosttyMouseEvent -> GhosttyMouseButton -> IO GhosttyResult
 
 -- | @ghostty_mouse_event_clear_button@: no button. @unsafe@: it does not call
 -- back into Haskell.
 foreign import capi unsafe "ghostty/vt.h ghostty_mouse_event_clear_button"
-  ghosttyMouseEventClearButton :: GhosttyMouseEvent -> IO ()
+  ghosttyMouseEventClearButton :: GhosttyMouseEvent -> IO GhosttyResult
 
--- | @ghostty_mouse_event_get_button@: whether a button is set, and which
--- through the out pointer (which may be null). @unsafe@: it does not call
--- back into Haskell.
+-- | @ghostty_mouse_event_get_button@: the button through the out pointer, or
+-- @GHOSTTY_NO_VALUE@ (the pointer not written) when there is none. @unsafe@:
+-- it does not call back into Haskell.
 foreign import capi unsafe "ghostty/vt.h ghostty_mouse_event_get_button"
-  ghosttyMouseEventGetButton :: GhosttyMouseEvent -> Ptr GhosttyMouseButton -> IO CBool
+  ghosttyMouseEventGetButton :: GhosttyMouseEvent -> Ptr GhosttyMouseButton -> IO GhosttyResult
 
 -- | @ghostty_mouse_event_set_mods@: the modifiers held. @unsafe@: it does not
 -- call back into Haskell.
 foreign import capi unsafe "ghostty/vt.h ghostty_mouse_event_set_mods"
-  ghosttyMouseEventSetMods :: GhosttyMouseEvent -> GhosttyMods -> IO ()
+  ghosttyMouseEventSetMods :: GhosttyMouseEvent -> GhosttyMods -> IO GhosttyResult
 
 -- | @ghostty_mouse_event_get_mods@. @unsafe@: it does not call back into
 -- Haskell.
@@ -313,7 +313,7 @@ foreign import capi unsafe "ghostty/vt.h ghostty_mouse_event_get_mods"
 -- function takes the position by value, so this calls a pointer shim
 -- (@gvtffi_shims.h@, §3.3). @unsafe@: it does not call back into Haskell.
 foreign import capi unsafe "gvtffi_shims.h gvtffi_mouse_event_set_position"
-  ghosttyMouseEventSetPosition :: GhosttyMouseEvent -> Ptr GhosttyMousePosition -> IO ()
+  ghosttyMouseEventSetPosition :: GhosttyMouseEvent -> Ptr GhosttyMousePosition -> IO GhosttyResult
 
 -- | @ghostty_mouse_event_get_position@. The C function returns the position by
 -- value, so this calls a pointer shim that writes it through the out pointer

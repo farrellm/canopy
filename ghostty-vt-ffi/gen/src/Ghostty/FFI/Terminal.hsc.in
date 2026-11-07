@@ -40,7 +40,6 @@ module Ghostty.FFI.Terminal
     ghosttyTerminalGet,
     ghosttyTerminalGetMulti,
     {{xenum terminal.h GhosttyTerminalScreen}}
-    {{xenum terminal.h GhosttyTerminalCursorStyle}}
     {{xstruct terminal.h GhosttyTerminalScrollbar}}
     {{xstruct terminal.h GhosttyTerminalMemoryUsage}}
     {{xstruct terminal.h GhosttyTerminalModeConfig}}
@@ -141,7 +140,6 @@ foreign import capi unsafe "ghostty/vt.h ghostty_terminal_get_multi"
   ghosttyTerminalGetMulti :: GhosttyTerminal -> CSize -> Ptr GhosttyTerminalData -> Ptr (Ptr ()) -> Ptr CSize -> IO GhosttyResult
 
 {{enum terminal.h GhosttyTerminalScreen}}
-{{enum terminal.h GhosttyTerminalCursorStyle}}
 {{struct terminal.h GhosttyTerminalScrollbar}}
 {{struct terminal.h GhosttyTerminalMemoryUsage}}
 {{struct terminal.h GhosttyTerminalModeConfig}}
@@ -192,15 +190,15 @@ foreign import capi unsafe "ghostty/vt.h ghostty_terminal_continuation_alloc"
 -- | @GhosttyTerminalScrollViewport@: how to scroll the viewport. A tagged union
 -- in C, so a sum here with an arm per tag (§3.3).
 data GhosttyTerminalScrollViewport
-  = -- | @GHOSTTY_SCROLL_VIEWPORT_TOP@: to the top of the scrollback.
+  = -- | @GHOSTTY_TERMINAL_SCROLL_VIEWPORT_TOP@: to the top of the scrollback.
     ScrollViewportTop
-  | -- | @GHOSTTY_SCROLL_VIEWPORT_BOTTOM@: to the active area.
+  | -- | @GHOSTTY_TERMINAL_SCROLL_VIEWPORT_BOTTOM@: to the active area.
     ScrollViewportBottom
-  | -- | @GHOSTTY_SCROLL_VIEWPORT_DELTA@: by @value.delta@ rows, up negative.
+  | -- | @GHOSTTY_TERMINAL_SCROLL_VIEWPORT_DELTA@: by @value.delta@ rows, up negative.
     ScrollViewportDelta CIntPtr
-  | -- | @GHOSTTY_SCROLL_VIEWPORT_ROW@: to the absolute row @value.row@.
+  | -- | @GHOSTTY_TERMINAL_SCROLL_VIEWPORT_ROW@: to the absolute row @value.row@.
     ScrollViewportRow CSize
-  | -- | @GHOSTTY_SCROLL_VIEWPORT_DELTA_PROMPT@: by @value.delta_prompt@
+  | -- | @GHOSTTY_TERMINAL_SCROLL_VIEWPORT_DELTA_PROMPT@: by @value.delta_prompt@
     -- semantic prompts, back negative.
     ScrollViewportDeltaPrompt CIntPtr
   | -- | A tag this binding does not name, whose value it cannot read.
@@ -212,32 +210,33 @@ instance Storable GhosttyTerminalScrollViewport where
   alignment _ = (#alignment GhosttyTerminalScrollViewport)
   peek p =
     (#peek GhosttyTerminalScrollViewport, tag) p >>= \case
-      GhosttyScrollViewportTop -> pure ScrollViewportTop
-      GhosttyScrollViewportBottom -> pure ScrollViewportBottom
-      GhosttyScrollViewportDelta -> ScrollViewportDelta <$> (#peek GhosttyTerminalScrollViewport, value.delta) p
-      GhosttyScrollViewportRow -> ScrollViewportRow <$> (#peek GhosttyTerminalScrollViewport, value.row) p
-      GhosttyScrollViewportDeltaPrompt -> ScrollViewportDeltaPrompt <$> (#peek GhosttyTerminalScrollViewport, value.delta_prompt) p
+      GhosttyTerminalScrollViewportTop -> pure ScrollViewportTop
+      GhosttyTerminalScrollViewportBottom -> pure ScrollViewportBottom
+      GhosttyTerminalScrollViewportDelta -> ScrollViewportDelta <$> (#peek GhosttyTerminalScrollViewport, value.delta) p
+      GhosttyTerminalScrollViewportRow -> ScrollViewportRow <$> (#peek GhosttyTerminalScrollViewport, value.row) p
+      GhosttyTerminalScrollViewportDeltaPrompt -> ScrollViewportDeltaPrompt <$> (#peek GhosttyTerminalScrollViewport, value.delta_prompt) p
       tag@(GhosttyTerminalScrollViewportTagUnknown _) -> pure (ScrollViewportOther tag)
   poke p = \case
-    ScrollViewportTop -> (#poke GhosttyTerminalScrollViewport, tag) p GhosttyScrollViewportTop
-    ScrollViewportBottom -> (#poke GhosttyTerminalScrollViewport, tag) p GhosttyScrollViewportBottom
+    ScrollViewportTop -> (#poke GhosttyTerminalScrollViewport, tag) p GhosttyTerminalScrollViewportTop
+    ScrollViewportBottom -> (#poke GhosttyTerminalScrollViewport, tag) p GhosttyTerminalScrollViewportBottom
     ScrollViewportDelta n -> do
-      (#poke GhosttyTerminalScrollViewport, tag) p GhosttyScrollViewportDelta
+      (#poke GhosttyTerminalScrollViewport, tag) p GhosttyTerminalScrollViewportDelta
       (#poke GhosttyTerminalScrollViewport, value.delta) p n
     ScrollViewportRow n -> do
-      (#poke GhosttyTerminalScrollViewport, tag) p GhosttyScrollViewportRow
+      (#poke GhosttyTerminalScrollViewport, tag) p GhosttyTerminalScrollViewportRow
       (#poke GhosttyTerminalScrollViewport, value.row) p n
     ScrollViewportDeltaPrompt n -> do
-      (#poke GhosttyTerminalScrollViewport, tag) p GhosttyScrollViewportDeltaPrompt
+      (#poke GhosttyTerminalScrollViewport, tag) p GhosttyTerminalScrollViewportDeltaPrompt
       (#poke GhosttyTerminalScrollViewport, value.delta_prompt) p n
     ScrollViewportOther tag -> (#poke GhosttyTerminalScrollViewport, tag) p tag
 
 {{layout GhosttyTerminalScrollViewport tag value}}
--- | @ghostty_terminal_scroll_viewport@. The C function takes the behaviour by
--- value, so this calls a pointer shim (@gvtffi_shims.h@, §3.3). @unsafe@: it
--- does not call back into Haskell.
+-- | @ghostty_terminal_scroll_viewport@: @GHOSTTY_INVALID_VALUE@ (the viewport
+-- unmoved) for a tag this library does not know. The C function takes the
+-- behaviour by value, so this calls a pointer shim (@gvtffi_shims.h@, §3.3).
+-- @unsafe@: it does not call back into Haskell.
 foreign import capi unsafe "gvtffi_shims.h gvtffi_terminal_scroll_viewport"
-  ghosttyTerminalScrollViewport :: GhosttyTerminal -> Ptr GhosttyTerminalScrollViewport -> IO ()
+  ghosttyTerminalScrollViewport :: GhosttyTerminal -> Ptr GhosttyTerminalScrollViewport -> IO GhosttyResult
 
 -- * Compression
 

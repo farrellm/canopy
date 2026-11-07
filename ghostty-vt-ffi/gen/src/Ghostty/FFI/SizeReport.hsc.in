@@ -16,7 +16,7 @@ module Ghostty.FFI.SizeReport
   )
 where
 
-import Foreign.C.Types (CChar, CInt (..), CSize (..))
+import Foreign.C.Types (CInt (..), CSize (..))
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (Storable (..))
 import Ghostty.FFI.Layout (CEnum (..), CField (..), CStruct (..), unnamed)
@@ -28,8 +28,6 @@ import Ghostty.FFI.Types (GhosttyResult (..))
 {{enum size_report.h GhosttySizeReportStyle}}
 -- | @ghostty_size_report_encode@: encode a size report in a style into a
 -- buffer. A null buffer, or one too small, returns @GHOSTTY_OUT_OF_SPACE@
--- with the size needed. The C function takes the size by value, so this
--- calls a pointer shim (@gvtffi_shims.h@, §3.3). @unsafe@: it does not call
--- back into Haskell.
-foreign import capi unsafe "gvtffi_shims.h gvtffi_size_report_encode"
-  ghosttySizeReportEncode :: GhosttySizeReportStyle -> Ptr GhosttySizeReportSize -> Ptr CChar -> CSize -> Ptr CSize -> IO GhosttyResult
+-- with the size needed. @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_size_report_encode"
+  ghosttySizeReportEncode :: GhosttySizeReportStyle -> Ptr GhosttySizeReportSize -> Ptr Word8 -> CSize -> Ptr CSize -> IO GhosttyResult

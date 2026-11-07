@@ -66,8 +66,9 @@ module Ghostty.FFI.Render
     ghosttyRenderStateGet,
     ghosttyRenderStateGetMulti,
     GhosttyRenderStateOption (..),
-    pattern GhosttyRenderStateOptionDirty,
-    pattern GhosttyRenderStateOptionOverscan,
+    pattern GhosttyRenderStateOptInvalid,
+    pattern GhosttyRenderStateOptDirty,
+    pattern GhosttyRenderStateOptOverscan,
     pattern GhosttyRenderStateOptionUnknown,
     ghosttyRenderStateOptionEnum,
     ghosttyRenderStateSet,
@@ -77,13 +78,6 @@ module Ghostty.FFI.Render
     pattern GhosttyRenderStateDirtyFull,
     pattern GhosttyRenderStateDirtyUnknown,
     ghosttyRenderStateDirtyEnum,
-    GhosttyRenderStateCursorVisualStyle (..),
-    pattern GhosttyRenderStateCursorVisualStyleBar,
-    pattern GhosttyRenderStateCursorVisualStyleBlock,
-    pattern GhosttyRenderStateCursorVisualStyleUnderline,
-    pattern GhosttyRenderStateCursorVisualStyleBlockHollow,
-    pattern GhosttyRenderStateCursorVisualStyleUnknown,
-    ghosttyRenderStateCursorVisualStyleEnum,
     GhosttyRenderStateOverscan (..),
     ghosttyRenderStateOverscanLayout,
     GhosttyRenderStateCursor (..),
@@ -110,7 +104,8 @@ module Ghostty.FFI.Render
     ghosttyRenderStateRowGet,
     ghosttyRenderStateRowGetMulti,
     GhosttyRenderStateRowOption (..),
-    pattern GhosttyRenderStateRowOptionDirty,
+    pattern GhosttyRenderStateRowOptInvalid,
+    pattern GhosttyRenderStateRowOptDirty,
     pattern GhosttyRenderStateRowOptionUnknown,
     ghosttyRenderStateRowOptionEnum,
     ghosttyRenderStateRowSet,
@@ -173,12 +168,6 @@ module Ghostty.FFI.Render
     pattern GhosttyImageProtocolKitty,
     pattern GhosttyImageProtocolUnknown,
     ghosttyImageProtocolEnum,
-    GhosttyRenderStateImageLayer (..),
-    pattern GhosttyRenderStateImageLayerBelowBackground,
-    pattern GhosttyRenderStateImageLayerBelowText,
-    pattern GhosttyRenderStateImageLayerAboveText,
-    pattern GhosttyRenderStateImageLayerUnknown,
-    ghosttyRenderStateImageLayerEnum,
     GhosttyRenderStateKittyPlacementKind (..),
     pattern GhosttyRenderStateKittyPlacementKindVirtual,
     pattern GhosttyRenderStateKittyPlacementKindRelative,
@@ -196,7 +185,7 @@ import Ghostty.FFI.Allocator (GhosttyAllocator)
 import Ghostty.FFI.Color (GhosttyColorRgb (..))
 import Ghostty.FFI.Layout (CEnum (..), CField (..), CStruct (..), unnamed)
 import Ghostty.FFI.Terminal.Handle (GhosttyTerminal (..))
-import Ghostty.FFI.Types (GhosttyResult (..))
+import Ghostty.FFI.Types (GhosttyCursorStyle (..), GhosttyResult (..))
 
 #include <gvtffi_shims.h>
 
@@ -315,7 +304,7 @@ pattern GhosttyRenderStateDataColorBackground = GhosttyRenderStateData (#const G
 pattern GhosttyRenderStateDataColorForeground :: GhosttyRenderStateData
 pattern GhosttyRenderStateDataColorForeground = GhosttyRenderStateData (#const GHOSTTY_RENDER_STATE_DATA_COLOR_FOREGROUND)
 
--- | @GHOSTTY_RENDER_STATE_DATA_COLOR_CURSOR@: Cursor color when explicitly set by terminal state (GhosttyColorRgb). Returns GHOSTTY\_INVALID\_VALUE if no explicit cursor color is set; use COLOR\_CURSOR\_HAS\_VALUE to check first.
+-- | @GHOSTTY_RENDER_STATE_DATA_COLOR_CURSOR@: Cursor color when explicitly set by terminal state (GhosttyColorRgb). Returns GHOSTTY\_NO\_VALUE if no explicit cursor color is set.
 pattern GhosttyRenderStateDataColorCursor :: GhosttyRenderStateData
 pattern GhosttyRenderStateDataColorCursor = GhosttyRenderStateData (#const GHOSTTY_RENDER_STATE_DATA_COLOR_CURSOR)
 
@@ -327,7 +316,7 @@ pattern GhosttyRenderStateDataColorCursorHasValue = GhosttyRenderStateData (#con
 pattern GhosttyRenderStateDataColorPalette :: GhosttyRenderStateData
 pattern GhosttyRenderStateDataColorPalette = GhosttyRenderStateData (#const GHOSTTY_RENDER_STATE_DATA_COLOR_PALETTE)
 
--- | @GHOSTTY_RENDER_STATE_DATA_CURSOR_VISUAL_STYLE@: The visual style of the cursor (GhosttyRenderStateCursorVisualStyle).
+-- | @GHOSTTY_RENDER_STATE_DATA_CURSOR_VISUAL_STYLE@: The visual style of the cursor (GhosttyCursorStyle).
 pattern GhosttyRenderStateDataCursorVisualStyle :: GhosttyRenderStateData
 pattern GhosttyRenderStateDataCursorVisualStyle = GhosttyRenderStateData (#const GHOSTTY_RENDER_STATE_DATA_CURSOR_VISUAL_STYLE)
 
@@ -343,19 +332,19 @@ pattern GhosttyRenderStateDataCursorBlinking = GhosttyRenderStateData (#const GH
 pattern GhosttyRenderStateDataCursorPasswordInput :: GhosttyRenderStateData
 pattern GhosttyRenderStateDataCursorPasswordInput = GhosttyRenderStateData (#const GHOSTTY_RENDER_STATE_DATA_CURSOR_PASSWORD_INPUT)
 
--- | @GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_HAS_VALUE@: Whether the cursor is visible within the viewport (bool). If false, the cursor viewport position values are undefined.
+-- | @GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_HAS_VALUE@: Whether the cursor is visible within the viewport (bool). If false, querying the cursor viewport position values returns GHOSTTY\_NO\_VALUE.
 pattern GhosttyRenderStateDataCursorViewportHasValue :: GhosttyRenderStateData
 pattern GhosttyRenderStateDataCursorViewportHasValue = GhosttyRenderStateData (#const GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_HAS_VALUE)
 
--- | @GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_X@: Cursor viewport x position in cells (uint16\_t). Only valid when CURSOR\_VIEWPORT\_HAS\_VALUE is true.
+-- | @GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_X@: Cursor viewport x position in cells (uint16\_t). Returns GHOSTTY\_NO\_VALUE when CURSOR\_VIEWPORT\_HAS\_VALUE is false.
 pattern GhosttyRenderStateDataCursorViewportX :: GhosttyRenderStateData
 pattern GhosttyRenderStateDataCursorViewportX = GhosttyRenderStateData (#const GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_X)
 
--- | @GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_Y@: Cursor viewport y position in cells (uint16\_t). Only valid when CURSOR\_VIEWPORT\_HAS\_VALUE is true.
+-- | @GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_Y@: Cursor viewport y position in cells (uint16\_t). Returns GHOSTTY\_NO\_VALUE when CURSOR\_VIEWPORT\_HAS\_VALUE is false.
 pattern GhosttyRenderStateDataCursorViewportY :: GhosttyRenderStateData
 pattern GhosttyRenderStateDataCursorViewportY = GhosttyRenderStateData (#const GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_Y)
 
--- | @GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_WIDE_TAIL@: Whether the cursor is on the tail of a wide character (bool). Only valid when CURSOR\_VIEWPORT\_HAS\_VALUE is true.
+-- | @GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_WIDE_TAIL@: Whether the cursor is on the tail of a wide character (bool). Returns GHOSTTY\_NO\_VALUE when CURSOR\_VIEWPORT\_HAS\_VALUE is false.
 pattern GhosttyRenderStateDataCursorViewportWideTail :: GhosttyRenderStateData
 pattern GhosttyRenderStateDataCursorViewportWideTail = GhosttyRenderStateData (#const GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_WIDE_TAIL)
 
@@ -371,15 +360,15 @@ pattern GhosttyRenderStateDataColors = GhosttyRenderStateData (#const GHOSTTY_RE
 pattern GhosttyRenderStateDataOverscan :: GhosttyRenderStateData
 pattern GhosttyRenderStateDataOverscan = GhosttyRenderStateData (#const GHOSTTY_RENDER_STATE_DATA_OVERSCAN)
 
--- | @GHOSTTY_RENDER_STATE_DATA_OVERSCAN_REQUEST@: The overscan request most recently set with GHOSTTY\_RENDER\_STATE\_OPTION\_OVERSCAN (GhosttyRenderStateOverscan). The next update uses this request. Both sides are zero if it was never set.
+-- | @GHOSTTY_RENDER_STATE_DATA_OVERSCAN_REQUEST@: The overscan request most recently set with GHOSTTY\_RENDER\_STATE\_OPT\_OVERSCAN (GhosttyRenderStateOverscan). The next update uses this request. Both sides are zero if it was never set.
 pattern GhosttyRenderStateDataOverscanRequest :: GhosttyRenderStateData
 pattern GhosttyRenderStateDataOverscanRequest = GhosttyRenderStateData (#const GHOSTTY_RENDER_STATE_DATA_OVERSCAN_REQUEST)
 
--- | @GHOSTTY_RENDER_STATE_DATA_IMAGE_ITERATOR@: Populate an existing GhosttyRenderStateImageIterator with the image placements found by the last update. See \"Images\" in the render state overview.
+-- | @GHOSTTY_RENDER_STATE_DATA_IMAGE_ITERATOR@: Populate an existing GhosttyRenderStateImageIterator with the image placements found by the last update. See @guide@-images-drawing.
 pattern GhosttyRenderStateDataImageIterator :: GhosttyRenderStateData
 pattern GhosttyRenderStateDataImageIterator = GhosttyRenderStateData (#const GHOSTTY_RENDER_STATE_DATA_IMAGE_ITERATOR)
 
--- | @GHOSTTY_RENDER_STATE_DATA_IMAGE_PLACEMENTS_GENERATION@: A value (uint64\_t) that changes whenever an update changes the placements that GHOSTTY\_RENDER\_STATE\_DATA\_IMAGE\_ITERATOR returns. If it matches the value from the last time you read the iterator, the placements are the same and you don\'t need to read them again. See \"Knowing When Images Changed\" in the render state overview for an example and for exactly when the value changes.
+-- | @GHOSTTY_RENDER_STATE_DATA_IMAGE_PLACEMENTS_GENERATION@: A value (uint64\_t) that changes whenever an update changes the placements that GHOSTTY\_RENDER\_STATE\_DATA\_IMAGE\_ITERATOR returns. If it matches the value from the last time you read the iterator, the placements are the same and you don\'t need to read them again. See @guide@-images-changes for an example and for exactly when the value changes.
 pattern GhosttyRenderStateDataImagePlacementsGeneration :: GhosttyRenderStateData
 pattern GhosttyRenderStateDataImagePlacementsGeneration = GhosttyRenderStateData (#const GHOSTTY_RENDER_STATE_DATA_IMAGE_PLACEMENTS_GENERATION)
 
@@ -469,13 +458,17 @@ newtype GhosttyRenderStateOption = GhosttyRenderStateOption CInt
   deriving stock (Eq, Show)
   deriving newtype (Storable)
 
--- | @GHOSTTY_RENDER_STATE_OPTION_DIRTY@: Set dirty state (GhosttyRenderStateDirty).
-pattern GhosttyRenderStateOptionDirty :: GhosttyRenderStateOption
-pattern GhosttyRenderStateOptionDirty = GhosttyRenderStateOption (#const GHOSTTY_RENDER_STATE_OPTION_DIRTY)
+-- | @GHOSTTY_RENDER_STATE_OPT_INVALID@: Not a real option. ghostty\_render\_state\_set() returns GHOSTTY\_INVALID\_VALUE for it. Its value is 0, so a zeroed or uninitialized variable is never mistaken for a real option.
+pattern GhosttyRenderStateOptInvalid :: GhosttyRenderStateOption
+pattern GhosttyRenderStateOptInvalid = GhosttyRenderStateOption (#const GHOSTTY_RENDER_STATE_OPT_INVALID)
 
--- | @GHOSTTY_RENDER_STATE_OPTION_OVERSCAN@: Request overscan rows above and below the viewport (GhosttyRenderStateOverscan). The request takes effect on the next update and stays in effect until it is changed. Both sides are zero by default, which captures only the viewport. The rows of the last update can still be read after changing the request. Expect a full redraw on the update after a change. See \"Overscan\" in the render state overview.
-pattern GhosttyRenderStateOptionOverscan :: GhosttyRenderStateOption
-pattern GhosttyRenderStateOptionOverscan = GhosttyRenderStateOption (#const GHOSTTY_RENDER_STATE_OPTION_OVERSCAN)
+-- | @GHOSTTY_RENDER_STATE_OPT_DIRTY@: Set dirty state (GhosttyRenderStateDirty). Each update sets this value itself, so there is no default to restore and a NULL value returns GHOSTTY\_INVALID\_VALUE.
+pattern GhosttyRenderStateOptDirty :: GhosttyRenderStateOption
+pattern GhosttyRenderStateOptDirty = GhosttyRenderStateOption (#const GHOSTTY_RENDER_STATE_OPT_DIRTY)
+
+-- | @GHOSTTY_RENDER_STATE_OPT_OVERSCAN@: Request overscan rows above and below the viewport (GhosttyRenderStateOverscan). The request takes effect on the next update and stays in effect until it is changed. Both sides are zero by default, which captures only the viewport. A NULL value restores that default. The rows of the last update can still be read after changing the request. Expect a full redraw on the update after a change. See @guide@-rendering-overscan.
+pattern GhosttyRenderStateOptOverscan :: GhosttyRenderStateOption
+pattern GhosttyRenderStateOptOverscan = GhosttyRenderStateOption (#const GHOSTTY_RENDER_STATE_OPT_OVERSCAN)
 
 -- | Any value this binding does not name: a newer library's.
 pattern GhosttyRenderStateOptionUnknown :: CInt -> GhosttyRenderStateOption
@@ -484,8 +477,9 @@ pattern GhosttyRenderStateOptionUnknown n <- GhosttyRenderStateOption (unnamed g
     GhosttyRenderStateOptionUnknown n = GhosttyRenderStateOption n
 
 {-# COMPLETE
-  GhosttyRenderStateOptionDirty,
-  GhosttyRenderStateOptionOverscan,
+  GhosttyRenderStateOptInvalid,
+  GhosttyRenderStateOptDirty,
+  GhosttyRenderStateOptOverscan,
   GhosttyRenderStateOptionUnknown
   #-}
 
@@ -497,8 +491,9 @@ ghosttyRenderStateOptionEnum =
     { name = "GhosttyRenderStateOption",
       size = (#size GhosttyRenderStateOption),
       values =
-        [ ("GHOSTTY_RENDER_STATE_OPTION_DIRTY", (#const GHOSTTY_RENDER_STATE_OPTION_DIRTY)),
-          ("GHOSTTY_RENDER_STATE_OPTION_OVERSCAN", (#const GHOSTTY_RENDER_STATE_OPTION_OVERSCAN))
+        [ ("GHOSTTY_RENDER_STATE_OPT_INVALID", (#const GHOSTTY_RENDER_STATE_OPT_INVALID)),
+          ("GHOSTTY_RENDER_STATE_OPT_DIRTY", (#const GHOSTTY_RENDER_STATE_OPT_DIRTY)),
+          ("GHOSTTY_RENDER_STATE_OPT_OVERSCAN", (#const GHOSTTY_RENDER_STATE_OPT_OVERSCAN))
         ]
     }
 
@@ -548,56 +543,6 @@ ghosttyRenderStateDirtyEnum =
         [ ("GHOSTTY_RENDER_STATE_DIRTY_FALSE", (#const GHOSTTY_RENDER_STATE_DIRTY_FALSE)),
           ("GHOSTTY_RENDER_STATE_DIRTY_PARTIAL", (#const GHOSTTY_RENDER_STATE_DIRTY_PARTIAL)),
           ("GHOSTTY_RENDER_STATE_DIRTY_FULL", (#const GHOSTTY_RENDER_STATE_DIRTY_FULL))
-        ]
-    }
-
--- | @GhosttyRenderStateCursorVisualStyle@: Visual style of the cursor.
-newtype GhosttyRenderStateCursorVisualStyle = GhosttyRenderStateCursorVisualStyle CInt
-  deriving stock (Eq, Show)
-  deriving newtype (Storable)
-
--- | @GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_BAR@: Bar cursor (DECSCUSR 5, 6).
-pattern GhosttyRenderStateCursorVisualStyleBar :: GhosttyRenderStateCursorVisualStyle
-pattern GhosttyRenderStateCursorVisualStyleBar = GhosttyRenderStateCursorVisualStyle (#const GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_BAR)
-
--- | @GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_BLOCK@: Block cursor (DECSCUSR 1, 2).
-pattern GhosttyRenderStateCursorVisualStyleBlock :: GhosttyRenderStateCursorVisualStyle
-pattern GhosttyRenderStateCursorVisualStyleBlock = GhosttyRenderStateCursorVisualStyle (#const GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_BLOCK)
-
--- | @GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_UNDERLINE@: Underline cursor (DECSCUSR 3, 4).
-pattern GhosttyRenderStateCursorVisualStyleUnderline :: GhosttyRenderStateCursorVisualStyle
-pattern GhosttyRenderStateCursorVisualStyleUnderline = GhosttyRenderStateCursorVisualStyle (#const GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_UNDERLINE)
-
--- | @GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_BLOCK_HOLLOW@: Hollow block cursor.
-pattern GhosttyRenderStateCursorVisualStyleBlockHollow :: GhosttyRenderStateCursorVisualStyle
-pattern GhosttyRenderStateCursorVisualStyleBlockHollow = GhosttyRenderStateCursorVisualStyle (#const GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_BLOCK_HOLLOW)
-
--- | Any value this binding does not name: a newer library's.
-pattern GhosttyRenderStateCursorVisualStyleUnknown :: CInt -> GhosttyRenderStateCursorVisualStyle
-pattern GhosttyRenderStateCursorVisualStyleUnknown n <- GhosttyRenderStateCursorVisualStyle (unnamed ghosttyRenderStateCursorVisualStyleEnum -> Just n)
-  where
-    GhosttyRenderStateCursorVisualStyleUnknown n = GhosttyRenderStateCursorVisualStyle n
-
-{-# COMPLETE
-  GhosttyRenderStateCursorVisualStyleBar,
-  GhosttyRenderStateCursorVisualStyleBlock,
-  GhosttyRenderStateCursorVisualStyleUnderline,
-  GhosttyRenderStateCursorVisualStyleBlockHollow,
-  GhosttyRenderStateCursorVisualStyleUnknown
-  #-}
-
--- | Every value of @GhosttyRenderStateCursorVisualStyle@, for the layout test (§3.4). It is also what
--- 'GhosttyRenderStateCursorVisualStyleUnknown' excludes.
-ghosttyRenderStateCursorVisualStyleEnum :: CEnum
-ghosttyRenderStateCursorVisualStyleEnum =
-  CEnum
-    { name = "GhosttyRenderStateCursorVisualStyle",
-      size = (#size GhosttyRenderStateCursorVisualStyle),
-      values =
-        [ ("GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_BAR", (#const GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_BAR)),
-          ("GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_BLOCK", (#const GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_BLOCK)),
-          ("GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_UNDERLINE", (#const GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_UNDERLINE)),
-          ("GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_BLOCK_HOLLOW", (#const GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_BLOCK_HOLLOW))
         ]
     }
 
@@ -653,7 +598,7 @@ data GhosttyRenderStateCursor = GhosttyRenderStateCursor
     -- | @password_input@: Whether the cursor is at a password input field.
     passwordInput :: CBool,
     -- | @visual_style@: The visual style of the cursor.
-    visualStyle :: GhosttyRenderStateCursorVisualStyle
+    visualStyle :: GhosttyCursorStyle
   }
   deriving stock (Eq, Show)
 
@@ -822,7 +767,7 @@ pattern GhosttyRenderStateRowDataCellsRaw = GhosttyRenderStateRowData (#const GH
 pattern GhosttyRenderStateRowDataViewportY :: GhosttyRenderStateRowData
 pattern GhosttyRenderStateRowDataViewportY = GhosttyRenderStateRowData (#const GHOSTTY_RENDER_STATE_ROW_DATA_VIEWPORT_Y)
 
--- | @GHOSTTY_RENDER_STATE_ROW_DATA_ID@: The row\'s identity across updates (GhosttyRenderStateRowId). This works with or without overscan. See \"Row Identity\" in the render state overview.
+-- | @GHOSTTY_RENDER_STATE_ROW_DATA_ID@: The row\'s identity across updates (GhosttyRenderStateRowId). This works with or without overscan. See @guide@-rendering-row-identity.
 pattern GhosttyRenderStateRowDataId :: GhosttyRenderStateRowData
 pattern GhosttyRenderStateRowDataId = GhosttyRenderStateRowData (#const GHOSTTY_RENDER_STATE_ROW_DATA_ID)
 
@@ -879,9 +824,13 @@ newtype GhosttyRenderStateRowOption = GhosttyRenderStateRowOption CInt
   deriving stock (Eq, Show)
   deriving newtype (Storable)
 
--- | @GHOSTTY_RENDER_STATE_ROW_OPTION_DIRTY@: Set dirty state for the current row (bool).
-pattern GhosttyRenderStateRowOptionDirty :: GhosttyRenderStateRowOption
-pattern GhosttyRenderStateRowOptionDirty = GhosttyRenderStateRowOption (#const GHOSTTY_RENDER_STATE_ROW_OPTION_DIRTY)
+-- | @GHOSTTY_RENDER_STATE_ROW_OPT_INVALID@: Not a real option. ghostty\_render\_state\_row\_set() returns GHOSTTY\_INVALID\_VALUE for it. Its value is 0, so a zeroed or uninitialized variable is never mistaken for a real option.
+pattern GhosttyRenderStateRowOptInvalid :: GhosttyRenderStateRowOption
+pattern GhosttyRenderStateRowOptInvalid = GhosttyRenderStateRowOption (#const GHOSTTY_RENDER_STATE_ROW_OPT_INVALID)
+
+-- | @GHOSTTY_RENDER_STATE_ROW_OPT_DIRTY@: Set dirty state for the current row (bool). Each update sets this value itself, so there is no default to restore and a NULL value returns GHOSTTY\_INVALID\_VALUE.
+pattern GhosttyRenderStateRowOptDirty :: GhosttyRenderStateRowOption
+pattern GhosttyRenderStateRowOptDirty = GhosttyRenderStateRowOption (#const GHOSTTY_RENDER_STATE_ROW_OPT_DIRTY)
 
 -- | Any value this binding does not name: a newer library's.
 pattern GhosttyRenderStateRowOptionUnknown :: CInt -> GhosttyRenderStateRowOption
@@ -890,7 +839,8 @@ pattern GhosttyRenderStateRowOptionUnknown n <- GhosttyRenderStateRowOption (unn
     GhosttyRenderStateRowOptionUnknown n = GhosttyRenderStateRowOption n
 
 {-# COMPLETE
-  GhosttyRenderStateRowOptionDirty,
+  GhosttyRenderStateRowOptInvalid,
+  GhosttyRenderStateRowOptDirty,
   GhosttyRenderStateRowOptionUnknown
   #-}
 
@@ -902,7 +852,8 @@ ghosttyRenderStateRowOptionEnum =
     { name = "GhosttyRenderStateRowOption",
       size = (#size GhosttyRenderStateRowOption),
       values =
-        [ ("GHOSTTY_RENDER_STATE_ROW_OPTION_DIRTY", (#const GHOSTTY_RENDER_STATE_ROW_OPTION_DIRTY))
+        [ ("GHOSTTY_RENDER_STATE_ROW_OPT_INVALID", (#const GHOSTTY_RENDER_STATE_ROW_OPT_INVALID)),
+          ("GHOSTTY_RENDER_STATE_ROW_OPT_DIRTY", (#const GHOSTTY_RENDER_STATE_ROW_OPT_DIRTY))
         ]
     }
 
@@ -1026,19 +977,19 @@ pattern GhosttyRenderStateRowCellsDataStyle = GhosttyRenderStateRowCellsData (#c
 pattern GhosttyRenderStateRowCellsDataGraphemesLen :: GhosttyRenderStateRowCellsData
 pattern GhosttyRenderStateRowCellsDataGraphemesLen = GhosttyRenderStateRowCellsData (#const GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_LEN)
 
--- | @GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_BUF@: Write grapheme codepoints into a caller-provided buffer (uint32\_t\*). The buffer must be at least graphemes\_len elements. The base codepoint is written first, followed by any extra codepoints.
+-- | @GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_BUF@: Copy the cell\'s grapheme codepoints into a buffer you provide (GhosttyCodepointBuffer).
 pattern GhosttyRenderStateRowCellsDataGraphemesBuf :: GhosttyRenderStateRowCellsData
 pattern GhosttyRenderStateRowCellsDataGraphemesBuf = GhosttyRenderStateRowCellsData (#const GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_BUF)
 
--- | @GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_BG_COLOR@: The resolved background color of the cell (GhosttyColorRgb). Flattens the three possible sources: content-tag bg\_color\_rgb, content-tag bg\_color\_palette (looked up in the palette), or the style\'s bg\_color. Returns GHOSTTY\_INVALID\_VALUE if the cell has no background color, in which case the caller should use whatever default background color it wants (e.g. the terminal background).
+-- | @GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_BG_COLOR@: The resolved background color of the cell (GhosttyColorRgb). Flattens the three possible sources: content-tag bg\_color\_rgb, content-tag bg\_color\_palette (looked up in the palette), or the style\'s bg\_color.
 pattern GhosttyRenderStateRowCellsDataBgColor :: GhosttyRenderStateRowCellsData
 pattern GhosttyRenderStateRowCellsDataBgColor = GhosttyRenderStateRowCellsData (#const GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_BG_COLOR)
 
--- | @GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_FG_COLOR@: The resolved foreground color of the cell (GhosttyColorRgb). Resolves palette indices through the palette. Bold color handling is not applied; the caller should handle bold styling separately. Returns GHOSTTY\_INVALID\_VALUE if the cell has no explicit foreground color, in which case the caller should use whatever default foreground color it wants (e.g. the terminal foreground).
+-- | @GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_FG_COLOR@: The resolved foreground color of the cell (GhosttyColorRgb). Resolves palette indices through the palette. Bold color handling is not applied; you should handle bold styling separately. Returns GHOSTTY\_NO\_VALUE if the cell has no foreground color of its own. Draw it with your default foreground, such as the terminal\'s.
 pattern GhosttyRenderStateRowCellsDataFgColor :: GhosttyRenderStateRowCellsData
 pattern GhosttyRenderStateRowCellsDataFgColor = GhosttyRenderStateRowCellsData (#const GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_FG_COLOR)
 
--- | @GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_SELECTED@: Whether the cell is contained within the current selection (bool). This returns true when the cell\'s column is within the current row\'s row-local selection range, and false otherwise. Rendering policy for selected cells (colors, inversion, etc.) is left to the caller.
+-- | @GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_SELECTED@: Whether the cell is contained within the current selection (bool). This returns true when the cell\'s column is within the current row\'s row-local selection range, and false otherwise. Rendering policy for selected cells (colors, inversion, etc.) is left to you.
 pattern GhosttyRenderStateRowCellsDataSelected :: GhosttyRenderStateRowCellsData
 pattern GhosttyRenderStateRowCellsDataSelected = GhosttyRenderStateRowCellsData (#const GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_SELECTED)
 
@@ -1138,11 +1089,11 @@ pattern GhosttyRenderStateImageDataProtocol = GhosttyRenderStateImageData (#cons
 pattern GhosttyRenderStateImageDataImageId :: GhosttyRenderStateImageData
 pattern GhosttyRenderStateImageDataImageId = GhosttyRenderStateImageData (#const GHOSTTY_RENDER_STATE_IMAGE_DATA_IMAGE_ID)
 
--- | @GHOSTTY_RENDER_STATE_IMAGE_DATA_IMAGE_GENERATION@: The generation of the image\'s contents (uint64\_t). It changes whenever the image\'s pixels change, including when an animation moves to a new frame. Use it as part of your texture cache key, with the protocol and image ID: if it matches the texture you have, you don\'t need to read the pixels again. For Kitty graphics, this is the same value as GHOSTTY\_KITTY\_IMAGE\_DATA\_GENERATION.
+-- | @GHOSTTY_RENDER_STATE_IMAGE_DATA_IMAGE_GENERATION@: The generation of the image\'s contents (uint64\_t). It changes whenever the image\'s pixels change, including when an animation moves to a new frame. Use it as part of your texture cache key, with the protocol and image ID: if it matches the texture you have, you don\'t need to read the pixels again. For Kitty graphics, this is the same value as GHOSTTY\_KITTY\_GRAPHICS\_IMAGE\_DATA\_GENERATION.
 pattern GhosttyRenderStateImageDataImageGeneration :: GhosttyRenderStateImageData
 pattern GhosttyRenderStateImageDataImageGeneration = GhosttyRenderStateImageData (#const GHOSTTY_RENDER_STATE_IMAGE_DATA_IMAGE_GENERATION)
 
--- | @GHOSTTY_RENDER_STATE_IMAGE_DATA_LAYER@: The layer to draw the image in (GhosttyRenderStateImageLayer).
+-- | @GHOSTTY_RENDER_STATE_IMAGE_DATA_LAYER@: The layer to draw the image in (GhosttyImageLayer).
 pattern GhosttyRenderStateImageDataLayer :: GhosttyRenderStateImageData
 pattern GhosttyRenderStateImageDataLayer = GhosttyRenderStateImageData (#const GHOSTTY_RENDER_STATE_IMAGE_DATA_LAYER)
 
@@ -1150,11 +1101,11 @@ pattern GhosttyRenderStateImageDataLayer = GhosttyRenderStateImageData (#const G
 pattern GhosttyRenderStateImageDataZ :: GhosttyRenderStateImageData
 pattern GhosttyRenderStateImageDataZ = GhosttyRenderStateImageData (#const GHOSTTY_RENDER_STATE_IMAGE_DATA_Z)
 
--- | @GHOSTTY_RENDER_STATE_IMAGE_DATA_VIEWPORT_COL@: The column of the top-left cell (int32\_t), where 0 is the leftmost column of the viewport. Fixed and relative placements are reported at their full size, so they can start to the left of the viewport, which gives a negative value. Virtual placements never do. See \"Images Partly Outside the Captured Rows\" in the @render@ documentation.
+-- | @GHOSTTY_RENDER_STATE_IMAGE_DATA_VIEWPORT_COL@: The column of the top-left cell (int32\_t), where 0 is the leftmost column of the viewport. Fixed and relative placements are reported at their full size, so they can start to the left of the viewport, which gives a negative value. Virtual placements never do. See @guide@-images-clipping.
 pattern GhosttyRenderStateImageDataViewportCol :: GhosttyRenderStateImageData
 pattern GhosttyRenderStateImageDataViewportCol = GhosttyRenderStateImageData (#const GHOSTTY_RENDER_STATE_IMAGE_DATA_VIEWPORT_COL)
 
--- | @GHOSTTY_RENDER_STATE_IMAGE_DATA_VIEWPORT_ROW@: The row of the top-left cell (int32\_t), where 0 is the top row of the viewport. A placement in an overscan row above the viewport has a negative row, the same as GHOSTTY\_RENDER\_STATE\_ROW\_DATA\_VIEWPORT\_Y. Fixed and relative placements are reported at their full size, so they can also start above the first overscan row. Virtual placements are always inside the captured rows. See \"Images Partly Outside the Captured Rows\" in the @render@ documentation.
+-- | @GHOSTTY_RENDER_STATE_IMAGE_DATA_VIEWPORT_ROW@: The row of the top-left cell (int32\_t), where 0 is the top row of the viewport. A placement in an overscan row above the viewport has a negative row, the same as GHOSTTY\_RENDER\_STATE\_ROW\_DATA\_VIEWPORT\_Y. Fixed and relative placements are reported at their full size, so they can also start above the first overscan row. Virtual placements are always inside the captured rows. See @guide@-images-clipping.
 pattern GhosttyRenderStateImageDataViewportRow :: GhosttyRenderStateImageData
 pattern GhosttyRenderStateImageDataViewportRow = GhosttyRenderStateImageData (#const GHOSTTY_RENDER_STATE_IMAGE_DATA_VIEWPORT_ROW)
 
@@ -1308,50 +1259,6 @@ ghosttyImageProtocolEnum =
       size = (#size GhosttyImageProtocol),
       values =
         [ ("GHOSTTY_IMAGE_PROTOCOL_KITTY", (#const GHOSTTY_IMAGE_PROTOCOL_KITTY))
-        ]
-    }
-
--- | @GhosttyRenderStateImageLayer@: Where an image is drawn relative to the terminal\'s text.
-newtype GhosttyRenderStateImageLayer = GhosttyRenderStateImageLayer CInt
-  deriving stock (Eq, Show)
-  deriving newtype (Storable)
-
--- | @GHOSTTY_RENDER_STATE_IMAGE_LAYER_BELOW_BACKGROUND@: Below the cell background colors.
-pattern GhosttyRenderStateImageLayerBelowBackground :: GhosttyRenderStateImageLayer
-pattern GhosttyRenderStateImageLayerBelowBackground = GhosttyRenderStateImageLayer (#const GHOSTTY_RENDER_STATE_IMAGE_LAYER_BELOW_BACKGROUND)
-
--- | @GHOSTTY_RENDER_STATE_IMAGE_LAYER_BELOW_TEXT@: Above the cell background colors and below the text.
-pattern GhosttyRenderStateImageLayerBelowText :: GhosttyRenderStateImageLayer
-pattern GhosttyRenderStateImageLayerBelowText = GhosttyRenderStateImageLayer (#const GHOSTTY_RENDER_STATE_IMAGE_LAYER_BELOW_TEXT)
-
--- | @GHOSTTY_RENDER_STATE_IMAGE_LAYER_ABOVE_TEXT@: Above the text.
-pattern GhosttyRenderStateImageLayerAboveText :: GhosttyRenderStateImageLayer
-pattern GhosttyRenderStateImageLayerAboveText = GhosttyRenderStateImageLayer (#const GHOSTTY_RENDER_STATE_IMAGE_LAYER_ABOVE_TEXT)
-
--- | Any value this binding does not name: a newer library's.
-pattern GhosttyRenderStateImageLayerUnknown :: CInt -> GhosttyRenderStateImageLayer
-pattern GhosttyRenderStateImageLayerUnknown n <- GhosttyRenderStateImageLayer (unnamed ghosttyRenderStateImageLayerEnum -> Just n)
-  where
-    GhosttyRenderStateImageLayerUnknown n = GhosttyRenderStateImageLayer n
-
-{-# COMPLETE
-  GhosttyRenderStateImageLayerBelowBackground,
-  GhosttyRenderStateImageLayerBelowText,
-  GhosttyRenderStateImageLayerAboveText,
-  GhosttyRenderStateImageLayerUnknown
-  #-}
-
--- | Every value of @GhosttyRenderStateImageLayer@, for the layout test (§3.4). It is also what
--- 'GhosttyRenderStateImageLayerUnknown' excludes.
-ghosttyRenderStateImageLayerEnum :: CEnum
-ghosttyRenderStateImageLayerEnum =
-  CEnum
-    { name = "GhosttyRenderStateImageLayer",
-      size = (#size GhosttyRenderStateImageLayer),
-      values =
-        [ ("GHOSTTY_RENDER_STATE_IMAGE_LAYER_BELOW_BACKGROUND", (#const GHOSTTY_RENDER_STATE_IMAGE_LAYER_BELOW_BACKGROUND)),
-          ("GHOSTTY_RENDER_STATE_IMAGE_LAYER_BELOW_TEXT", (#const GHOSTTY_RENDER_STATE_IMAGE_LAYER_BELOW_TEXT)),
-          ("GHOSTTY_RENDER_STATE_IMAGE_LAYER_ABOVE_TEXT", (#const GHOSTTY_RENDER_STATE_IMAGE_LAYER_ABOVE_TEXT))
         ]
     }
 

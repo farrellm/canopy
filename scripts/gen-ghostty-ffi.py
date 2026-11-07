@@ -28,9 +28,9 @@ in place. Each directive is alone on its line, as `{{kind args}}`:
     {{shim F}}             in the C shim header: a static inline pointer shim
                            for function F, which takes or returns a struct by
                            value (DESIGN.md §3.3)
-    {{pin}}                ghosttyPinnedCommit, GHOSTTY_COMMIT as a constant,
-                           which ghostty-effectful's version check compares
-                           with the linked library's (DESIGN.md §4.7)
+    {{pin}}                ghosttyPinnedVersion, LIBGHOSTTY_VT_VERSION as a
+                           constant, which ghostty-effectful's version check
+                           compares with the linked library's (DESIGN.md §4.7)
 
     {{xenum H T}}, {{xstruct H T}}, {{xfn wrapper|dynamic H T}}, {{xmodes}},
     {{xdefines H T P}}
@@ -43,7 +43,7 @@ it gets a Tag suffix and a note saying why; when it is its enum's Unknown view
 camelCase, `data` becoming `data_`.
 
 Run from the repository root. The headers are read from
-`_deps/ghostty/<GHOSTTY_COMMIT>/include` (scripts/build-libghostty.sh), or
+`_deps/ghostty/<LIBGHOSTTY_VT_VERSION>/include` (scripts/build-libghostty.sh), or
 from `--include`.
 """
 
@@ -137,7 +137,7 @@ def sentence(p: str) -> str:
 
 def type_line(paras):
     for p in paras:
-        m = re.match(r"(Input/output|Input|Output) type: (.*)", p)
+        m = re.match(r"(Input/output|Input|Output|Value) type: (.*?)(?:\. Default:.*)?$", p, re.M)
         if m:
             return f"{m.group(1)} type: @{m.group(2).strip()}@."
     return None
@@ -209,9 +209,9 @@ def paren(t: str) -> str:
 
 
 class Gen:
-    def __init__(self, headers: Headers, commit: str):
+    def __init__(self, headers: Headers, version: str):
         self.h = headers
-        self.commit = commit
+        self.version = version
         self.rows = []
 
     def parse_enum(self, header, name):
@@ -546,11 +546,11 @@ class Gen:
             return self.shim(rest[0])
         if kind == "pin":
             return [
-                "-- | @GHOSTTY_COMMIT@, the libghostty-vt commit this binding was generated",
-                "-- against. The linked library's @VERSION_BUILD@ must be exactly this",
-                "-- (DESIGN.md §3.4, §4.7).",
-                "ghosttyPinnedCommit :: ByteString",
-                f'ghosttyPinnedCommit = "{self.commit}"',
+                "-- | @LIBGHOSTTY_VT_VERSION@, the libghostty-vt release this binding was",
+                "-- generated against. The linked library's 'ghosttyVersion' must be exactly",
+                "-- this (DESIGN.md §3.4, §4.7).",
+                "ghosttyPinnedVersion :: ByteString",
+                f'ghosttyPinnedVersion = "{self.version}"',
             ]
         if kind == "enumrows":
             rows = ",\n".join(self.rows)
@@ -579,8 +579,8 @@ def main() -> int:
     parser.add_argument("--check", action="store_true", help="fail if a committed file is stale")
     parser.add_argument("--include", type=Path, help="the libghostty-vt include directory")
     args = parser.parse_args()
-    commit = (PKG / "GHOSTTY_COMMIT").read_text().strip()
-    gen = Gen(Headers(args.include or Path("_deps/ghostty") / commit / "include"), commit)
+    version = (PKG / "LIBGHOSTTY_VT_VERSION").read_text().strip()
+    gen = Gen(Headers(args.include or Path("_deps/ghostty") / version / "include"), version)
 
     # Sources first, so that {{enumrows}} in the test sees every enum.
     templates = sorted(GEN.rglob("*.in"), key=lambda p: (p.parts[2] == "test", p.as_posix()))
