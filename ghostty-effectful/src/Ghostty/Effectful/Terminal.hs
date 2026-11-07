@@ -66,7 +66,7 @@ import Ghostty.Effectful.Internal.Terminal
     trackPoint,
     untrackRef,
   )
-import Ghostty.Effectful.Point (KnownCoord (..), Point)
+import Ghostty.Effectful.Point (KnownCoord (..), Point, SCoord (..))
 import Ghostty.Effectful.Terminal.Keys
 
 -- | Open a terminal for the duration of the action, and free it when the
@@ -179,7 +179,17 @@ untrack ref = do
 refPoint :: forall c s es. (Ghostty :> es, KnownCoord c) => TrackedRef s -> Eff es (Maybe (Point c))
 refPoint ref = do
   _ <- owned "refPoint"
-  unsafeEff_ (fmap fromCoordinate <$> refCoordinate ref (pointTag (coordSing @c)))
+  unsafeEff_ $ case coordSing @c of
+    -- The library gives a cell of the active area a scrollback row past the
+    -- scrollback (its screen row), the converse of 'pastHistory'. A cell
+    -- with an active position is not in the scrollback. Regression 7.
+    SHistory ->
+      refCoordinate ref (pointTag SActive) >>= \case
+        Just _ -> pure Nothing
+        Nothing -> coordinate
+    _ -> coordinate
+  where
+    coordinate = fmap fromCoordinate <$> refCoordinate ref (pointTag (coordSing @c))
 
 -- | Move a reference to the cell at a point of the active screen. 'False',
 -- and the reference unchanged, if the point is outside its coordinate

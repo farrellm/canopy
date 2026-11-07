@@ -195,6 +195,9 @@ Written as changes land, not at release (DESIGN.md §2.9).
 - Fixed: a scrollback point past the end of the scrollback resolved to an active-area row, since
   the library bounds a history row only by the whole screen; `track`, `moveRef` and `formatRange`
   now refuse it (regression 6; DESIGN.md §4.4).
+- Fixed: `refPoint @'History` of a reference to an active-area cell gave a scrollback row past the
+  scrollback (the cell's screen row), the converse of regression 6; it is now `Nothing`
+  (regression 7; DESIGN.md §4.4).
 
 ### M0: infrastructure
 

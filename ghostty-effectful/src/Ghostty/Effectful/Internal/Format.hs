@@ -29,7 +29,7 @@ module Ghostty.Effectful.Internal.Format
   )
 where
 
-import Control.Exception (bracket, throwIO)
+import Control.Exception (bracket, finally, throwIO)
 import Data.ByteString qualified as BS
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Marshal.Utils (fromBool, with)
@@ -179,7 +179,7 @@ formatWith t o sel =
         p <- peek outPtr
         n <- peek outLen
         -- Empty output is a null pointer, which ghostty_free accepts.
-        BS.packCStringLen (castPtr p, fromIntegral n) <* ghosttyFree nullPtr p n
+        BS.packCStringLen (castPtr p, fromIntegral n) `finally` ghosttyFree nullPtr p n
   where
     newFormatter op = alloca $ \out -> do
       expectSuccess (CallSite "ghostty_formatter_terminal_new")
@@ -201,7 +201,9 @@ formatTerminalRange t o range = do
     Block a b -> pure (a, b, True)
     WholeRows a b -> do
       cols <- getData t.handle Cols
-      pure (Point {col = 0, row = a}, Point {col = cols - 1, row = b}, False)
+      -- The span runs from the first cell of the upper row to the last of
+      -- the lower, whichever order the rows were given in.
+      pure (Point {col = 0, row = min a b}, Point {col = cols - 1, row = max a b}, False)
   let (from, to, rectangle) = ends
   gridRef t from >>= \case
     Nothing -> pure Nothing

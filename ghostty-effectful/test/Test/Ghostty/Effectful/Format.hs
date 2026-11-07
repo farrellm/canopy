@@ -127,6 +127,10 @@ ranges =
       r <- formatted "abcdef\r\nghijkl\r\nmnopqr" $ \t ->
         formatRange t plain (Block @'Active (Point 4 2) (Point 1 0))
       r @?= Just "bcde\nhijk\nnopq",
+    testCase "whole rows are whole in either order" $ do
+      r <- formatted "abcdef\r\nghijkl\r\nmnopqr" $ \t ->
+        (,) <$> formatRange t plain (WholeRows @'Active 2 0) <*> formatRange t plain (WholeRows @'Active 0 2)
+      r @?= (Just "abcdef\nghijkl\nmnopqr", Just "abcdef\nghijkl\nmnopqr"),
     testCase "whole rows of the grid reach into the scrollback" $ do
       r <- formatted scrolled $ \t -> do
         grid' <- formatRange t plain (WholeRows @'Grid 1 3)

@@ -727,7 +727,9 @@ carry their coordinate system in their type (`refPoint @'Grid`), and a point out
 library does not refuse: a scrollback (`History`) row past the end of the scrollback resolves to the
 active row that many rows down (at the pin, `PageList.pin` bounds a history row only by the whole
 screen). So every call that takes a point checks a `History` row against `SCROLLBACK_ROWS` first
-(M1.8, regression 6).
+(M1.8, regression 6). Conversely, the library reads a reference to an active-area cell back as a
+`History` row past the scrollback, so `refPoint @'History` is `Nothing` for any cell with an `Active`
+position (regression 7).
 
 ### 4.5 Callbacks become events
 
