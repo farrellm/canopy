@@ -1,6 +1,6 @@
 # DESIGN.md §2.8. One GHC, because base ^>=4.21.2.0 admits only 9.12 (D10).
-# Steps 1–7 are M0's exit condition. Step 8, the benchmark gate (§12.3),
-# arrives with the first benchmark; the nightly canopy-e2e job (§11.5) with M3.
+# Steps 1–7 are M0's exit condition; step 8, the benchmark gate (§12.3),
+# arrived with M1.10. The nightly canopy-e2e job (§11.5) arrives with M3.
 name: CI
 
 on:
@@ -123,6 +123,15 @@ jobs:
       # 7
       - name: Haddock, with a coverage floor
         run: cabal haddock all $CABAL_FLAGS --haddock-quickjump 2>&1 | python3 scripts/check-haddock.py
+
+      # 8: the allocation gate (§12.3). Allocation does not depend on the
+      # machine, so a developer machine's baseline holds here; time is
+      # reported, not gated. The slack absorbs the few KB a run's bookkeeping
+      # varies by on the benchmarks whose per-byte work allocates nothing.
+      - name: Benchmark allocation gate
+        run: |
+          cabal bench ghostty-effectful-bench $CABAL_FLAGS --benchmark-options="--csv $RUNNER_TEMP/ghostty-effectful-bench.csv"
+          python3 scripts/check-allocation.py --slack 4096 ghostty-effectful/bench/baseline/ghc-9.12.4.csv "$RUNNER_TEMP/ghostty-effectful-bench.csv"
 
   lint:
     name: Lint and format

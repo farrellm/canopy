@@ -21,9 +21,9 @@ two disagree, the design is the intent and the code is behind. Conventions are c
 | `cabal.project` | Lists the seven packages. |
 | `.ormolu` | ormolu's fixities and re-exports (§2.5). Copied from cassini. Not style config. |
 | `.hlint.yaml`, `lint/` | §2.6's layering rules, their fixtures, and `lint/check-layering.sh`. |
-| `scripts/` | `build-libghostty.sh` (with `prefetch-zig-deps.py`), `vendor-tree-sitter.sh`, `gen-ts-shims.py`, `gen-ghostty-ffi.py`, `check-ghostty-coverage.py`, `check-ghostty-signatures.py`, `check-ghostty-safety.py`, `check-common-stanzas.sh`, `check-haddock.py`, `check-layout-rows.py`. |
+| `scripts/` | `build-libghostty.sh` (with `prefetch-zig-deps.py`), `vendor-tree-sitter.sh`, `gen-ts-shims.py`, `gen-ghostty-ffi.py`, `check-ghostty-coverage.py`, `check-ghostty-signatures.py`, `check-ghostty-safety.py`, `check-common-stanzas.sh`, `check-haddock.py`, `check-layout-rows.py`, `check-allocation.py`. |
 | `_deps/` | Gitignored output of `build-libghostty.sh`: the Zig, the ghostty checkout, and the built library. |
-| `.github/workflows/ci.yml` | CI, §2.8 steps 1–7. Step 8 arrives with the first benchmark. |
+| `.github/workflows/ci.yml` | CI, §2.8 steps 1–8. |
 
 ## Rules
 
@@ -71,3 +71,7 @@ root:
   `scripts/check-common-stanzas.sh` and `python3 scripts/check-layout-rows.py`
 - Format: `ormolu --mode check $(git ls-files '*.hs')`
 - Haddock: `cabal haddock all 2>&1 | python3 scripts/check-haddock.py`
+- Benchmarks (§12.3): `cabal bench ghostty-effectful-bench <CI's flags> --benchmark-options="--csv out.csv"`,
+  then `python3 scripts/check-allocation.py --slack 4096 ghostty-effectful/bench/baseline/ghc-9.12.4.csv out.csv`.
+  Name the suite: the root is no package's directory. A baseline is regenerated only on purpose,
+  in a commit that says why.

@@ -52,5 +52,9 @@ events instead of callbacks. No export may expose a pointer.
 - **A C enum is closed at this level, with no unknown case**: an unnamed value is `UnknownEnum`
   (`Internal.Convert.unknownEnum`), because the version check and the layout test rule it out.
 - Tests may import `Internal` (to build values or reach `runGhosttyPinnedTo`).
+- **Benchmarks** (§12.3, M1.10) are `ghostty-effectful-bench`, in `bench/Bench/**`, through the public
+  API only. CI gates their allocation against `bench/baseline/ghc-9.12.4.csv`. Each iteration is a
+  whole terminal life (`runGhostty`, open, feed, free), so no iteration feeds a terminal another
+  left scrollback in.
 
 Its doctest runs the real library, so `LD_LIBRARY_PATH` must come from `build-libghostty.sh`.
