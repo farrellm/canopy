@@ -26,6 +26,7 @@ where
 
 import Control.Exception (throwIO)
 import Foreign.C.Types (CInt)
+import Foreign.Marshal.Utils (toBool)
 import Ghostty.Effectful.Color (Rgb (..))
 import Ghostty.Effectful.Error (CallSite, GhosttyError (..))
 import Ghostty.Effectful.Mode (ModeKey (..))
@@ -113,7 +114,6 @@ fromStyle site s = do
       StyleColorPalette i -> pure (PaletteColor i)
       StyleColorRgb c -> pure (RgbColor (fromRgb c))
       StyleColorOther (GhosttyStyleColorTag n) -> unknownEnum site ghosttyStyleColorTagEnum n
-    toBool b = b /= 0
 
 -- | The tag of a coordinate system.
 pointTag :: SCoord c -> GhosttyPointTag

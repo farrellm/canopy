@@ -23,15 +23,16 @@ import Data.ByteString qualified as BS
 import Foreign.C.Types (CBool, CSize)
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Marshal.Array (allocaArray, peekArray, withArray)
-import Foreign.Marshal.Utils (fromBool, with)
+import Foreign.Marshal.Utils (fromBool, toBool, with)
 import Foreign.Ptr (Ptr, castPtr, nullPtr)
 import Foreign.Storable (Storable (..))
 import Ghostty.Effectful.Color (Palette, paletteColors, paletteFromList)
 import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), ResultCode (..))
-import Ghostty.Effectful.Internal.Callbacks (Answers (..), setEnquiryAnswer, setXtversionAnswer)
+import Ghostty.Effectful.Internal.Callbacks (Answers (..), captureRelease, setEnquiryAnswer, setXtversionAnswer)
 import Ghostty.Effectful.Internal.Convert (enumName, fromRgb, fromStyle, modeCode, toRgb, unknownEnum)
 import Ghostty.Effectful.Internal.Error (expectSuccess, resultCode)
-import Ghostty.Effectful.Internal.Terminal (Terminal (..))
+import Ghostty.Effectful.Internal.Terminal (Terminal (..), wrote)
+import Ghostty.Effectful.Mode (ModeKey (..))
 import Ghostty.Effectful.Style (Style)
 import Ghostty.Effectful.Terminal.Keys
   ( ChecksumExtension (..),
@@ -166,9 +167,9 @@ getData h key = case key of
   ColorCursorDefault -> fmap fromRgb <$> maybeValue
   ColorPaletteDefault -> palette
   KittyImageStorageLimit -> maybeValue
-  KittyImageMediumFile -> fmap (/= 0) <$> (maybeValue :: IO (Maybe CBool))
+  KittyImageMediumFile -> fmap toBool <$> (maybeValue :: IO (Maybe CBool))
   KittyImageMediumTempFile -> traverse decode =<< maybeValue
-  KittyImageMediumSharedMem -> fmap (/= 0) <$> (maybeValue :: IO (Maybe CBool))
+  KittyImageMediumSharedMem -> fmap toBool <$> (maybeValue :: IO (Maybe CBool))
   ViewportActive -> flag
   VtProcessingError -> flag
   ScrollbackMaxBytes -> fmap toWord <$> maybeValue
@@ -176,7 +177,7 @@ getData h key = case key of
   ContinuationMaxBytes -> word
   Mode m -> do
     c <- fetchInto (GhosttyTerminalModeConfig {mode = modeCode m, value = 0})
-    maybe (throwIO (Invariant site ResultNoValue)) (pure . (/= 0) . (.value)) c
+    maybe (throwIO (Invariant site ResultNoValue)) (pure . toBool . (.value)) c
   VtGround -> flag
   CursorAtPrompt -> flag
   ClipboardWriteMaxBytes -> word
@@ -307,7 +308,7 @@ memoryUsage n =
 fromMemoryUsage :: GhosttyTerminalMemoryUsage -> Memory
 fromMemoryUsage u =
   Memory
-    { compressionSupported = u.compressionSupported /= 0,
+    { compressionSupported = toBool u.compressionSupported,
       primary =
         ScreenMemory
           u.primaryPages
@@ -330,8 +331,16 @@ fromMemoryUsage u =
 -- Nothing a constructor can carry is refused, so a refusal is 'Invariant'.
 -- An option that sets the answer to a query is not the library's: it
 -- changes what the binding's callback answers with (DESIGN.md §4.5).
+--
+-- Every write counts as a change of the terminal ('wrote'). Turning
+-- synchronized output off ends a render hold, which calls no callback, so
+-- it drops every render state's captured frame here (§4.3).
 setOption :: Terminal s -> TerminalOption a -> a -> IO ()
-setOption t opt v = case opt of
+setOption t opt v = wrote t >> writeOption t opt v
+
+-- | 'setOption' without the count.
+writeOption :: Terminal s -> TerminalOption a -> a -> IO ()
+writeOption t opt v = case opt of
   SetTitle -> text v put
   SetPwd -> text v put
   SetColorForeground -> maybeWith (toRgb <$> v) put
@@ -353,8 +362,11 @@ setOption t opt v = case opt of
   SetScrollbackMaxLines -> maybeWith (toCSize <$> v) put
   SetContinuationMaxBytes -> with (toCSize v) (put . castPtr)
   SetTitleReport -> flag v
-  SetModeDefault m -> with (GhosttyTerminalModeConfig {mode = modeCode m, value = fromBool v}) (put . castPtr)
-  SetMode m -> with (GhosttyTerminalModeConfig {mode = modeCode m, value = fromBool v}) (put . castPtr)
+  SetModeDefault m -> modeValue m v
+  SetMode ModeSyncOutput -> do
+    modeValue ModeSyncOutput v
+    unless v $ captureRelease t.installed
+  SetMode m -> modeValue m v
   SetUnknownMaxBytes -> with (toCSize v) (put . castPtr)
   SetTerminfoName -> text (fromTerminfoName v) put
   SetClipboardWriteMaxBytes -> with (toCSize v) (put . castPtr)
@@ -378,6 +390,9 @@ setOption t opt v = case opt of
 
     flag :: Bool -> IO ()
     flag b = with (fromBool b :: CBool) (put . castPtr)
+
+    modeValue :: ModeKey r -> Bool -> IO ()
+    modeValue m b = with (GhosttyTerminalModeConfig {mode = modeCode m, value = fromBool b}) (put . castPtr)
 
     toCSize :: Word -> CSize
     toCSize = fromIntegral

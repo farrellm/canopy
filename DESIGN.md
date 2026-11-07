@@ -586,10 +586,16 @@ is the session.
 
 ### 4.3 Borrowed data: frames
 
-Render-state iterators and cell data are valid only until the next `render_state_update`. That is a
-second, shorter region:
+Render-state iterators and cell data are valid only until the next `render_state_update`. A render
+state is a region of its own inside its terminal's, and a frame a second, shorter region inside that:
 
 ```haskell
+withRenderState
+  :: Ghostty :> es
+  => Terminal t
+  -> (forall s. RenderState s -> Eff es a)
+  -> Eff es a
+
 withFrame
   :: Ghostty :> es
   => RenderState s
@@ -603,7 +609,42 @@ cells     :: Row s f -> Eff es (Vector Cell)   -- Cell is a copied Haskell value
 `Row s f` and anything else borrowed carries the frame tag `f`, so it cannot be held across an update.
 Data that leaves the frame is **copied** into plain Haskell values (`Cell`, `Style`, `Rgb`,
 `Hyperlink`), which carry no tag. The copy is the price of safety, and it is paid only for dirty rows
-(§12.1).
+(§12.1). (M1.7.) A render state gets its own rank-2 region, not its terminal's `s`, because it is
+freed before the terminal is: with the terminal's tag it could outlive its `free`.
+
+- **Dirty state belongs to frames.** `withFrame` updates the render state; a frame that returns
+  marks its changes consumed (`render_state_clean`), and one that throws does not, so the next frame
+  reports them again. `dirtyRows` is the header's dirty iteration: none, the changed rows, or every
+  row. Neither dirty option is exposed. A `withFrame` inside another on the same render state is that
+  frame: it neither updates nor consumes.
+- **The rows are read through one iterator per render state**, reused by every frame. Iterators
+  only move forward, so the render state records how far its row iterator has moved and refills it
+  only to go back; rows read in order cost one step each.
+- **Frame and row data are typed keys** (`FrameData a`, `RowData a`, read with `getF` and `getR`),
+  one constructor per header row as in §4.4, prefixed `Render…` and `Row…` so they do not collide
+  with the terminal's. Rows without one: the iterators (how rows and cells are read), the bulk raw
+  cell view, selection (M6.5), image placements (M6.15), and overscan. **No overscan is requested**:
+  overscan is for renderers that shift the grid by part of a row to scroll smoothly, and canopy draws
+  whole rows into a host terminal. A cursor value the header calls undefined outside the viewport is
+  `Nothing`. The cell keys a copy reads into `Cell` are held against the header the same way.
+- **A synchronized-output hold shows the frame from when it began** (§4.5's question, answered).
+  When a program sets mode 2026, the terminal holds exactly the frame the program wants left on
+  screen, but the bytes after it are processed in the same write, and `vt_write_until` cannot stop
+  at a CSI. The header's answer is to update the render state inside the `RENDER_HOLD` callback. That
+  is a C call, and §4.1's third goal keeps Haskell out of callbacks, so the callback is C
+  (`cbits/gveff_terminal.c`): it updates every render state attached to the terminal and marks each
+  held, then calls the Haskell callback that appends the `RenderHold` event. Until the hold ends,
+  `withFrame` does not update a held render state (`frameHeld` says so). The terminal has no clock,
+  so ending a hold that lasts too long is the caller's, by turning the mode off; that calls no
+  callback, so `setT` drops every capture of the terminal itself when it turns the mode off. (It
+  was first noticed lazily, by `withFrame` reading the mode, but turning the mode off and on again
+  before a frame then brought the old hold's frame back.) A hold that begins while
+  a frame of a render state is open is not captured into it, because the update would invalidate the
+  rows being read; that render state shows the terminal live after.
+- **A hyperlink's URI is not in the render state**, only whether a cell has one. It is read from the
+  terminal at the cell's viewport position, which is right only while the terminal is the frame's
+  moment. So each terminal counts the calls that change it, a frame records the count, and a linked
+  cell's `uri` is `Nothing` in a held frame or once the count has moved.
 
 ### 4.4 Typed keys
 
@@ -670,7 +711,7 @@ every `Word8`), `Style` (`.Style`), `Point (c :: Coord)` (`.Point`). A test enum
 constructors (`[Some TerminalData]`, kept exhaustive by a `-Wincomplete-patterns` match in the test)
 and calls each on a fresh terminal against its expected value; another writes every option and
 reads it back where a key reads the same setting. The same treatment applies to render-state data,
-row and cell data (M1.7).
+row and cell data (§4.3).
 
 **Tracked grid references** (`TrackedRef s`) follow a cell as the terminal scrolls, prunes and
 reflows; blocks are pairs of them (§7.3). A terminal owns the references made from it in a registry,
@@ -735,17 +776,20 @@ inspect. Size is answered from the terminal's own grid and cell size, kept by `r
 attributes callback that declines gets the library's defaults (VT220 with ANSI colour), not silence,
 so `defaultDeviceAttributes` is those and the callback always answers. ENQ and XTVERSION are answered
 by a callback that returns a `GhosttyString` by value, which no Haskell function can be (§3.3), so
-those two answers are returned by C (`ghostty-effectful/cbits/gveff_answers.c`) from bytes the
+those two answers are returned by C (`ghostty-effectful/cbits/gveff_terminal.c`) from bytes the
 binding owns, reached through `USERDATA`. A clipboard write must be answered before its callback
 returns, so whether to accept it is configuration too (`SetClipboardWrite`, off by default): accepted,
 it is an event and the program is told it succeeded; refused, it is dropped and the program told it
 was denied. `CLIPBOARD_READ` is never installed, so a program's clipboard read is answered as empty;
 installing it would also turn on kitty paste events, which nothing wants yet.
 
-A render hold's frame is a question for M1.7: the header asks the embedder to capture the frame in
+A render hold's frame was a question for M1.7: the header asks the embedder to capture the frame in
 the `RENDER_HOLD` callback, because by the time the write returns the bytes after mode 2026 was set
 have been processed, and `vt_write_until` cannot stop at a CSI. The event comes in order, but the
-frame it points at is gone by then.
+frame it points at is gone by then. Answered in §4.3: the callback is C, captures into each render
+state of the terminal, and then calls the Haskell callback, which only appends, as every other does.
+The terminal's `USERDATA` is one C struct (`GveffUserdata`): the two answer strings, first, and the
+render states a hold captures into.
 
 ### 4.6 Concurrency
 

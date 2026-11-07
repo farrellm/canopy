@@ -30,6 +30,8 @@ module Ghostty.Effectful.Internal.Terminal
     -- * Calls
     openTerminal,
     closeTerminal,
+    wrote,
+    forgetRegion,
 
     -- * Tracked references
     trackPoint,
@@ -43,7 +45,7 @@ where
 import Control.Exception (onException, throwIO)
 import Data.IntMap.Strict qualified as IntMap
 import Foreign.Marshal.Alloc (alloca)
-import Foreign.Marshal.Utils (with)
+import Foreign.Marshal.Utils (toBool, with)
 import Foreign.Ptr (nullPtr)
 import Foreign.Storable (peek)
 import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), ResultCode (..))
@@ -88,7 +90,12 @@ data Terminal s = Terminal
     -- | what the query callbacks answer with
     answers :: IORef Answers,
     -- | the callbacks, freed with the terminal
-    installed :: Installed
+    installed :: Installed,
+    -- | how many calls have changed the terminal or its viewport: a frame
+    -- read when this was one value describes the terminal only while it
+    -- still is. Every operation that writes, resizes, resets, sets an
+    -- option or scrolls the viewport counts ('wrote').
+    writes :: IORef Word64
   }
 
 -- | A tracked reference to a cell of a terminal in the region @s@: it
@@ -173,7 +180,27 @@ openTerminal cfg = do
   installed <-
     installCallbacks handle events answers cfg.enquiry (encodeUtf8 cfg.xtversion)
       `onException` ghosttyTerminalFree handle
-  pure Terminal {handle, refs, nextRef, events, answers, installed}
+  writes <- newIORef 0
+  pure Terminal {handle, refs, nextRef, events, answers, installed, writes}
+
+-- | Count a call that changed the terminal (§4.3: a frame's hyperlinks are
+-- read from the terminal only while it has not changed since).
+wrote :: Terminal s -> IO ()
+wrote t = modifyIORef' t.writes (+ 1)
+
+-- | The same terminal, its region forgotten, for a handle scoped inside the
+-- region that keeps it (a render state).
+forgetRegion :: Terminal s -> Terminal ()
+forgetRegion t =
+  Terminal
+    { handle = t.handle,
+      refs = t.refs,
+      nextRef = t.nextRef,
+      events = t.events,
+      answers = t.answers,
+      installed = t.installed,
+      writes = t.writes
+    }
 
 -- | Free every tracked reference still registered, taking their number off
 -- the counter, then @ghostty_terminal_free@, then the callbacks, which the
@@ -258,4 +285,4 @@ refHasValue :: TrackedRef s -> IO Bool
 refHasValue ref =
   registered ref >>= \case
     Nothing -> pure False
-    Just h -> (/= 0) <$> ghosttyTrackedGridRefHasValue h
+    Just h -> toBool <$> ghosttyTrackedGridRefHasValue h
