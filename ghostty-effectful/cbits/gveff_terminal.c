@@ -49,9 +49,8 @@ bool gveff_capture_held(const GveffUserdata *ud, GhosttyRenderState state) {
   return false;
 }
 
-void gveff_capture_release(GveffUserdata *ud, GhosttyRenderState state) {
-  for (size_t i = 0; i < ud->count; i++)
-    if (ud->captures[i].state == state) ud->captures[i].held = false;
+void gveff_capture_release(GveffUserdata *ud) {
+  for (size_t i = 0; i < ud->count; i++) ud->captures[i].held = false;
 }
 
 void gveff_capture_framing(GveffUserdata *ud, GhosttyRenderState state, bool framing) {

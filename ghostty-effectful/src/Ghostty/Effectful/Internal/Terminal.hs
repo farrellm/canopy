@@ -31,6 +31,7 @@ module Ghostty.Effectful.Internal.Terminal
     openTerminal,
     closeTerminal,
     wrote,
+    forgetRegion,
 
     -- * Tracked references
     trackPoint,
@@ -44,7 +45,7 @@ where
 import Control.Exception (onException, throwIO)
 import Data.IntMap.Strict qualified as IntMap
 import Foreign.Marshal.Alloc (alloca)
-import Foreign.Marshal.Utils (with)
+import Foreign.Marshal.Utils (toBool, with)
 import Foreign.Ptr (nullPtr)
 import Foreign.Storable (peek)
 import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), ResultCode (..))
@@ -187,6 +188,20 @@ openTerminal cfg = do
 wrote :: Terminal s -> IO ()
 wrote t = modifyIORef' t.writes (+ 1)
 
+-- | The same terminal, its region forgotten, for a handle scoped inside the
+-- region that keeps it (a render state).
+forgetRegion :: Terminal s -> Terminal ()
+forgetRegion t =
+  Terminal
+    { handle = t.handle,
+      refs = t.refs,
+      nextRef = t.nextRef,
+      events = t.events,
+      answers = t.answers,
+      installed = t.installed,
+      writes = t.writes
+    }
+
 -- | Free every tracked reference still registered, taking their number off
 -- the counter, then @ghostty_terminal_free@, then the callbacks, which the
 -- terminal can no longer call.
@@ -270,4 +285,4 @@ refHasValue :: TrackedRef s -> IO Bool
 refHasValue ref =
   registered ref >>= \case
     Nothing -> pure False
-    Just h -> (/= 0) <$> ghosttyTrackedGridRefHasValue h
+    Just h -> toBool <$> ghosttyTrackedGridRefHasValue h

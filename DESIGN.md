@@ -636,7 +636,9 @@ freed before the terminal is: with the terminal's tag it could outlive its `free
   held, then calls the Haskell callback that appends the `RenderHold` event. Until the hold ends,
   `withFrame` does not update a held render state (`frameHeld` says so). The terminal has no clock,
   so ending a hold that lasts too long is the caller's, by turning the mode off; that calls no
-  callback, so `withFrame` reads the mode, and a hold found off is dropped. A hold that begins while
+  callback, so `setT` drops every capture of the terminal itself when it turns the mode off. (It
+  was first noticed lazily, by `withFrame` reading the mode, but turning the mode off and on again
+  before a frame then brought the old hold's frame back.) A hold that begins while
   a frame of a render state is open is not captured into it, because the update would invalidate the
   rows being read; that render state shows the terminal live after.
 - **A hyperlink's URI is not in the render state**, only whether a cell has one. It is read from the

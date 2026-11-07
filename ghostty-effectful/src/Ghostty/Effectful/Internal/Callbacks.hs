@@ -54,7 +54,7 @@ import Data.ByteString.Unsafe qualified as BSU
 import Foreign.C.Types (CBool (..), CInt (..), CSize)
 import Foreign.Marshal.Alloc (free, mallocBytes)
 import Foreign.Marshal.Array (peekArray)
-import Foreign.Marshal.Utils (copyBytes, with)
+import Foreign.Marshal.Utils (copyBytes, toBool, with)
 import Foreign.Ptr (FunPtr, Ptr, castFunPtr, castFunPtrToPtr, castPtr, freeHaskellFunPtr, nullPtr)
 import Foreign.Storable (Storable (..))
 import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), ResultCode (..))
@@ -304,9 +304,9 @@ foreign import capi unsafe "gveff_terminal.h gveff_capture_detach"
 foreign import capi unsafe "gveff_terminal.h gveff_capture_held"
   gveffCaptureHeld :: Ptr GveffUserdata -> GhosttyRenderState -> IO CBool
 
--- | Drop a render state's captured frame.
+-- | Drop every render state's captured frame.
 foreign import capi unsafe "gveff_terminal.h gveff_capture_release"
-  gveffCaptureRelease :: Ptr GveffUserdata -> GhosttyRenderState -> IO ()
+  gveffCaptureRelease :: Ptr GveffUserdata -> IO ()
 
 -- | Mark a frame of a render state open or closed.
 foreign import capi unsafe "gveff_terminal.h gveff_capture_framing"
@@ -332,11 +332,11 @@ captureDetach i = gveffCaptureDetach i.userdata
 -- | Whether a render state holds the frame captured when a hold began, the
 -- hold not having ended since.
 captureHeld :: Installed -> GhosttyRenderState -> IO Bool
-captureHeld i rs = (/= 0) <$> gveffCaptureHeld i.userdata rs
+captureHeld i rs = toBool <$> gveffCaptureHeld i.userdata rs
 
--- | Drop a render state's captured frame: its owner ended the hold by
--- turning the mode off, which calls no callback.
-captureRelease :: Installed -> GhosttyRenderState -> IO ()
+-- | Drop every render state's captured frame: the terminal's owner ended
+-- the hold by turning the mode off, which calls no callback.
+captureRelease :: Installed -> IO ()
 captureRelease i = gveffCaptureRelease i.userdata
 
 -- | Mark a frame of a render state open ('True') or closed. A hold that

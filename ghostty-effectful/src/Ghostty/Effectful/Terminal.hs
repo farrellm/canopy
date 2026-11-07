@@ -65,7 +65,6 @@ import Ghostty.Effectful.Internal.Terminal
     terminalConfig,
     trackPoint,
     untrackRef,
-    wrote,
   )
 import Ghostty.Effectful.Point (KnownCoord (..), Point)
 import Ghostty.Effectful.Terminal.Keys
@@ -149,7 +148,7 @@ getT t key = do
 setT :: (Ghostty :> es) => Terminal s -> TerminalOption a -> a -> Eff es ()
 setT t opt v = do
   _ <- owned "setT"
-  unsafeEff_ (wrote t >> setOption t opt v)
+  unsafeEff_ (setOption t opt v)
 
 -- | Track the cell at a point of the active screen: the reference follows
 -- it as the terminal scrolls, prunes and reflows. 'Nothing' if the point is

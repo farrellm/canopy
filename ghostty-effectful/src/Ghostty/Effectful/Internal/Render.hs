@@ -14,8 +14,10 @@
 -- ("Ghostty.Effectful.Internal.Callbacks"): when a program begins a
 -- synchronized-output hold, the C callback updates it to the frame the
 -- program wants left on screen, and until the hold ends a frame does not
--- update it. While one of its frames is open, the capture leaves it alone,
--- since an update would invalidate the rows being read.
+-- update it. Turning the mode off ends the hold too
+-- ("Ghostty.Effectful.Internal.Keys" drops the capture). While one of its
+-- frames is open, the capture leaves it alone, since an update would
+-- invalidate the rows being read.
 module Ghostty.Effectful.Internal.Render
   ( -- * Representations
     RenderState (..),
@@ -52,28 +54,26 @@ import Data.Vector qualified as V
 import Foreign.C.Types (CBool, CSize)
 import Foreign.Marshal.Alloc (alloca, allocaBytes)
 import Foreign.Marshal.Array (allocaArray, peekArray)
-import Foreign.Marshal.Utils (with)
+import Foreign.Marshal.Utils (toBool, with)
 import Foreign.Ptr (Ptr, castPtr, nullPtr)
 import Foreign.Storable (Storable (..))
 import Ghostty.Effectful.Cell (Cell (..), CellWidth (..), Hyperlink (..), SemanticContent (..))
 import Ghostty.Effectful.Color (Palette, paletteFromList)
 import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), ResultCode (..))
-import Ghostty.Effectful.Internal.Callbacks (Installed, captureAttach, captureDetach, captureFraming, captureHeld, captureRelease)
+import Ghostty.Effectful.Internal.Callbacks (captureAttach, captureDetach, captureFraming, captureHeld)
 import Ghostty.Effectful.Internal.Convert (enumName, fromRgb, fromStyle, toPoint, unknownEnum)
 import Ghostty.Effectful.Internal.Error (expectSuccess, resultCode)
-import Ghostty.Effectful.Internal.Keys (getData)
-import Ghostty.Effectful.Internal.Terminal (Terminal (..))
-import Ghostty.Effectful.Mode (ModeKey (..))
+import Ghostty.Effectful.Internal.Terminal (Terminal (..), forgetRegion)
 import Ghostty.Effectful.Point (Coord (..), Point (..))
 import Ghostty.Effectful.Render.Keys
 import Ghostty.Effectful.Style (defaultStyle)
-import Ghostty.Effectful.Terminal.Keys (CursorShape (..), TerminalData (..))
+import Ghostty.Effectful.Terminal.Keys (CursorShape (..))
 import Ghostty.FFI.Color (GhosttyColorRgb (..))
 import Ghostty.FFI.GridRef (GhosttyGridRef (..), ghosttyGridRefHyperlinkUri)
 import Ghostty.FFI.Render
 import Ghostty.FFI.Screen
 import Ghostty.FFI.Style (GhosttyStyle, ghosttyStyleDefault)
-import Ghostty.FFI.Terminal (GhosttyTerminal, ghosttyTerminalGridRef)
+import Ghostty.FFI.Terminal (ghosttyTerminalGridRef)
 import Ghostty.FFI.Types (GhosttyBuffer (..), GhosttyResult)
 
 -- | A render state of one terminal, alive in the region @s@ that
@@ -81,12 +81,10 @@ import Ghostty.FFI.Types (GhosttyBuffer (..), GhosttyResult)
 data RenderState s = RenderState
   { -- | the library's handle
     handle :: GhosttyRenderState,
-    -- | the terminal it is updated from
-    terminal :: GhosttyTerminal,
-    -- | the terminal's callbacks, which capture held frames into it
-    installed :: Installed,
-    -- | the terminal's count of changes
-    terminalWrites :: IORef Word64,
+    -- | the terminal it is updated from, whose callbacks capture held
+    -- frames into it and whose count of changes dates its frames. Its
+    -- region is forgotten: the render state's own is inside it.
+    terminal :: Terminal (),
     -- | the row iterator every frame reuses
     rowIterator :: GhosttyRenderStateRowIterator,
     -- | the cell iterator every row reuses
@@ -142,9 +140,7 @@ openRenderState t = do
   pure
     RenderState
       { handle = h,
-        terminal = t.handle,
-        installed = t.installed,
-        terminalWrites = t.writes,
+        terminal = forgetRegion t,
         rowIterator = it,
         rowCells = cs,
         advanced,
@@ -160,7 +156,7 @@ openRenderState t = do
 -- itself.
 closeRenderState :: RenderState s -> IO ()
 closeRenderState rs = do
-  captureDetach rs.installed rs.handle
+  captureDetach rs.terminal.installed rs.handle
   ghosttyRenderStateRowCellsFree rs.rowCells
   ghosttyRenderStateRowIteratorFree rs.rowIterator
   ghosttyRenderStateFree rs.handle
@@ -168,31 +164,22 @@ closeRenderState rs = do
 -- * Frames
 
 -- | Open a frame: update the render state from the terminal, unless it holds
--- a captured frame whose hold is still on. A hold its owner ended by turning
--- synchronized output off calls no callback, so the mode is read here, and
--- a hold found off is dropped. A frame opened inside another of the same
--- render state is that frame: it neither updates nor, at its end, cleans.
--- Returns the frame's moment, and whether it is the outermost.
+-- a captured frame whose hold is still on. A frame opened inside another of
+-- the same render state is that frame: it neither updates nor, at its end,
+-- cleans. Returns the frame's moment, and whether it is the outermost.
 beginFrame :: RenderState s -> IO (FrameInfo, Bool)
 beginFrame rs =
   readIORef rs.open >>= \case
     Just info -> pure (info, False)
     Nothing -> do
-      captured <- captureHeld rs.installed rs.handle
-      held <-
-        if not captured
-          then pure False
-          else do
-            syncing <- getData rs.terminal (Mode ModeSyncOutput)
-            unless syncing $ captureRelease rs.installed rs.handle
-            pure syncing
+      held <- captureHeld rs.terminal.installed rs.handle
       unless held $
-        expectSuccess (CallSite "ghostty_render_state_update") =<< ghosttyRenderStateUpdate rs.handle rs.terminal
+        expectSuccess (CallSite "ghostty_render_state_update") =<< ghosttyRenderStateUpdate rs.handle rs.terminal.handle
       writeIORef rs.advanced Nothing
-      w <- readIORef rs.terminalWrites
+      w <- readIORef rs.terminal.writes
       let info = FrameInfo {held, writes = w}
       writeIORef rs.open (Just info)
-      captureFraming rs.installed rs.handle True
+      captureFraming rs.terminal.installed rs.handle True
       pure (info, True)
 
 -- | Close the outermost frame, which ran to its end: its changes are
@@ -208,7 +195,7 @@ endFrame rs = do
 abandonFrame :: RenderState s -> IO ()
 abandonFrame rs = do
   writeIORef rs.open Nothing
-  captureFraming rs.installed rs.handle False
+  captureFraming rs.terminal.installed rs.handle False
 
 -- | Fill the row iterator from the render state.
 fill :: RenderState s -> IO ()
@@ -491,7 +478,7 @@ copyCells row = do
   with rs.rowCells $ \p ->
     expectSuccess (CallSite "ghostty_render_state_row_get GHOSTTY_RENDER_STATE_ROW_DATA_CELLS")
       =<< ghosttyRenderStateRowGet rs.rowIterator GhosttyRenderStateRowDataCells (castPtr p)
-  now <- readIORef rs.terminalWrites
+  now <- readIORef rs.terminal.writes
   let live = not row.frame.info.held && now == row.frame.info.writes
       go x acc =
         ghosttyRenderStateRowCellsNext rs.rowCells >>= \case
@@ -579,7 +566,7 @@ linkUri rs x y = do
       refSite = CallSite "ghostty_terminal_grid_ref"
       uriSite = CallSite "ghostty_grid_ref_hyperlink_uri"
   with point $ \pp -> with (refTemplate (sized refTemplate)) $ \rp -> do
-    expectSuccess refSite =<< ghosttyTerminalGridRef rs.terminal pp rp
+    expectSuccess refSite =<< ghosttyTerminalGridRef rs.terminal.handle pp rp
     alloca $ \np -> do
       let into cap buf = do
             r <- ghosttyGridRefHyperlinkUri rp buf (fromIntegral cap) np
@@ -608,7 +595,3 @@ smallBuffer = 64
 -- | Copy bytes out of a buffer.
 bytesAt :: Ptr Word8 -> Int -> IO ByteString
 bytesAt p n = BS.packCStringLen (castPtr p, n)
-
--- | C @bool@.
-toBool :: CBool -> Bool
-toBool = (/= 0)

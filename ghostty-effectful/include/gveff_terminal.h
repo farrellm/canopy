@@ -70,8 +70,9 @@ void gveff_capture_detach(GveffUserdata *ud, GhosttyRenderState state);
  * hold has not ended since. */
 bool gveff_capture_held(const GveffUserdata *ud, GhosttyRenderState state);
 
-/* Drop a render state's captured frame, for a hold its owner ended itself. */
-void gveff_capture_release(GveffUserdata *ud, GhosttyRenderState state);
+/* Drop every render state's captured frame, for a hold its owner ended
+ * itself by turning the mode off, which calls no callback. */
+void gveff_capture_release(GveffUserdata *ud);
 
 /* Mark a frame of the render state open or closed. While one is open, a hold
  * that begins does not capture into it: its rows are being read, and an update

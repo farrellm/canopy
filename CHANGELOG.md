@@ -168,7 +168,7 @@ Written as changes land, not at release (DESIGN.md §2.9).
   callback is now C (`cbits/gveff_terminal.c`, renamed from `gveff_answers.c` with the terminal's
   `USERDATA` now a struct), which updates every render state attached to the terminal, as the header
   asks, before calling the Haskell callback that appends the event. A hold the caller ends by
-  turning the mode off is noticed at the next frame. A hold that begins while a frame of a render
+  turning the mode off with `setT` ends at once. A hold that begins while a frame of a render
   state is open does not capture into it, since that would invalidate the rows being read.
 - A hyperlink's URI is read from the terminal, so a cell has it only while the terminal is still the
   frame's moment: not in a held frame, nor after the terminal was written to, which a new count of
@@ -177,6 +177,12 @@ Written as changes land, not at release (DESIGN.md §2.9).
   rows read in any order; styles, palette colours, wide and combining characters, links,
   background-only cells, semantic content; every hold case above; every frame and row key on a fresh
   frame and against the header; row identity through a scroll; the cursor outside the viewport.
+- Fixed in review: a hold ended by `setT` turning mode 2026 off was dropped only at the next frame,
+  so turning it on again first brought the old hold's frame back (regression 5; `setT` now drops
+  the captures itself, and `withFrame` no longer reads the mode). `withFrame` opens and arms its
+  frame under `mask`, so an asynchronous exception cannot leave it open for good; a render state
+  with no rows has no rows, not 65536; a row move that fails no longer leaves a stale count for the
+  next read. `setOption` counts every write itself, and a render state keeps its `Terminal`.
 
 ### M0: infrastructure
 

@@ -210,6 +210,16 @@ holds =
         setT t (SetMode ModeSyncOutput) False
         withFrame rs $ \f -> (,frameHeld f) . take 1 <$> texts f
       r @?= (["AB"], False),
+    -- Regression 5 (§4.3): turning the mode off left the capture marked
+    -- held until the next frame read the mode, so turning it on again
+    -- first brought the old hold's frame back.
+    testCase "regression 5: a hold turned off and on again by setT shows the terminal" $ do
+      r <- ghostty $ withTerminal config $ \t -> withRenderState t $ \rs -> do
+        _ <- feed t "A\ESC[?2026hB"
+        setT t (SetMode ModeSyncOutput) False
+        setT t (SetMode ModeSyncOutput) True
+        withFrame rs $ \f -> (,frameHeld f) . take 1 <$> texts f
+      r @?= (["AB"], False),
     testCase "a hold that begins while a frame is open is not captured" $ do
       r <- ghostty $ withTerminal config $ \t -> withRenderState t $ \rs -> do
         _ <- feed t "A"
