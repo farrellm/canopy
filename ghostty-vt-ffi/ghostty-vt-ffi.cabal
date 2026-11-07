@@ -14,7 +14,7 @@ maintainer:         farrellm@alum.mit.edu
 category:           Terminal
 build-type:         Simple
 tested-with:        GHC ==9.12.4
-extra-doc-files:    GHOSTTY_COMMIT
+extra-doc-files:    LIBGHOSTTY_VT_VERSION
 extra-source-files: include/gvtffi_shims.h
 
 -- DESIGN.md §3.1: development links the shared library; releases link the
@@ -86,13 +86,13 @@ library
     , bytestring ^>=0.12
     , canopy-prelude
 
-  -- A missing or wrong library fails at configure time (§3.1). The range
-  -- admits the pinned commit's 0.1.0-dev; ==0.1.* does not parse here.
+  -- A missing or wrong library fails at configure time (§3.1): exactly the
+  -- pinned release, LIBGHOSTTY_VT_VERSION (D-2).
   if flag(static)
-    pkgconfig-depends: libghostty-vt-static >=0.1 && <0.2
+    pkgconfig-depends: libghostty-vt-static ==1.0.0
 
   else
-    pkgconfig-depends: libghostty-vt >=0.1 && <0.2
+    pkgconfig-depends: libghostty-vt ==1.0.0
 
   mixins:
     base hiding (Prelude),
