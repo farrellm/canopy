@@ -225,6 +225,11 @@ forgetRegion t =
 -- terminal can no longer call.
 closeTerminal :: Terminal s -> IO ()
 closeTerminal t = do
+  -- The registry's reads and writes here, in 'trackPoint' and in
+  -- 'untrackRef' are plain, not atomicModifyIORef': only the owner thread
+  -- touches a terminal (DESIGN.md §4.6). This runs as 'bracket''s release,
+  -- masked, so no asynchronous exception falls between the read and the
+  -- write and frees a reference twice.
   live <- readIORef t.refs
   writeIORef t.refs mempty
   traverse_ ghosttyTrackedGridRefFree live
@@ -265,6 +270,8 @@ trackPoint t p = unlessPastHistory t.handle p Nothing $ do
       optionalVia ResultInvalidValue (CallSite "ghostty_terminal_grid_ref_track") $
         ghosttyTerminalGridRefTrack t.handle pp
   forM made $ \ref -> do
+    -- Owner thread only (§4.6, as in 'closeTerminal'), so the key is not
+    -- taken twice.
     key <- readIORef t.nextRef
     writeIORef t.nextRef (key + 1)
     modifyIORef' t.refs (IntMap.insert key ref)
@@ -275,6 +282,8 @@ trackPoint t p = unlessPastHistory t.handle p Nothing $ do
 -- already untracked, or whose terminal is closed, is left alone.
 untrackRef :: TrackedRef s -> IO ()
 untrackRef ref = do
+  -- Owner thread only (§4.6, as in 'closeTerminal'): no other call changes
+  -- the registry between this read and the write below.
   (found, rest) <- IntMap.updateLookupWithKey (\_ _ -> Nothing) ref.key <$> readIORef ref.terminal.refs
   for_ found $ \h -> do
     writeIORef ref.terminal.refs rest

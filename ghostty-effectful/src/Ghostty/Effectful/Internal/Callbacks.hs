@@ -115,6 +115,9 @@ data Pending
 -- empty. 'resolveOnto' takes it in that order, so it is never reversed.
 drain :: IORef [Pending] -> IO [Pending]
 drain buf = do
+  -- A read then a write, not atomicModifyIORef': only the owner thread
+  -- touches the buffer (DESIGN.md §4.6), and the callbacks that append to
+  -- it run on that thread inside a C call, never between the two.
   ps <- readIORef buf
   writeIORef buf []
   pure ps
