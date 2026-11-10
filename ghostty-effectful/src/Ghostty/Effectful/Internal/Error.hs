@@ -72,6 +72,10 @@ succeedsUnless refusal site r = case resultCode r of
   ResultSuccess -> pure True
   c | c == refusal -> pure False
   other -> throwIO (resultError site other)
+-- Inlined, as 'outVia' is: out of line, a caller in a loop (the feed's
+-- @vt_write_until@) builds its call site's thunk on every call, where
+-- inlined it is built only on the error path.
+{-# INLINE succeedsUnless #-}
 
 -- | A value the header says is there, or 'Invariant' with the result that
 -- stands for its absence.
