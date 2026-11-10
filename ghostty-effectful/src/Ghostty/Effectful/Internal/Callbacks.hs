@@ -24,7 +24,7 @@ module Ghostty.Effectful.Internal.Callbacks
   ( -- * Pending events
     Pending (..),
     drain,
-    resolve,
+    resolveOnto,
     joinWrites,
 
     -- * Answers
@@ -112,14 +112,16 @@ data Pending
 
 -- | Take what the buffer holds, oldest first, leaving it empty.
 drain :: IORef [Pending] -> IO [Pending]
-drain buf = reverse <$> atomicModifyIORef' buf ([],)
+drain buf = do
+  ps <- readIORef buf
+  writeIORef buf []
+  pure (reverse ps)
 
--- | Turn drained entries into events, reading what they need from the
--- terminal (through the given read), which is between writes now. Adjacent
--- 'WritePty's are joined, so a reply goes to the PTY in one write. Throws
--- what a callback recorded.
-resolve :: (forall a. TerminalData a -> IO a) -> [Pending] -> IO [TerminalEvent]
-resolve getData ps = joinWrites <$> traverse event ps
+-- | Turn drained entries into events, newest first onto the given ones,
+-- reading what they need from the terminal (through the given read), which
+-- is between writes now. Throws what a callback recorded.
+resolveOnto :: (forall a. TerminalData a -> IO a) -> [TerminalEvent] -> [Pending] -> IO [TerminalEvent]
+resolveOnto getData = foldlM (\acc p -> (: acc) <$> event p)
   where
     event = \case
       Ready e -> pure e
@@ -132,12 +134,19 @@ resolve getData ps = joinWrites <$> traverse event ps
       Unnamed site e n -> unknownEnum site e n
       Failed e -> throwIO e
 
--- | Join adjacent 'WritePty's, so a reply goes to the PTY in one write.
+-- | Join each run of adjacent 'WritePty's into one, so a reply goes to the
+-- PTY in one write.
 joinWrites :: [TerminalEvent] -> [TerminalEvent]
 joinWrites = \case
-  WritePty a : WritePty b : rest -> joinWrites (WritePty (a <> b) : rest)
+  WritePty a : rest@(WritePty _ : _) ->
+    let (more, rest') = writes rest
+     in WritePty (BS.concat (a : more)) : joinWrites rest'
   e : rest -> e : joinWrites rest
   [] -> []
+  where
+    writes = \case
+      WritePty b : rest -> first (b :) (writes rest)
+      rest -> ([], rest)
 
 -- | What a terminal's query callbacks answer with, and the grid they report.
 data Answers = Answers
