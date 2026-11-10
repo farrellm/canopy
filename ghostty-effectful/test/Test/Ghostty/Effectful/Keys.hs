@@ -6,7 +6,6 @@
 -- tables, and the mode list and its index held against the library.
 module Test.Ghostty.Effectful.Keys (tests) where
 
-import Data.Char (isUpper, toUpper)
 import Data.List (stripPrefix)
 import Effectful (Eff, IOE)
 import Foreign.Marshal.Alloc (alloca)
@@ -52,20 +51,16 @@ import Ghostty.FFI.Terminal
     pattern GhosttyTerminalOptWritePty,
   )
 import Ghostty.FFI.Types (pattern GhosttyInvalidValue, pattern GhosttySuccess)
-import Test.Ghostty.Effectful.Support (config, ghostty)
+import Test.Ghostty.Effectful.Support (Some (..), expectJust, headerName, rowName, withFresh)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
-
--- | Some key, its type forgotten.
-data Some f where
-  Some :: f a -> Some f
 
 tests :: TestTree
 tests =
   testGroup
     "Keys"
     [ testCase "every data key reads its fresh-terminal value" $ do
-        failures <- ghostty $ withTerminal config $ \t ->
+        failures <- withFresh $ \t ->
           concat <$> traverse (\(Some k) -> fresh t k) allData
         failures @?= [],
       testCase "every data key is a constructor, or deferred" $
@@ -75,14 +70,14 @@ tests =
         filter (\(c, h) -> h /= Just ("GHOSTTY_TERMINAL_DATA_" <> c)) (map (\(Some k) -> (headerName (show k), rowName ghosttyTerminalDataEnum (dataNumber (dataKey k)))) allData)
           @?= [],
       testCase "every option writes, and reads back where a key reads it" $ do
-        failures <- ghostty $ withTerminal config $ \t ->
+        failures <- withFresh $ \t ->
           concat <$> traverse (\(Some o) -> written t o) allOptions
         failures @?= [],
       -- Regression 11 (DESIGN.md §4.4): at libghostty-vt 1.0 a null value
       -- restores an option's default, and the byte limit's default is
       -- 10,000 bytes, so 'Nothing' set that limit instead of removing it.
       testCase "regression 11: no byte limit is none, not the default" $ do
-        r <- ghostty $ withTerminal config $ \t -> do
+        r <- withFresh $ \t -> do
           setT t SetScrollbackMaxBytes (Just 5000)
           setT t SetScrollbackMaxBytes Nothing
           getT t ScrollbackMaxBytes
@@ -91,7 +86,7 @@ tests =
       -- none of its C calls runs a callback; were one to, its event would
       -- wait here for the next 'feed'.
       testCase "regression 3: writing every option reports nothing" $ do
-        evs <- ghostty $ withTerminal config $ \t -> do
+        evs <- withFresh $ \t -> do
           traverse_ (\(Some o) -> written t o) allOptions
           feed t ""
         evs @?= [],
@@ -102,30 +97,18 @@ tests =
         filter (\(c, h) -> h /= Just ("GHOSTTY_TERMINAL_OPT_" <> c)) (map (\(Some o) -> (headerName (fromMaybe "" (stripPrefix "Set" (show o))), rowName ghosttyTerminalOptionEnum (optionNumber (optionKey o)))) allOptions)
           @?= [],
       testCase "the modes are exactly the ones the library recognises" $ do
-        recognised <- ghostty $ withTerminal config $ \t ->
+        recognised <- withFresh $ \t ->
           liftIO (filterM (recognises t) [ghosttyModeNew n a | n <- [0 .. 0x7fff], a <- [0, 1]])
         sort recognised @?= sort (map (\(SomeModeKey m) -> modeCode m) allModes),
       testCase "a mode's index says whether the library lets its default be set" $ do
-        wrong <- ghostty $ withTerminal config $ \t ->
+        wrong <- withFresh $ \t ->
           liftIO (filterM (\m -> (/=) (configurable m) <$> defaultSettable t m) allModes)
         map show wrong @?= ([] :: [String]),
       testCase "a palette has a colour at every index" $ do
-        p <- maybe (assertFailure "not 256") pure (paletteFromList (map (\i -> Rgb i i i) universe))
+        p <- expectJust "not 256" (paletteFromList (map (\i -> Rgb i i i) universe))
         paletteColor (setPaletteColor 7 (Rgb 1 2 3) p) 7 @?= Rgb 1 2 3
         paletteColor p 255 @?= Rgb 255 255 255
     ]
-
--- | A constructor's name as the header spells its row: the first word of
--- its 'show', in upper snake case (@CursorX@ is @CURSOR_X@).
-headerName :: String -> Text
-headerName = toText . go . takeWhile (/= ' ')
-  where
-    go (c : cs) = toUpper c : concatMap (\x -> if isUpper x then ['_', x] else [toUpper x]) cs
-    go [] = []
-
--- | The header's name for a row's number.
-rowName :: CEnum -> Integer -> Maybe Text
-rowName e n = fst <$> find ((== n) . snd) e.values
 
 -- * Data
 

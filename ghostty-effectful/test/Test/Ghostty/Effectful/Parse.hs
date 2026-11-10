@@ -4,7 +4,6 @@
 module Test.Ghostty.Effectful.Parse (tests) where
 
 import Data.ByteString.Char8 qualified as BC
-import Data.Char (isAlphaNum, toLower)
 import Data.Text qualified as T
 import Ghostty.Effectful.Color (Rgb (..))
 import Ghostty.Effectful.Internal.Parse (oscCommandType)
@@ -12,7 +11,7 @@ import Ghostty.Effectful.Parse
 import Ghostty.Effectful.Style (Underline (..))
 import Ghostty.FFI.Layout (CEnum (..))
 import Ghostty.FFI.Osc (GhosttyOscCommandType (..), ghosttyOscCommandTypeEnum)
-import Test.Ghostty.Effectful.Support (ghostty)
+import Test.Ghostty.Effectful.Support (ghostty, rowName, squash)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=))
 
@@ -165,11 +164,3 @@ allCommands =
 -- | A command's header value.
 code :: OscCommand -> Integer
 code c = let GhosttyOscCommandType n = oscCommandType c in toInteger n
-
--- | The header's name for a value.
-rowName :: CEnum -> Integer -> Maybe Text
-rowName e n = fst <$> find ((== n) . snd) e.values
-
--- | A name without case or underscores.
-squash :: Text -> Text
-squash = T.filter isAlphaNum . T.map toLower

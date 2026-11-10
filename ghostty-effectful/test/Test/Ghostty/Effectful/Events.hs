@@ -8,10 +8,8 @@ module Test.Ghostty.Effectful.Events (tests) where
 
 import Control.Exception (ErrorCall (..))
 import Data.ByteString qualified as BS
-import Effectful (Eff, IOE)
 import Effectful.Exception (try)
 import Foreign.Ptr (castFunPtrToPtr, freeHaskellFunPtr)
-import Ghostty.Effectful (Ghostty)
 import Ghostty.Effectful.Event
 import Ghostty.Effectful.Internal.Callbacks (Pending (..))
 import Ghostty.Effectful.Internal.Size (Extent (..))
@@ -21,7 +19,7 @@ import Ghostty.Effectful.Point (Point (..))
 import Ghostty.Effectful.Terminal
 import Ghostty.FFI.Terminal (ghosttyTerminalSet, pattern GhosttyTerminalOptBell)
 import Ghostty.FFI.Terminal.Callbacks (mkGhosttyTerminalBellFn)
-import Test.Ghostty.Effectful.Support (config, ghostty, grid)
+import Test.Ghostty.Effectful.Support (config, grid, withConfig, withFresh)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=))
 
@@ -240,14 +238,6 @@ sessionEvents =
 -- | A prompt mark with the cursor at a column and row.
 mark :: PromptStep -> Word16 -> Word32 -> TerminalEvent
 mark step c r = SemanticPrompt PromptMark {step, cursor = Point {col = c, row = r}}
-
--- | Run with a fresh terminal of 'config'.
-withFresh :: (forall s. Terminal s -> Eff '[Ghostty, IOE] a) -> IO a
-withFresh = withConfig config
-
--- | Run with a fresh terminal, failing the test on a version mismatch.
-withConfig :: TerminalConfig -> (forall s. Terminal s -> Eff '[Ghostty, IOE] a) -> IO a
-withConfig cfg k = ghostty (withTerminal cfg k)
 
 -- | What a test's injected failure throws.
 boom :: ErrorCall
