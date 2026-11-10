@@ -50,32 +50,28 @@ module Ghostty.Effectful.Internal.Render
 where
 
 import Control.Exception (onException, throwIO)
-import Data.ByteString qualified as BS
 import Data.Vector qualified as V
 import Foreign.C.Types (CBool, CSize)
-import Foreign.Marshal.Alloc (alloca, allocaBytes)
-import Foreign.Marshal.Array (allocaArray, peekArray)
+import Foreign.Marshal.Alloc (alloca)
 import Foreign.Marshal.Utils (toBool, with)
 import Foreign.Ptr (Ptr, castPtr)
 import Foreign.Storable (Storable (..))
 import Ghostty.Effectful.Cell (Cell (..), CellWidth (..), Hyperlink (..), SemanticContent (..))
-import Ghostty.Effectful.Color (Palette, paletteFromList)
 import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), ResultCode (..))
 import Ghostty.Effectful.Internal.Callbacks (captureAttach, captureDetach, captureFraming, captureHeld)
-import Ghostty.Effectful.Internal.Convert (emptyRef, enumName, fromRgb, fromStyle, sized, toPoint, unknownEnum)
-import Ghostty.Effectful.Internal.Error (expectSuccess, newHandle, resultCode)
+import Ghostty.Effectful.Internal.Convert (emptyRef, enumSite, fromCursorStyle, fromPalette, fromRgb, fromStyle, readPalette, toPoint, unfoldWhileM, unknownEnum, withSize)
+import Ghostty.Effectful.Internal.Error (bytesVia, expectSuccess, newHandle, optionalVia, outVia)
 import Ghostty.Effectful.Internal.Terminal (Terminal (..), forgetRegion)
 import Ghostty.Effectful.Point (Coord (..), Point (..))
 import Ghostty.Effectful.Render.Keys
 import Ghostty.Effectful.Style (defaultStyle)
-import Ghostty.Effectful.Terminal.Keys (CursorShape (..))
 import Ghostty.FFI.Color (GhosttyColorRgb (..))
 import Ghostty.FFI.GridRef (ghosttyGridRefHyperlinkUri)
 import Ghostty.FFI.Render
 import Ghostty.FFI.Screen
 import Ghostty.FFI.Style (GhosttyStyle, ghosttyStyleDefault)
 import Ghostty.FFI.Terminal (ghosttyTerminalGridRef)
-import Ghostty.FFI.Types (GhosttyBuffer (..), ghosttyCursorStyleEnum, pattern GhosttyCursorStyleBar, pattern GhosttyCursorStyleBlock, pattern GhosttyCursorStyleBlockHollow, pattern GhosttyCursorStyleUnderline, pattern GhosttyCursorStyleUnknown)
+import Ghostty.FFI.Types (GhosttyBuffer (..), GhosttyResult, pattern GhosttyCursorStyleBar)
 
 -- | A render state of one terminal, alive in the region @s@ that
 -- 'Ghostty.Effectful.Render.withRenderState' opens.
@@ -211,11 +207,9 @@ dirtyRowsOf f = do
   -- The iterator is used up; the next seek fills it again.
   writeIORef rs.advanced Nothing
   alloca $ \yp ->
-    let go acc =
-          ghosttyRenderStateRowIteratorNextDirty rs.rowIterator yp >>= \case
-            0 -> pure (reverse acc)
-            _ -> peek yp >>= \y -> go (Row {frame = f, y} : acc)
-     in go []
+    unfoldWhileM
+      (toBool <$> ghosttyRenderStateRowIteratorNextDirty rs.rowIterator yp)
+      ((\y -> Row {frame = f, y}) <$> peek yp)
 
 -- | Every row of the frame, top to bottom.
 allRowsOf :: Frame s f -> IO [Row s f]
@@ -288,10 +282,8 @@ getFrameData rs key = case key of
   RenderColorForeground -> fromRgb <$> fetch
   RenderColorCursor -> whenHas RenderColorCursorHasValue (fromRgb <$> fetch)
   RenderColorCursorHasValue -> flag
-  RenderColorPalette -> allocaArray 256 $ \p -> do
-    expectSuccess site =<< ghosttyRenderStateGet rs.handle k (castPtr p)
-    palette =<< peekArray 256 p
-  RenderCursorVisualStyle -> fetch >>= cursorShape
+  RenderColorPalette -> readPalette site (ghosttyRenderStateGet rs.handle k . castPtr)
+  RenderCursorVisualStyle -> fetch >>= fromCursorStyle site
   RenderCursorVisible -> flag
   RenderCursorBlinking -> flag
   RenderCursorPasswordInput -> flag
@@ -300,69 +292,58 @@ getFrameData rs key = case key of
   RenderCursorViewportY -> whenHas RenderCursorViewportHasValue fetch
   RenderCursorViewportWideTail -> whenHas RenderCursorViewportHasValue flag
   RenderCursor -> do
-    c <- fetchInto (cursorTemplate (sized cursorTemplate))
-    shape <- cursorShape c.visualStyle
+    c <- fetchInto (withSize cursorTemplate)
+    shape <- fromCursorStyle site c.visualStyle
     pure
       Cursor
         { position =
-            if toBool c.viewportHasValue
-              then
-                Just
-                  CursorPosition
-                    { point = Point {col = c.viewportX, row = fromIntegral c.viewportY},
-                      wideTail = toBool c.wideTail
-                    }
-              else Nothing,
+            CursorPosition
+              { point = Point {col = c.viewportX, row = fromIntegral c.viewportY},
+                wideTail = toBool c.wideTail
+              }
+              <$ guard (toBool c.viewportHasValue),
           visible = toBool c.visible,
           blinking = toBool c.blinking,
           passwordInput = toBool c.passwordInput,
           shape
         }
   RenderColors -> do
-    c <- fetchInto (colorsTemplate (sized colorsTemplate))
-    p <- palette c.palette
+    c <- fetchInto (withSize colorsTemplate)
+    p <- fromPalette site c.palette
     pure
       Colors
         { background = fromRgb c.background,
           foreground = fromRgb c.foreground,
-          cursor = if toBool c.cursorHasValue then Just (fromRgb c.cursor) else Nothing,
+          cursor = fromRgb c.cursor <$ guard (toBool c.cursorHasValue),
           palette = p
         }
   where
     k = frameKey key
-    site = CallSite ("ghostty_render_state_get " <> enumName ghosttyRenderStateDataEnum (let GhosttyRenderStateData n = k in n))
+    site = enumSite "ghostty_render_state_get" ghosttyRenderStateDataEnum (coerce k)
 
+    get :: Ptr b -> IO GhosttyResult
+    get = ghosttyRenderStateGet rs.handle k . castPtr
+
+    -- A sized struct, its size written first.
     fetchInto :: (Storable b) => b -> IO b
     fetchInto v = with v $ \p -> do
-      expectSuccess site =<< ghosttyRenderStateGet rs.handle k (castPtr p)
+      expectSuccess site =<< get p
       peek p
 
     fetch :: (Storable b) => IO b
-    fetch = alloca $ \p -> do
-      expectSuccess site =<< ghosttyRenderStateGet rs.handle k (castPtr p)
-      peek p
+    fetch = outVia site get
 
     flag :: IO Bool
-    flag = toBool <$> (fetch :: IO CBool)
+    flag = toBool @CBool <$> fetch
 
     whenHas :: FrameData Bool -> IO b -> IO (Maybe b)
-    whenHas has act = getFrameData rs has >>= bool (pure Nothing) (Just <$> act)
-
-    palette :: [GhosttyColorRgb] -> IO Palette
-    palette cs = maybe (throwIO (Invariant site ResultInvalidValue)) pure (paletteFromList (map fromRgb cs))
+    whenHas has act = ifM (getFrameData rs has) (Just <$> act) (pure Nothing)
 
     dirty = \case
       GhosttyRenderStateDirtyFalse -> pure NotDirty
       GhosttyRenderStateDirtyPartial -> pure PartlyDirty
       GhosttyRenderStateDirtyFull -> pure FullyDirty
       GhosttyRenderStateDirtyUnknown n -> unknownEnum site ghosttyRenderStateDirtyEnum n
-
-    cursorShape = \case
-      GhosttyCursorStyleBar -> pure BarCursor
-      GhosttyCursorStyleBlock -> pure BlockCursor
-      GhosttyCursorStyleUnderline -> pure UnderlineCursor
-      GhosttyCursorStyleBlockHollow -> pure HollowBlockCursor
-      GhosttyCursorStyleUnknown n -> unknownEnum site ghosttyCursorStyleEnum n
 
 -- | An empty cursor of the given size.
 cursorTemplate :: CSize -> GhosttyRenderStateCursor
@@ -399,7 +380,7 @@ getRowData :: Row s f -> RowData a -> IO a
 getRowData row key = do
   seek row
   case key of
-    RowDirty -> toBool <$> (fetch :: IO CBool)
+    RowDirty -> toBool @CBool <$> fetch
     RowViewportY -> fetch
     RowId -> do
       GhosttyRenderStateRowId bits <- fetch
@@ -408,7 +389,7 @@ getRowData row key = do
         _ -> throwIO (Invariant site ResultInvalidValue)
     RowRaw -> do
       raw :: GhosttyRow <- fetch
-      let rowFlag d = toBool <$> (rowValue raw d :: IO CBool)
+      let rowFlag d = toBool @CBool <$> rowValue raw d
       wrap <- rowFlag GhosttyRowDataWrap
       wrapContinuation <- rowFlag GhosttyRowDataWrapContinuation
       grapheme <- rowFlag GhosttyRowDataGrapheme
@@ -426,18 +407,14 @@ getRowData row key = do
   where
     rs = row.frame.state
     k = rowKey key
-    site = CallSite ("ghostty_render_state_row_get " <> enumName ghosttyRenderStateRowDataEnum (let GhosttyRenderStateRowData n = k in n))
+    site = enumSite "ghostty_render_state_row_get" ghosttyRenderStateRowDataEnum (coerce k)
     rowSite = CallSite "ghostty_row_get"
 
     fetch :: (Storable b) => IO b
-    fetch = alloca $ \p -> do
-      expectSuccess site =<< ghosttyRenderStateRowGet rs.rowIterator k (castPtr p)
-      peek p
+    fetch = outVia site (ghosttyRenderStateRowGet rs.rowIterator k . castPtr)
 
     rowValue :: (Storable b) => GhosttyRow -> GhosttyRowData -> IO b
-    rowValue raw d = alloca $ \p -> do
-      expectSuccess rowSite =<< ghosttyRowGet raw d (castPtr p)
-      peek p
+    rowValue raw d = outVia rowSite (ghosttyRowGet raw d . castPtr)
 
 -- * Cells
 
@@ -467,11 +444,11 @@ copyCells row = do
       =<< ghosttyRenderStateRowGet rs.rowIterator GhosttyRenderStateRowDataCells (castPtr p)
   now <- readIORef rs.terminal.writes
   let live = not row.frame.info.held && now == row.frame.info.writes
-      go x acc =
-        ghosttyRenderStateRowCellsNext rs.rowCells >>= \case
-          0 -> pure (V.fromList (reverse acc))
-          _ -> copyCell rs live row.y x >>= \c -> go (x + 1) (c : acc)
-  go 0 []
+  flip V.unfoldrM 0 $ \x ->
+    ifM
+      (toBool <$> ghosttyRenderStateRowCellsNext rs.rowCells)
+      (Just . (,x + 1) <$> copyCell rs live row.y x)
+      (pure Nothing)
 
 -- | Copy the cell the cell iterator is on, at column @x@ of row @y@.
 copyCell :: RenderState s -> Bool -> Word16 -> Word16 -> IO Cell
@@ -490,61 +467,52 @@ copyCell rs live y x = do
       GhosttyCellSemanticInput -> pure ContentInput
       GhosttyCellSemanticPrompt -> pure ContentPrompt
       GhosttyCellSemanticContentUnknown n -> unknownEnum cellSite ghosttyCellSemanticContentEnum n
-  protected <- toBool <$> (cellValue raw GhosttyCellDataProtected :: IO CBool)
-  linked <- toBool <$> (cellValue raw GhosttyCellDataHasHyperlink :: IO CBool)
-  styled <- toBool <$> (fetch GhosttyRenderStateRowCellsDataHasStyling :: IO CBool)
+  protected <- toBool @CBool <$> cellValue raw GhosttyCellDataProtected
+  linked <- toBool @CBool <$> cellValue raw GhosttyCellDataHasHyperlink
+  styled <- toBool @CBool <$> fetch GhosttyRenderStateRowCellsDataHasStyling
   style <-
-    if not styled
-      then pure defaultStyle
-      else alloca $ \(p :: Ptr GhosttyStyle) -> do
-        ghosttyStyleDefault p
-        expectSuccess (site GhosttyRenderStateRowCellsDataStyle)
-          =<< ghosttyRenderStateRowCellsGet rs.rowCells GhosttyRenderStateRowCellsDataStyle (castPtr p)
-        fromStyle (site GhosttyRenderStateRowCellsDataStyle) =<< peek p
+    if styled
+      then fromStyle (site GhosttyRenderStateRowCellsDataStyle) =<< styleOf
+      else pure defaultStyle
   text <- decodeUtf8 <$> graphemes
   foreground <- color GhosttyRenderStateRowCellsDataFgColor
   background <- color GhosttyRenderStateRowCellsDataBgColor
   hyperlink <-
-    if not linked
-      then pure Nothing
-      else Just . Hyperlink <$> (if live then Just . decodeUtf8 <$> linkUri rs x y else pure Nothing)
+    if linked
+      then Just . Hyperlink <$> if live then Just . decodeUtf8 <$> linkUri rs x y else pure Nothing
+      else pure Nothing
   pure Cell {text, width, style, foreground, background, hyperlink, protected, semantic}
   where
-    site d = CallSite ("ghostty_render_state_row_cells_get " <> enumName ghosttyRenderStateRowCellsDataEnum (let GhosttyRenderStateRowCellsData n = d in n))
+    site = enumSite "ghostty_render_state_row_cells_get" ghosttyRenderStateRowCellsDataEnum . coerce
     cellSite = CallSite "ghostty_cell_get"
 
+    get :: GhosttyRenderStateRowCellsData -> Ptr b -> IO GhosttyResult
+    get d = ghosttyRenderStateRowCellsGet rs.rowCells d . castPtr
+
     fetch :: (Storable b) => GhosttyRenderStateRowCellsData -> IO b
-    fetch d = alloca $ \p -> do
-      expectSuccess (site d) =<< ghosttyRenderStateRowCellsGet rs.rowCells d (castPtr p)
-      peek p
+    fetch d = outVia (site d) (get d)
 
     cellValue :: (Storable b) => GhosttyCell -> GhosttyCellData -> IO b
-    cellValue raw d = alloca $ \p -> do
-      expectSuccess cellSite =<< ghosttyCellGet raw d (castPtr p)
-      peek p
+    cellValue raw d = outVia cellSite (ghosttyCellGet raw d . castPtr)
+
+    -- A sized struct, defaulted first.
+    styleOf :: IO GhosttyStyle
+    styleOf = outVia (site d) (\p -> ghosttyStyleDefault p >> get d p)
+      where
+        d = GhosttyRenderStateRowCellsDataStyle
 
     -- The header's NO_VALUE for a colour is "none of its own: use the
     -- default" (INVALID_VALUE before libghostty-vt 1.0; regression 9).
-    color d = alloca $ \p -> do
-      r <- ghosttyRenderStateRowCellsGet rs.rowCells d (castPtr p)
-      case resultCode r of
-        ResultSuccess -> Just . fromRgb <$> peek p
-        ResultNoValue -> pure Nothing
-        other -> throwIO (Invariant (site d) other)
+    color d = fmap fromRgb <$> optionalVia ResultNoValue (site d) (get d)
 
-    -- GRAPHEMES_UTF8: into a small buffer, or one of the size the library
-    -- asks for.
+    -- GRAPHEMES_UTF8, through a buffer struct that reports the length.
     graphemes :: IO ByteString
-    graphemes = do
-      let d = GhosttyRenderStateRowCellsDataGraphemesUtf8
-          into cap buf = with GhosttyBuffer {ptr = buf, cap = fromIntegral cap, len = 0} $ \bp -> do
-            r <- ghosttyRenderStateRowCellsGet rs.rowCells d (castPtr bp)
-            b <- peek bp
-            case resultCode r of
-              ResultSuccess -> Right <$> bytesAt buf (fromIntegral b.len)
-              ResultOutOfSpace -> pure (Left (fromIntegral b.len))
-              other -> throwIO (Invariant (site d) other)
-      retrySized (site d) into
+    graphemes = bytesVia (site d) $ \buf cap ->
+      with GhosttyBuffer {ptr = buf, cap = fromIntegral cap, len = 0} $ \bp -> do
+        r <- get d bp
+        (r,) . fromIntegral . (.len) <$> peek bp
+      where
+        d = GhosttyRenderStateRowCellsDataGraphemesUtf8
 
 -- | The URI of the link at a viewport cell of the terminal
 -- (@ghostty_terminal_grid_ref@, then @ghostty_grid_ref_hyperlink_uri@).
@@ -555,31 +523,6 @@ linkUri rs x y = do
       uriSite = CallSite "ghostty_grid_ref_hyperlink_uri"
   with point $ \pp -> with emptyRef $ \rp -> do
     expectSuccess refSite =<< ghosttyTerminalGridRef rs.terminal.handle pp rp
-    alloca $ \np -> do
-      let into cap buf = do
-            r <- ghosttyGridRefHyperlinkUri rp buf (fromIntegral cap) np
-            n <- fromIntegral <$> peek np
-            case resultCode r of
-              ResultSuccess -> Right <$> bytesAt buf n
-              ResultOutOfSpace -> pure (Left n)
-              other -> throwIO (Invariant uriSite other)
-      retrySized uriSite into
-
--- | Read into a small buffer, or, if the read asks for more ('Left' with the
--- size it needs), once more into a buffer of that size.
-retrySized :: CallSite -> (Int -> Ptr Word8 -> IO (Either Int ByteString)) -> IO ByteString
-retrySized site into =
-  allocaBytes smallBuffer (into smallBuffer) >>= \case
-    Right bs -> pure bs
-    Left need ->
-      allocaBytes need (into need) >>= \case
-        Right bs -> pure bs
-        Left _ -> throwIO (Invariant site ResultOutOfSpace)
-
--- | The first try's buffer size, enough for nearly every grapheme.
-smallBuffer :: Int
-smallBuffer = 64
-
--- | Copy bytes out of a buffer.
-bytesAt :: Ptr Word8 -> Int -> IO ByteString
-bytesAt p n = BS.packCStringLen (castPtr p, n)
+    alloca $ \np -> bytesVia uriSite $ \buf cap -> do
+      r <- ghosttyGridRefHyperlinkUri rp buf (fromIntegral cap) np
+      (r,) . fromIntegral <$> peek np

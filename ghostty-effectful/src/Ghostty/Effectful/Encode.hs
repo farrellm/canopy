@@ -45,6 +45,7 @@ module Ghostty.Effectful.Encode
     SizeReportStyle (..),
     encodeSizeReport,
     ModeNumber,
+    ModeFamily (..),
     modeNumber,
     knownMode,
     ModeReport (..),
@@ -56,6 +57,7 @@ module Ghostty.Effectful.Encode
     Rejected (..),
     PasteSafety (..),
     isPasteSafe,
+    Bracketing (..),
     encodePaste,
 
     -- * Handles
@@ -71,9 +73,11 @@ import Ghostty.Effectful.Event (TerminalEvent)
 import Ghostty.Effectful.Input
 import Ghostty.Effectful.Internal.Effect (Ghostty, Handles (..), countOf, ownedIO, scoped)
 import Ghostty.Effectful.Internal.Encode
-  ( Focus (..),
+  ( Bracketing (..),
+    Focus (..),
     KeyEncoder,
     KeyOptions (..),
+    ModeFamily (..),
     ModeNumber,
     ModeReport (..),
     MouseEncoder,
@@ -227,17 +231,17 @@ isPasteSafe :: (Ghostty :> es) => ByteString -> Eff es Bool
 isPasteSafe b =
   ownedIO "isPasteSafe" (pasteSafe b)
 
--- | Text as a paste writes it, without a terminal: bracketed ('True'), or
--- with its line feeds made carriage returns, and with unsafe control bytes
--- made spaces in either case. No safety check is made.
+-- | Text as a paste writes it, without a terminal: 'Bracketed', or with its
+-- line feeds made carriage returns, and with unsafe control bytes made
+-- spaces in either case. No safety check is made.
 --
 -- >>> import Effectful (runEff)
 -- >>> import Ghostty.Effectful (runGhostty)
--- >>> runEff (runGhostty (encodePaste False "a\nb"))
+-- >>> runEff (runGhostty (encodePaste Unbracketed "a\nb"))
 -- Right "a\rb"
-encodePaste :: (Ghostty :> es) => Bool -> ByteString -> Eff es ByteString
-encodePaste bracketed b =
-  ownedIO "encodePaste" (encodePasteBytes bracketed b)
+encodePaste :: (Ghostty :> es) => Bracketing -> ByteString -> Eff es ByteString
+encodePaste bracketing b =
+  ownedIO "encodePaste" (encodePasteBytes bracketing b)
 
 -- * Handles
 

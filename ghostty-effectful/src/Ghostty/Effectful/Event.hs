@@ -229,9 +229,10 @@ data SequenceKind
     Osc OscTerminator
   deriving stock (Eq, Show)
 
--- | How an OSC ended.
+-- | How an OSC sequence was ended. A reply to one ends the same way, since
+-- some programs recognise only a reply that matches.
 data OscTerminator
-  = -- | @ESC \\@
+  = -- | ST: @ESC \\@
     TerminatedBySt
   | -- | BEL
     TerminatedByBel

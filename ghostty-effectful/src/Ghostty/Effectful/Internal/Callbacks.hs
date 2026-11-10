@@ -56,14 +56,14 @@ import Foreign.Ptr (FunPtr, Ptr, castFunPtr, castFunPtrToPtr, castPtr, freeHaske
 import Foreign.Storable (Storable (..))
 import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), ResultCode (..))
 import Ghostty.Effectful.Event
-import Ghostty.Effectful.Internal.Convert (unknownEnum)
-import Ghostty.Effectful.Internal.Error (expectSuccess, resultCode)
+import Ghostty.Effectful.Internal.Convert (colorSchemeCode, emptyString, oscTerminator, stringText, unknownEnum)
+import Ghostty.Effectful.Internal.Error (expectSuccess, resultCode, resultError)
 import Ghostty.Effectful.Internal.Size (CellPixels (..), GridSize (..), extent, fromExtent)
 import Ghostty.Effectful.Point (Point (..))
 import Ghostty.Effectful.Terminal.Keys (ColorScheme (..), DeviceAttributes (..), TerminalData (..))
 import Ghostty.FFI.Device
 import Ghostty.FFI.Layout (CEnum)
-import Ghostty.FFI.Osc (ghosttyOscTerminatorEnum, pattern GhosttyOscTerminatorBel, pattern GhosttyOscTerminatorSt, pattern GhosttyOscTerminatorUnknown)
+import Ghostty.FFI.Osc (ghosttyOscTerminatorEnum)
 import Ghostty.FFI.Render (GhosttyRenderState (..))
 import Ghostty.FFI.SizeReport (GhosttySizeReportSize (..))
 import Ghostty.FFI.Terminal
@@ -264,10 +264,6 @@ enquiryIndex = 0
 xtversionIndex = 1
 answerCount = 2
 
--- | No bytes, at no address.
-emptyString :: GhosttyString
-emptyString = GhosttyString {ptr = nullPtr, len = 0}
-
 -- | Free a string 'replaceAnswer' made.
 freeString :: GhosttyString -> IO ()
 freeString s = when (s.ptr /= nullPtr) (free s.ptr)
@@ -361,10 +357,6 @@ push buf p = modifyIORef' buf (p :)
 sheltered :: IORef [Pending] -> a -> IO a -> IO a
 sheltered buf dflt act = act `catch` \e -> dflt <$ push buf (Failed e)
 
--- | A borrowed string, copied out and decoded leniently.
-text :: GhosttyString -> IO Text
-text s = decodeUtf8 <$> ghosttyStringBytes s
-
 -- | A percentage the header gives as -1 when absent.
 percentOf :: Int8 -> Maybe Word8
 percentOf n = fromIntegral n <$ guard (n >= 0)
@@ -376,11 +368,8 @@ onRenderHold buf ud _ _ held = sheltered buf () $ do
   failure <- gveffCaptureFailure ud
   case resultCode failure of
     ResultSuccess -> pass
-    ResultOutOfMemory -> push buf (Failed (toException (OutOfMemory captureSite)))
-    other -> push buf (Failed (toException (Invariant captureSite other)))
+    other -> push buf (Failed (toException (resultError (CallSite "ghostty_render_state_update") other)))
   push buf (Ready (RenderHold (toBool held)))
-  where
-    captureSite = CallSite "ghostty_render_state_update"
 
 -- | @WRITE_PTY@: copy the reply out.
 onWritePty :: IORef [Pending] -> GhosttyTerminal -> Ptr () -> Ptr Word8 -> CSize -> IO ()
@@ -411,8 +400,7 @@ onSchemeAnswer buf answers _ _ out = sheltered buf 0 $ do
   a <- readIORef answers
   case a.scheme of
     Nothing -> pure 0
-    Just Light -> 1 <$ poke out GhosttyColorSchemeLight
-    Just Dark -> 1 <$ poke out GhosttyColorSchemeDark
+    Just scheme -> 1 <$ poke out (colorSchemeCode scheme)
 
 -- | @DEVICE_ATTRIBUTES@: the configured attributes, always.
 onAttributesAnswer :: IORef [Pending] -> IORef Answers -> GhosttyTerminal -> Ptr () -> Ptr GhosttyDeviceAttributes -> IO CBool
@@ -446,7 +434,7 @@ onClipboardWrite buf answers _ _ wp = sheltered buf () $ do
   ok <- case location of
     Just loc | a.clipboard -> do
       cs <- peekArray (fromIntegral w.contentsLen) w.contents
-      contents <- forM cs $ \c -> ClipboardContent <$> text c.mime <*> ghosttyStringBytes c.data_
+      contents <- forM cs $ \c -> ClipboardContent <$> stringText c.mime <*> ghosttyStringBytes c.data_
       True <$ push buf (Ready (ClipboardWrite loc contents))
     _ -> pure False
   let reply =
@@ -465,7 +453,7 @@ clipboardSite = CallSite "GhosttyTerminalClipboardWriteFn"
 onNotification :: IORef [Pending] -> GhosttyTerminal -> Ptr () -> Ptr GhosttyTerminalDesktopNotification -> IO ()
 onNotification buf _ _ np = sheltered buf () $ do
   n <- peek np
-  e <- Notification <$> text n.title <*> text n.body
+  e <- Notification <$> stringText n.title <*> stringText n.body
   push buf (Ready e)
 
 -- | @PROGRESS_REPORT@.
@@ -504,10 +492,10 @@ onProgramStatus buf _ _ rp = sheltered buf () $ do
     Right (st, nd) -> do
       report <-
         ProgramReport st nd (percentOf r.progress)
-          <$> text r.id
-          <*> text r.app
-          <*> text r.title
-          <*> text r.message
+          <$> stringText r.id
+          <*> stringText r.app
+          <*> stringText r.title
+          <*> stringText r.message
       push buf (Ready (ProgramStatus report))
 
 -- | @SEMANTIC_PROMPT@: the mark now, the cursor after the write.
@@ -522,9 +510,9 @@ onSemanticPrompt buf _ _ ep = sheltered buf () $ do
       GhosttySemanticPromptPromptSecondary -> mark (PromptStart SecondaryPrompt)
       GhosttySemanticPromptPromptKindUnknown n -> push buf (Unnamed site ghosttySemanticPromptPromptKindEnum n)
     GhosttySemanticPromptInputStart -> mark InputStart
-    GhosttySemanticPromptOutputStart -> mark . OutputStart =<< text e.command
+    GhosttySemanticPromptOutputStart -> mark . OutputStart =<< stringText e.command
     GhosttySemanticPromptCommandEnd -> do
-      err <- text e.error
+      err <- stringText e.error
       mark (CommandEnd (e.exitCode <$ guard (toBool e.hasExitCode)) err)
     -- The header says INVALID is never reported, so it is no more named
     -- than an unknown value.
@@ -541,10 +529,9 @@ onUnknownSequence buf _ _ sp = sheltered buf () $ do
     UnknownSequenceApc s -> do
       b <- ghosttyStringBytes s.content
       ready Apc (toBool s.truncated) b
-    UnknownSequenceOsc s -> case s.terminator of
-      GhosttyOscTerminatorSt -> osc TerminatedBySt s
-      GhosttyOscTerminatorBel -> osc TerminatedByBel s
-      GhosttyOscTerminatorUnknown n -> push buf (Unnamed site ghosttyOscTerminatorEnum n)
+    UnknownSequenceOsc s -> case oscTerminator s.terminator of
+      Right term -> osc term s
+      Left n -> push buf (Unnamed site ghosttyOscTerminatorEnum n)
     UnknownSequenceOther (GhosttyTerminalUnknownSequenceTag n) -> push buf (Unnamed site ghosttyTerminalUnknownSequenceTagEnum n)
   where
     site = CallSite "GhosttyTerminalUnknownSequenceFn"

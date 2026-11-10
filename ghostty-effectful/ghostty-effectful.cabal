@@ -102,6 +102,7 @@ test-suite ghostty-effectful-test
   other-modules:
     Test.Ghostty.Effectful
     Test.Ghostty.Effectful.Encode
+    Test.Ghostty.Effectful.Error
     Test.Ghostty.Effectful.Events
     Test.Ghostty.Effectful.Format
     Test.Ghostty.Effectful.Keys

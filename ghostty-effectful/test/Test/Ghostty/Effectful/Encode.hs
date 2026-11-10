@@ -133,12 +133,12 @@ tests =
           testCase "mode reports: DEC private, ANSI, and a mode the library does not know" $ do
             r <- ghostty $ do
               dec <- encodeModeReport (knownMode ModeCursorKeys) ModeIsSet
-              ansi <- traverse (`encodeModeReport` ModeIsReset) (modeNumber True 4)
-              other <- traverse (`encodeModeReport` ModeNotRecognized) (modeNumber False 9999)
+              ansi <- traverse (`encodeModeReport` ModeIsReset) (modeNumber AnsiMode 4)
+              other <- traverse (`encodeModeReport` ModeNotRecognized) (modeNumber DecPrivateMode 9999)
               pure (dec, ansi, other)
             r @?= ("\ESC[?1;1$y", Just "\ESC[4;2$y", Just "\ESC[?9999;0$y"),
           testCase "a mode number past 15 bits is refused" $
-            modeNumber False 0x8000 @?= Nothing,
+            modeNumber DecPrivateMode 0x8000 @?= Nothing,
           testCase "colour-scheme reports" $ do
             r <- ghostty (traverse encodeColorSchemeReport [Dark, Light])
             r @?= ["\ESC[?997;1n", "\ESC[?997;2n"]
@@ -149,15 +149,15 @@ tests =
             r <- ghostty (traverse isPasteSafe ["plain text", "two\nlines", "cr\r", "x\ESC[201~y"])
             r @?= [True, False, False, False],
           testCase "encoding without a terminal: newlines, brackets, control bytes" $ do
-            r <- ghostty (traverse (uncurry encodePaste) [(False, "a\nb"), (True, "a\nb"), (False, "a\ESCb")])
+            r <- ghostty (traverse (uncurry encodePaste) [(Unbracketed, "a\nb"), (Bracketed, "a\nb"), (Unbracketed, "a\ESCb")])
             r @?= ["a\rb", "\ESC[200~a\nb\ESC[201~", "a b"],
           testCase "an encoding longer than the first buffer is whole" $ do
             let long = BS.replicate 300 0x61
-            r <- ghostty (encodePaste True long)
+            r <- ghostty (encodePaste Bracketed long)
             r @?= "\ESC[200~" <> long <> "\ESC[201~",
           testCase "encoding leaves its input unchanged" $ do
             let input = "a\ESCb" :: ByteString
-            _ <- ghostty (encodePaste False input)
+            _ <- ghostty (encodePaste Unbracketed input)
             input @?= "a\ESCb",
           testCase "into a terminal: rejected, then allowed, as a WritePty" $ do
             r <- ghostty $ withTerminal config $ \t -> do

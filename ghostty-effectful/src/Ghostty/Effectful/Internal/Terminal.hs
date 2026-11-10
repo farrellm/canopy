@@ -37,6 +37,7 @@ module Ghostty.Effectful.Internal.Terminal
 
     -- * Points
     pastHistory,
+    unlessPastHistory,
 
     -- * Tracked references
     trackPoint,
@@ -47,14 +48,12 @@ module Ghostty.Effectful.Internal.Terminal
   )
 where
 
-import Control.Exception (onException, throwIO)
+import Control.Exception (onException)
 import Data.IntMap.Strict qualified as IntMap
 import Foreign.C.Types (CSize)
-import Foreign.Marshal.Alloc (alloca)
 import Foreign.Marshal.Utils (toBool, with)
-import Foreign.Ptr (castPtr, nullPtr)
-import Foreign.Storable (peek)
-import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), ResultCode (..))
+import Foreign.Ptr (castPtr)
+import Ghostty.Effectful.Error (CallSite (..), ResultCode (..))
 import Ghostty.Effectful.Internal.Callbacks
   ( Answers (..),
     Installed,
@@ -62,7 +61,7 @@ import Ghostty.Effectful.Internal.Callbacks
     installCallbacks,
     releaseCallbacks,
   )
-import Ghostty.Effectful.Internal.Error (expectSuccess, resultCode)
+import Ghostty.Effectful.Internal.Error (newHandle, optionalVia, outVia, succeedsUnless)
 import Ghostty.Effectful.Internal.Size (CellPixels (..), Extent (..), GridSize (..), extent, fromExtent, noCellPixels)
 import Ghostty.Effectful.Terminal.Keys (ColorScheme, DeviceAttributes, defaultDeviceAttributes)
 import Ghostty.FFI.GridRef
@@ -178,10 +177,9 @@ terminalConfig g =
 -- is freed and the error thrown.
 openTerminal :: IORef Int -> TerminalConfig -> IO (Terminal s)
 openTerminal liveRefs cfg = do
-  handle <- alloca $ \out -> do
-    r <- ghosttyTerminalNew nullPtr out (fromExtent cfg.size.cols) (fromExtent cfg.size.rows)
-    expectSuccess (CallSite "ghostty_terminal_new") r
-    peek out
+  handle <-
+    newHandle (CallSite "ghostty_terminal_new") $ \a out ->
+      ghosttyTerminalNew a out (fromExtent cfg.size.cols) (fromExtent cfg.size.rows)
   refs <- newIORef mempty
   nextRef <- newIORef 0
   events <- newIORef []
@@ -234,10 +232,15 @@ pastHistory h p
   | p.tag == GhosttyPointTagHistory = (\n -> fromIntegral p.coordinate.y >= n) <$> scrollbackRows
   | otherwise = pure False
   where
-    scrollbackRows = alloca $ \out -> do
-      expectSuccess (CallSite "ghostty_terminal_get GHOSTTY_TERMINAL_DATA_SCROLLBACK_ROWS")
-        =<< ghosttyTerminalGet h GhosttyTerminalDataScrollbackRows (castPtr out)
-      peek out :: IO CSize
+    scrollbackRows :: IO CSize
+    scrollbackRows =
+      outVia (CallSite "ghostty_terminal_get GHOSTTY_TERMINAL_DATA_SCROLLBACK_ROWS") $
+        ghosttyTerminalGet h GhosttyTerminalDataScrollbackRows . castPtr
+
+-- | The action's result for a point not past the scrollback
+-- ('pastHistory'), and the given value for one that is.
+unlessPastHistory :: GhosttyTerminal -> GhosttyPoint -> a -> IO a -> IO a
+unlessPastHistory h p past = ifM (pastHistory h p) (pure past)
 
 -- | @ghostty_terminal_grid_ref_track@: a tracked reference to the cell at a
 -- point of the active screen, registered with the terminal and counted;
@@ -245,25 +248,17 @@ pastHistory h p
 -- header's @GHOSTTY_INVALID_VALUE@ for a valid terminal, or is past the
 -- scrollback ('pastHistory').
 trackPoint :: Terminal s -> GhosttyPoint -> IO (Maybe (TrackedRef s))
-trackPoint t p = ifM (pastHistory t.handle p) (pure Nothing) (trackValid t p)
-
--- | 'trackPoint' for a point known not to be past the scrollback.
-trackValid :: Terminal s -> GhosttyPoint -> IO (Maybe (TrackedRef s))
-trackValid t p = alloca $ \out -> do
-  r <- with p $ \pp -> ghosttyTerminalGridRefTrack t.handle pp out
-  case resultCode r of
-    ResultSuccess -> do
-      ref <- peek out
-      key <- readIORef t.nextRef
-      writeIORef t.nextRef (key + 1)
-      modifyIORef' t.refs (IntMap.insert key ref)
-      modifyIORef' t.liveRefs (+ 1)
-      pure (Just TrackedRef {terminal = t, key})
-    ResultInvalidValue -> pure Nothing
-    ResultOutOfMemory -> throwIO (OutOfMemory site)
-    other -> throwIO (Invariant site other)
-  where
-    site = CallSite "ghostty_terminal_grid_ref_track"
+trackPoint t p = unlessPastHistory t.handle p Nothing $ do
+  made <-
+    with p $ \pp ->
+      optionalVia ResultInvalidValue (CallSite "ghostty_terminal_grid_ref_track") $
+        ghosttyTerminalGridRefTrack t.handle pp
+  forM made $ \ref -> do
+    key <- readIORef t.nextRef
+    writeIORef t.nextRef (key + 1)
+    modifyIORef' t.refs (IntMap.insert key ref)
+    modifyIORef' t.liveRefs (+ 1)
+    pure TrackedRef {terminal = t, key}
 
 -- | Free a reference and drop it from its terminal's registry. A reference
 -- already untracked, or whose terminal is closed, is left alone.
@@ -290,22 +285,14 @@ registered ref = IntMap.lookup ref.key <$> readIORef ref.terminal.refs
 refCoordinate :: TrackedRef s -> GhosttyPointTag -> IO (Maybe GhosttyPointCoordinate)
 refCoordinate ref tag
   | tag == GhosttyPointTagHistory =
-      rawCoordinate ref GhosttyPointTagActive >>= \case
-        Just _ -> pure Nothing
-        Nothing -> rawCoordinate ref tag
+      ifM (isJust <$> rawCoordinate ref GhosttyPointTagActive) (pure Nothing) (rawCoordinate ref tag)
   | otherwise = rawCoordinate ref tag
 
 -- | 'refCoordinate' as the library answers it.
 rawCoordinate :: TrackedRef s -> GhosttyPointTag -> IO (Maybe GhosttyPointCoordinate)
 rawCoordinate ref tag =
-  registered ref >>= \case
-    Nothing -> pure Nothing
-    Just h -> alloca $ \out -> do
-      r <- ghosttyTrackedGridRefPoint h tag out
-      case resultCode r of
-        ResultSuccess -> Just <$> peek out
-        ResultNoValue -> pure Nothing
-        other -> throwIO (Invariant (CallSite "ghostty_tracked_grid_ref_point") other)
+  registered ref
+    >>= maybe (pure Nothing) (optionalVia ResultNoValue (CallSite "ghostty_tracked_grid_ref_point") . (`ghosttyTrackedGridRefPoint` tag))
 
 -- | @ghostty_tracked_grid_ref_set@: move the reference to a point of the
 -- terminal's active screen. 'False' if the point is outside its coordinate
@@ -314,15 +301,8 @@ rawCoordinate ref tag =
 -- the reference is then unchanged.
 moveTrackedRef :: TrackedRef s -> GhosttyPoint -> IO Bool
 moveTrackedRef ref p =
-  (,) <$> registered ref <*> pastHistory ref.terminal.handle p >>= \case
-    (Just h, False) -> do
-      r <- with p (ghosttyTrackedGridRefSet h ref.terminal.handle)
-      case resultCode r of
-        ResultSuccess -> pure True
-        ResultInvalidValue -> pure False
-        ResultOutOfMemory -> throwIO (OutOfMemory site)
-        other -> throwIO (Invariant site other)
-    _ -> pure False
+  unlessPastHistory ref.terminal.handle p False $
+    registered ref >>= maybe (pure False) (\h -> succeedsUnless ResultInvalidValue site =<< with p (ghosttyTrackedGridRefSet h ref.terminal.handle))
   where
     site = CallSite "ghostty_tracked_grid_ref_set"
 

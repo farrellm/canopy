@@ -10,8 +10,11 @@ events instead of callbacks. No export may expose a pointer.
 - **`Internal` modules hold representations** (constructors over raw handles) and the IO calls; the
   public modules re-export their types without constructors. Raw pointers appear only in `Internal`
   (§10.6).
-- **Results become `GhosttyError` through `Ghostty.Effectful.Internal.Error`**: a result the header
-  says cannot happen for the arguments the types allow is `Invariant`. Make the bad argument
+- **Results become `GhosttyError` through `Ghostty.Effectful.Internal.Error`** (`expectSuccess`,
+  `succeedsUnless`, `outVia`, `optionalVia`, `bytesVia`; never a hand-written switch): out of
+  memory is `OutOfMemory`, and a result the header says cannot happen for the arguments the types
+  allow is `Invariant`. Marshalling shared between modules (strings, flags, palettes, enum call
+  sites) is in `Internal.Convert`. Make the bad argument
   unrepresentable (as `Extent` does for zero) rather than returning the refusal.
 - **A header row is a GADT constructor named for it** (`Ghostty.Effectful.Terminal.Keys`, §4.4):
   `CURSOR_X` is `CursorX`, and an option's name gets `Set`; a test checks it. Marshalled in
@@ -45,8 +48,9 @@ events instead of callbacks. No export may expose a pointer.
 - **Encoders, parsers, widths** (§4.8, M1.9). Key and mouse encoders are handles (`withKeyEncoder`,
   `withMouseEncoder`, `Internal.Encode`), each owning the event handle it fills in per encode; their
   inputs are plain values in `Input`. Reports, `encodePaste` and the parsers have no handle: a
-  parser is made, fed one sequence, copied out of and freed in one call. Encode buffers go through
-  `Internal.Encode.bytesVia`, which retries on `OUT_OF_SPACE`, so a short buffer never escapes.
+  parser is made, fed one sequence, copied out of and freed in one call. Every buffer read goes
+  through `Internal.Error.bytesVia`, which retries on `OUT_OF_SPACE`, so a short buffer never
+  escapes.
   `paste` reads its text through the C MIME reader `cbits/gveff_paste.c` (a struct by value) and
   returns its `WritePty` as an event, `Either Rejected`. `Key` and `OscCommand` are held against
   their header enums by the tests, as typed keys are.

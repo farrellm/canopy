@@ -260,6 +260,21 @@ Written as changes land, not at release (DESIGN.md §2.9).
   and every kitty-image key then threw `Invariant` on its `UNSUPPORTED` (regression 12).
 - The format goldens are unchanged. The feed benchmark's allocation is within the gate, each
   iteration about 2 KB more, from the version check's feature queries in every `runGhostty`.
+- Refactored for idiom, with no change of behaviour beyond the fixes below. `feed` folds every OSC
+  stop's events onto one strict accumulator and joins `WritePty` runs once. That is about 10% less
+  allocation on the feed benchmark's prompts, and 30% less on its 4 KiB writes. Operations are
+  built on `ownedIO`, `countOf` and `scoped`. Result switches, out-parameter reads, buffer retries,
+  string marshalling, bit flags and palettes each have one helper, in
+  `Ghostty.Effectful.Internal.Error` or `.Convert`. `OscTerminator` is defined once, in
+  `Ghostty.Effectful.Event`. Breaking, in the public API:
+  - `encodePaste` takes `Bracketing` (`Bracketed` or `Unbracketed`) rather than a `Bool`.
+  - `modeNumber` takes `ModeFamily` (`AnsiMode` or `DecPrivateMode`) rather than a `Bool`.
+- Fixed: six calls with a documented refusal switched on their result by hand. Four of them (a
+  tracked reference's point, a grid reference for formatting, an OSC datum, and a cell's colour,
+  grapheme or hyperlink URI) threw `Invariant` for running out of memory where every other call
+  throws `OutOfMemory`. Each now goes through the shared helper, which regression 13 checks. The
+  render-hold callback's function pointer is also registered masked, like the others, so an
+  asynchronous exception can no longer leak it.
 
 ### M0: infrastructure
 
