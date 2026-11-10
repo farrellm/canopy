@@ -31,6 +31,7 @@ module Ghostty.Effectful.Internal.Callbacks
     Answers (..),
     Installed,
     installCallbacks,
+    registerFunPtr,
     releaseCallbacks,
     setEnquiryAnswer,
     setXtversionAnswer,
@@ -186,9 +187,7 @@ installCallbacks :: GhosttyTerminal -> IORef [Pending] -> IORef Answers -> ByteS
 installCallbacks h buf answers enq xtv = do
   made <- newIORef []
   let register :: IO (FunPtr a) -> IO (FunPtr a)
-      register mk = mask_ $ do
-        fp <- mk
-        fp <$ modifyIORef' made (castFunPtr fp :)
+      register = registerFunPtr made
       wrapped :: IO (FunPtr a) -> GhosttyTerminalOption -> IO ()
       wrapped mk opt = setPtr opt . castFunPtrToPtr =<< register mk
       setPtr opt p = expectSuccess (CallSite "ghostty_terminal_set") =<< ghosttyTerminalSet h opt p
@@ -220,6 +219,14 @@ installCallbacks h buf answers enq xtv = do
   let installed = (\funPtrs -> Installed {funPtrs, userdata = ud}) <$> readIORef made
   install `onException` (releaseCallbacks =<< installed)
   installed
+
+-- | Make a callback's function pointer and record it to be freed, masked so
+-- that no asynchronous exception falls between the two and leaks it. Every
+-- pointer 'installCallbacks' makes goes through it (regression 15).
+registerFunPtr :: IORef [FunPtr ()] -> IO (FunPtr a) -> IO (FunPtr a)
+registerFunPtr made mk = mask_ $ do
+  fp <- mk
+  fp <$ modifyIORef' made (castFunPtr fp :)
 
 -- | Free the callbacks, the answer strings and the @USERDATA@. Only once the
 -- terminal that calls them is freed.

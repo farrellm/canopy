@@ -79,7 +79,7 @@ import Ghostty.Effectful.Error (CallSite (..), ResultCode (..))
 import Ghostty.Effectful.Event (TerminalEvent)
 import Ghostty.Effectful.Input
 import Ghostty.Effectful.Internal.Convert (colorSchemeCode, emptyString, flagBits, kittyFlagBits, modeCode, withSize, withString)
-import Ghostty.Effectful.Internal.Error (bytesVia, expectSuccess, newHandle, succeedsUnless)
+import Ghostty.Effectful.Internal.Error (bytesVia, configured, expectSuccess, newHandle, succeedsUnless)
 import Ghostty.Effectful.Internal.Feed (drainEvents)
 import Ghostty.Effectful.Internal.Size (CellPixels (..), Extent, GridSize (..), fromExtent)
 import Ghostty.Effectful.Internal.Terminal (Terminal (..))
@@ -188,8 +188,7 @@ openKeyEncoder :: KeyOptions -> IO (KeyEncoder k)
 openKeyEncoder o = do
   encoder <- newHandle (CallSite "ghostty_key_encoder_new") ghosttyKeyEncoderNew
   event <- newHandle (CallSite "ghostty_key_event_new") ghosttyKeyEventNew `onException` ghosttyKeyEncoderFree encoder
-  let enc = KeyEncoder {encoder, event}
-  enc <$ setKeyOptions enc o `onException` closeKeyEncoder enc
+  configured (`setKeyOptions` o) closeKeyEncoder KeyEncoder {encoder, event}
 
 -- | Free the event and the encoder.
 closeKeyEncoder :: KeyEncoder k -> IO ()
@@ -574,8 +573,7 @@ openMouseEncoder :: MouseOptions -> IO (MouseEncoder m)
 openMouseEncoder o = do
   encoder <- newHandle (CallSite "ghostty_mouse_encoder_new") ghosttyMouseEncoderNew
   event <- newHandle (CallSite "ghostty_mouse_event_new") ghosttyMouseEventNew `onException` ghosttyMouseEncoderFree encoder
-  let enc = MouseEncoder {encoder, event}
-  enc <$ setMouseOptions enc o `onException` closeMouseEncoder enc
+  configured (`setMouseOptions` o) closeMouseEncoder MouseEncoder {encoder, event}
 
 -- | Free the event and the encoder.
 closeMouseEncoder :: MouseEncoder m -> IO ()

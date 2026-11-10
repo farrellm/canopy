@@ -6,12 +6,12 @@
 -- 'setT' changes, and the other callbacks' events.
 module Test.Ghostty.Effectful.Events (tests) where
 
-import Control.Exception (ErrorCall (..))
+import Control.Exception (ErrorCall (..), MaskingState (..), getMaskingState)
 import Data.ByteString qualified as BS
 import Effectful.Exception (try)
-import Foreign.Ptr (castFunPtrToPtr, freeHaskellFunPtr)
+import Foreign.Ptr (castFunPtrToPtr, freeHaskellFunPtr, nullFunPtr)
 import Ghostty.Effectful.Event
-import Ghostty.Effectful.Internal.Callbacks (Pending (..))
+import Ghostty.Effectful.Internal.Callbacks (Pending (..), registerFunPtr)
 import Ghostty.Effectful.Internal.Size (Extent (..))
 import Ghostty.Effectful.Internal.Terminal (Terminal (..))
 import Ghostty.Effectful.Mode (ModeKey (..))
@@ -27,7 +27,18 @@ tests :: TestTree
 tests =
   testGroup
     "Events"
-    [ testGroup
+    [ -- Regression 15 (DESIGN.md §4.5): the render-hold callback's function
+      -- pointer was made and recorded unmasked, so an asynchronous exception
+      -- between the two leaked it. Every pointer is now registered through
+      -- the helper checked here.
+      testCase "regression 15: a callback's function pointer is made masked, and recorded" $ do
+        made <- newIORef []
+        state <- newIORef Unmasked
+        _ <- registerFunPtr made (nullFunPtr <$ (writeIORef state =<< getMaskingState))
+        masking <- readIORef state
+        recorded <- readIORef made
+        (masking, recorded) @?= (MaskedInterruptible, [nullFunPtr]),
+      testGroup
         "order"
         [ testCase "OSC 133 marks, bells and titles come in stream order" $ do
             evs <- withFresh (`feed` session)

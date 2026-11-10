@@ -275,8 +275,11 @@ Written as changes land, not at release (DESIGN.md §2.9).
   grapheme or hyperlink URI, and `feed`'s `vt_write_until`) threw `Invariant` for running out of
   memory where every other call throws `OutOfMemory`. Each now goes through the shared helper, which regression 13 checks. The
   render-hold callback's function pointer is also registered masked, like the others, so an
-  asynchronous exception can no longer leak it. A key or mouse encoder whose options cannot be set is freed
-  rather than leaked; no option value the types allow is refused, so neither has a test case.
+  asynchronous exception can no longer leak it: every pointer goes through
+  `Internal.Callbacks.registerFunPtr`, which regression 15 checks makes it masked and records it. A
+  key or mouse encoder whose options cannot be set is freed rather than leaked: both open through
+  `Internal.Error.configured`, which regression 16 checks frees a handle whose configuration throws.
+  Neither failure can be produced through the public API, so each case checks the helper.
 - Fixed: every region parameter was phantom, so `coerce` took a handle out of its region
   without its constructor, and `withTerminal cfg (pure . coerce)` returned a terminal the region
   then freed (#15; on master before this branch). `Terminal`, `TrackedRef`, `RenderState`,

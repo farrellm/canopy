@@ -4,10 +4,10 @@
 -- through "Ghostty.Effectful.Internal.Error", so each is checked once here.
 module Test.Ghostty.Effectful.Error (tests) where
 
-import Control.Exception (try)
+import Control.Exception (ErrorCall (..), throwIO, try)
 import Foreign.Storable (poke)
 import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), ResultCode (..))
-import Ghostty.Effectful.Internal.Error (bytesVia, expectSuccess, optionalVia, outVia, succeedsUnless)
+import Ghostty.Effectful.Internal.Error (bytesVia, configured, expectSuccess, optionalVia, outVia, succeedsUnless)
 import Ghostty.FFI.Types (pattern GhosttyInvalidValue, pattern GhosttyNoValue, pattern GhosttyOutOfMemory, pattern GhosttyOutOfSpace, pattern GhosttySuccess)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=))
@@ -27,6 +27,16 @@ tests =
         d <- try (bytesVia site (\_ _ -> pure (GhosttyOutOfMemory, 0)))
         (void a, void b, void c, void d)
           @?= (Left (OutOfMemory site), Left (OutOfMemory site), Left (OutOfMemory site), Left (OutOfMemory site)),
+      -- Regression 16 (DESIGN.md §4.2): a key or mouse encoder whose options
+      -- could not be set was left behind, both its handles unfreed. Both
+      -- now open through the helper checked here.
+      testCase "regression 16: a handle whose configuration throws is freed, and one whose does not is kept" $ do
+        freed <- newIORef []
+        let free h = modifyIORef' freed (h :)
+        refused <- try (configured (\_ -> throwIO (ErrorCall "refused")) free (1 :: Int))
+        kept <- configured (const pass) free 2
+        after <- readIORef freed
+        (refused, kept, after) @?= (Left (ErrorCall "refused"), 2, [1]),
       testCase "a documented refusal is a value, and anything else an invariant" $ do
         refused <- optionalVia @Word8 ResultNoValue site (const (pure GhosttyNoValue))
         refused @?= Nothing

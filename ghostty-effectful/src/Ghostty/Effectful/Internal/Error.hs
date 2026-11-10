@@ -8,6 +8,7 @@ module Ghostty.Effectful.Internal.Error
     succeedsUnless,
     orInvariant,
     newHandle,
+    configured,
     outVia,
     optionalVia,
     optionalViaWith,
@@ -15,7 +16,7 @@ module Ghostty.Effectful.Internal.Error
   )
 where
 
-import Control.Exception (throwIO)
+import Control.Exception (onException, throwIO)
 import Data.ByteString qualified as BS
 import Foreign.Marshal.Alloc (alloca, allocaBytes)
 import Foreign.Ptr (Ptr, castPtr, nullPtr)
@@ -82,6 +83,11 @@ orInvariant site code = maybe (throwIO (Invariant site code)) pure
 -- memory ('expectSuccess').
 newHandle :: (Storable h) => CallSite -> (Ptr allocator -> Ptr h -> IO GhosttyResult) -> IO h
 newHandle site new = outVia site (new nullPtr)
+
+-- | A handle with its configuration set, or freed if setting it throws, so a
+-- handle whose options are refused is never left behind (regression 16).
+configured :: (h -> IO ()) -> (h -> IO ()) -> h -> IO h
+configured set free h = h <$ set h `onException` free h
 
 -- | The value a call writes to its out-parameter, for a call whose only
 -- documented failure is running out of memory ('expectSuccess').
