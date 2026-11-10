@@ -16,7 +16,7 @@ module Ghostty.FFI.Focus
   )
 where
 
-import Foreign.C.Types (CChar, CInt (..), CSize (..))
+import Foreign.C.Types (CInt (..), CSize (..))
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (Storable (..))
 import Ghostty.FFI.Layout (CEnum (..), unnamed)
@@ -66,4 +66,4 @@ ghosttyFocusEventEnum =
 -- or one too small, returns @GHOSTTY_OUT_OF_SPACE@ with the size needed.
 -- @unsafe@: it does not call back into Haskell.
 foreign import capi unsafe "ghostty/vt.h ghostty_focus_encode"
-  ghosttyFocusEncode :: GhosttyFocusEvent -> Ptr CChar -> CSize -> Ptr CSize -> IO GhosttyResult
+  ghosttyFocusEncode :: GhosttyFocusEvent -> Ptr Word8 -> CSize -> Ptr CSize -> IO GhosttyResult

@@ -10,19 +10,15 @@ import Control.Exception (ErrorCall (..))
 import Data.ByteString qualified as BS
 import Effectful (Eff, IOE)
 import Effectful.Exception (try)
-import Foreign.C.Types (CSize)
-import Foreign.Marshal.Alloc (allocaBytes)
-import Foreign.Ptr (castFunPtrToPtr, castPtr, freeHaskellFunPtr, nullPtr)
-import Foreign.Storable (pokeByteOff)
+import Foreign.Ptr (castFunPtrToPtr, freeHaskellFunPtr)
 import Ghostty.Effectful (Ghostty)
-import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..))
 import Ghostty.Effectful.Event
-import Ghostty.Effectful.Internal.Callbacks (Pending (..), onClipboardWrite)
+import Ghostty.Effectful.Internal.Callbacks (Pending (..))
 import Ghostty.Effectful.Internal.Terminal (Extent (..), Terminal (..))
 import Ghostty.Effectful.Mode (ModeKey (..))
 import Ghostty.Effectful.Point (Point (..))
 import Ghostty.Effectful.Terminal
-import Ghostty.FFI.Terminal (GhosttyTerminal (..), ghosttyTerminalSet, pattern GhosttyTerminalOptBell)
+import Ghostty.FFI.Terminal (ghosttyTerminalSet, pattern GhosttyTerminalOptBell)
 import Ghostty.FFI.Terminal.Callbacks (mkGhosttyTerminalBellFn)
 import Test.Ghostty.Effectful.Support (config, ghostty, grid)
 import Test.Tasty (TestTree, testGroup)
@@ -188,7 +184,7 @@ tests =
                   ),
           testCase "a mode set through setT reports nothing" $ do
             evs <- withFresh $ \t -> do
-              setT t (SetMode ModeSyncOutput) True
+              setT t (SetMode ModeSynchronizedOutput) True
               feed t "x"
             evs @?= []
         ],
@@ -214,18 +210,7 @@ tests =
           -- replies split one reply into two writes.
           testCase "regression 2: a reply split by an OSC stop is one write" $ do
             evs <- withFresh (`feed` "\ESC[6n\ESC]7777;x\a\ESC[6n")
-            evs @?= [WritePty "\ESC[1;1R\ESC[1;1R"],
-          -- The clipboard callback read the whole request whatever its
-          -- size said. A short one is now refused unread: not even its
-          -- reply, which is null here, is called.
-          testCase "regression 4: a short clipboard write is refused unread" $ do
-            answers <- newIORef =<< withFresh (\t -> liftIO (readIORef t.answers))
-            buf <- newIORef []
-            allocaBytes 64 $ \p -> do
-              pokeByteOff p 0 (8 :: CSize)
-              onClipboardWrite buf answers (GhosttyTerminal nullPtr) nullPtr (castPtr p)
-            recorded <- readIORef buf
-            map failure recorded @?= [Just (ShortStruct (CallSite "GhosttyTerminalClipboardWriteFn") "GhosttyClipboardWrite" 8)]
+            evs @?= [WritePty "\ESC[1;1R\ESC[1;1R"]
         ]
     ]
 
@@ -266,9 +251,3 @@ withConfig cfg k = ghostty (withTerminal cfg k)
 -- | What a test's injected failure throws.
 boom :: ErrorCall
 boom = ErrorCall "boom"
-
--- | The binding's error a buffer entry recorded, if it is one.
-failure :: Pending -> Maybe GhosttyError
-failure = \case
-  Failed e -> fromException e
-  _ -> Nothing

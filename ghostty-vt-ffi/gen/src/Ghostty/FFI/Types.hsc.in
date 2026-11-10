@@ -5,7 +5,8 @@
 
 -- | Types shared by every libghostty-vt header (@include/ghostty/vt/types.h@,
 -- DESIGN.md §3.2): the result code, borrowed strings and codepoint lists,
--- caller buffers, surface positions and the formatter's output format.
+-- caller buffers, surface positions, the formatter's output format, and the
+-- cursor shape and image layer that @terminal.h@ and @render.h@ share.
 --
 -- The header's opaque handles are bound in the module of the header that
 -- uses each: @GhosttyRenderState@ in "Ghostty.FFI.Render",
@@ -26,12 +27,20 @@ module Ghostty.FFI.Types
 
     -- * Buffers
     {{xstruct types.h GhosttyBuffer}}
+    {{xstruct types.h GhosttyCodepointBuffer}}
 
     -- * Surface positions
     {{xstruct types.h GhosttySurfacePosition}}
 
     -- * Formatter output
     {{xenum types.h GhosttyFormatterFormat}}
+
+    -- * Cursor shapes
+    {{xenum types.h GhosttyCursorStyle}}
+
+    -- * Image layers
+    {{xenum types.h GhosttyImageLayer}}
+    {{xdefines types.h Word32 GHOSTTY_IMAGE_LAYER_MASK_}}
 
     -- * Type manifest
     ghosttyTypeJson,
@@ -93,8 +102,12 @@ ghosttyStringLayout =
 
 {{struct types.h GhosttyCodepoints}}
 {{struct types.h GhosttyBuffer}}
+{{struct types.h GhosttyCodepointBuffer}}
 {{struct types.h GhosttySurfacePosition}}
 {{enum types.h GhosttyFormatterFormat}}
+{{enum types.h GhosttyCursorStyle}}
+{{enum types.h GhosttyImageLayer}}
+{{defines types.h Word32 GHOSTTY_IMAGE_LAYER_MASK_}}
 -- | @ghostty_type_json@: the linked library's description of every public
 -- type (sizes, alignments, field offsets, enum values), as a static
 -- NUL-terminated JSON string valid for the life of the process. What the

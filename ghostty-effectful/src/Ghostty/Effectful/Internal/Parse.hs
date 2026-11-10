@@ -22,18 +22,17 @@ where
 
 import Control.Exception (bracket, throwIO)
 import Data.ByteString qualified as BS
-import Foreign.C.ConstPtr (ConstPtr (..))
 import Foreign.C.String (castCharToCChar)
-import Foreign.C.Types (CBool, CChar, CSize)
+import Foreign.C.Types (CBool, CSize)
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Marshal.Array (peekArray, withArrayLen)
 import Foreign.Marshal.Utils (toBool, with)
-import Foreign.Ptr (castPtr, nullPtr)
+import Foreign.Ptr (castPtr)
 import Foreign.Storable (Storable, peek)
 import Ghostty.Effectful.Color (Rgb)
 import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), ResultCode (..))
 import Ghostty.Effectful.Internal.Convert (fromRgb, fromUnderline, unknownEnum)
-import Ghostty.Effectful.Internal.Error (expectSuccess, newHandle)
+import Ghostty.Effectful.Internal.Error (expectSuccess, newHandle, resultCode)
 import Ghostty.Effectful.Style (Underline)
 import Ghostty.FFI.Osc
 import Ghostty.FFI.Sgr
@@ -268,19 +267,22 @@ parseOscBytes limit end body =
   where
     site = CallSite "ghostty_osc_command_data"
 
-    -- One datum of the command; the header says each is there for its type.
+    -- One datum of the command; the header says each is there for its type,
+    -- so anything but success (@GHOSTTY_NO_VALUE@ included) is an invariant.
     datum :: (Storable a) => GhosttyOscCommand -> GhosttyOscCommandData -> IO a
     datum cmd key = alloca $ \out -> do
-      found <- toBool <$> ghosttyOscCommandData cmd key (castPtr out)
-      unless found $ throwIO (Invariant site ResultNoValue)
-      peek out
+      r <- ghosttyOscCommandData cmd key (castPtr out)
+      case resultCode r of
+        ResultSuccess -> peek out
+        other -> throwIO (Invariant site other)
 
     command :: GhosttyOscCommand -> GhosttyOscCommandType -> IO (Maybe OscCommand)
     command cmd = \case
       GhosttyOscCommandInvalid -> pure Nothing
       GhosttyOscCommandChangeWindowTitle -> do
-        ConstPtr p <- datum cmd GhosttyOscDataChangeWindowTitleStr :: IO (ConstPtr CChar)
-        title <- if p == nullPtr then pure "" else BS.packCString p
+        -- A GhosttyString: exactly its bytes, which are not NUL-terminated
+        -- and may hold a NUL (regression 8).
+        title <- ghosttyStringBytes =<< datum cmd GhosttyOscDataChangeWindowTitleStr
         pure (Just (OscChangeWindowTitle (decodeUtf8 title)))
       GhosttyOscCommandUnknown -> do
         s <- datum cmd GhosttyOscDataUnknownContent

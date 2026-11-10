@@ -187,7 +187,7 @@ import Ghostty.FFI.Types (GhosttyString)
 
 -- * Callback types
 
--- | @GhosttyTerminalWritePtyFn@: Callback function type for write\_pty. Called when the terminal needs to write data back to the pty, for example in response to a device status report, mode query, or VT-driven mode 2048 enable. The data is only valid for the duration of the call; callers must copy it if it needs to persist.
+-- | @GhosttyTerminalWritePtyFn@: Callback function type for write\_pty. Called when the terminal needs to write data back to the pty, for example in response to a device status report, mode query, or VT-driven mode 2048 enable. The data is only valid for the duration of the call; you must copy it if it needs to persist.
 --
 -- Set with @GHOSTTY_TERMINAL_OPT_WRITE_PTY@.
 type GhosttyTerminalWritePtyFn = FunPtr (GhosttyTerminal -> Ptr () -> Ptr Word8 -> CSize -> IO ())
@@ -209,7 +209,7 @@ type GhosttyTerminalBellFn = FunPtr (GhosttyTerminal -> Ptr () -> IO ())
 foreign import ccall "wrapper"
   mkGhosttyTerminalBellFn :: (GhosttyTerminal -> Ptr () -> IO ()) -> IO GhosttyTerminalBellFn
 
--- | @GhosttyTerminalTitleChangedFn@: Callback function type for title\_changed. Called when the terminal title changes via escape sequences (e.g. OSC 0 or OSC 2). The new title can be queried from the terminal after the callback returns.
+-- | @GhosttyTerminalTitleChangedFn@: Callback function type for title\_changed. Called when the terminal title changes via escape sequences (e.g. OSC 0 or OSC 2). Use ghostty\_terminal\_get() with GHOSTTY\_TERMINAL\_DATA\_TITLE inside the callback to read the new value.
 --
 -- Set with @GHOSTTY_TERMINAL_OPT_TITLE_CHANGED@.
 type GhosttyTerminalTitleChangedFn = FunPtr (GhosttyTerminal -> Ptr () -> IO ())
@@ -253,7 +253,7 @@ type GhosttyTerminalColorSchemeFn = FunPtr (GhosttyTerminal -> Ptr () -> Ptr Gho
 foreign import ccall "wrapper"
   mkGhosttyTerminalColorSchemeFn :: (GhosttyTerminal -> Ptr () -> Ptr GhosttyColorScheme -> IO CBool) -> IO GhosttyTerminalColorSchemeFn
 
--- | @GhosttyTerminalDeviceAttributesFn@: Callback function type for device attributes queries (DA1\/DA2\/DA3). Called when the terminal receives a device attributes query (CSI c, CSI \> c, or CSI = c). Return true and fill \*out\_attrs with the response data, or return false to silently ignore the query.
+-- | @GhosttyTerminalDeviceAttributesFn@: Callback function type for device attributes queries (DA1\/DA2\/DA3). Called when the terminal receives a device attributes query (CSI c, CSI \> c, or CSI = c). Return true and fill \*out\_attrs with the response data, or return false to answer with the library\'s default attributes, which GHOSTTY\_TERMINAL\_OPT\_DEVICE\_ATTRIBUTES describes.
 --
 -- Set with @GHOSTTY_TERMINAL_OPT_DEVICE_ATTRIBUTES@.
 type GhosttyTerminalDeviceAttributesFn = FunPtr (GhosttyTerminal -> Ptr () -> Ptr GhosttyDeviceAttributes -> IO CBool)
@@ -264,7 +264,7 @@ type GhosttyTerminalDeviceAttributesFn = FunPtr (GhosttyTerminal -> Ptr () -> Pt
 foreign import ccall "wrapper"
   mkGhosttyTerminalDeviceAttributesFn :: (GhosttyTerminal -> Ptr () -> Ptr GhosttyDeviceAttributes -> IO CBool) -> IO GhosttyTerminalDeviceAttributesFn
 
--- | @GhosttyTerminalClipboardWriteFn@: Callback function type for clipboard\_write. The embedder may ask for permission to write or perform the write async, but the callback itself is synchronous and the reply function must be called during the lifetime of this function. While this callback is active the VT stream is paused.
+-- | @GhosttyTerminalClipboardWriteFn@: Callback function type for clipboard\_write. You may ask for permission to write or perform the write async, but the callback itself is synchronous and the reply function must be called during the lifetime of this function. While this callback is active the VT stream is paused.
 --
 -- Set with @GHOSTTY_TERMINAL_OPT_CLIPBOARD_WRITE@.
 type GhosttyTerminalClipboardWriteFn = FunPtr (GhosttyTerminal -> Ptr () -> Ptr GhosttyClipboardWrite -> IO ())
@@ -275,7 +275,7 @@ type GhosttyTerminalClipboardWriteFn = FunPtr (GhosttyTerminal -> Ptr () -> Ptr 
 foreign import ccall "wrapper"
   mkGhosttyTerminalClipboardWriteFn :: (GhosttyTerminal -> Ptr () -> Ptr GhosttyClipboardWrite -> IO ()) -> IO GhosttyTerminalClipboardWriteFn
 
--- | @GhosttyTerminalClipboardReadFn@: Callback function type for clipboard\_read. Called synchronously when the running program requests clipboard contents via OSC 52 with a \"?\" payload or a Kitty clipboard (OSC 5522) read. Answering lets the program read the user\'s clipboard, so the embedder is expected to mediate consent. Because the read is synchronous, an embedder that needs to ask the user must block (for example by running a modal prompt) until it has an answer; the VT stream waits until the callback returns.
+-- | @GhosttyTerminalClipboardReadFn@: Callback function type for clipboard\_read. Called synchronously when the running program requests clipboard contents via OSC 52 with a \"?\" payload or a Kitty clipboard (OSC 5522) read. Answering lets the program read the clipboard of the person using your terminal, so you are expected to mediate consent. Because the read is synchronous, an embedder that needs to ask them must block (for example by running a modal prompt) until it has an answer; the VT stream waits until the callback returns.
 --
 -- Set with @GHOSTTY_TERMINAL_OPT_CLIPBOARD_READ@.
 type GhosttyTerminalClipboardReadFn = FunPtr (GhosttyTerminal -> Ptr () -> Ptr GhosttyClipboardRead -> IO ())
@@ -341,7 +341,7 @@ type GhosttyTerminalResetFn = FunPtr (GhosttyTerminal -> Ptr () -> IO ())
 foreign import ccall "wrapper"
   mkGhosttyTerminalResetFn :: (GhosttyTerminal -> Ptr () -> IO ()) -> IO GhosttyTerminalResetFn
 
--- | @GhosttyTerminalRenderHoldFn@: Callback function type for render\_hold. Called when the running program asks the terminal to stop updating the screen, and again when it lets the screen update again. We call the time in between a \"render hold\".
+-- | @GhosttyTerminalRenderHoldFn@: Callback function type for render\_hold. Called when the running program asks the terminal to stop updating the screen, and again when it lets the screen update again. We call the time in between a \"render hold\". See @guide@-rendering-holds for what to do about one.
 --
 -- Set with @GHOSTTY_TERMINAL_OPT_RENDER_HOLD@.
 type GhosttyTerminalRenderHoldFn = FunPtr (GhosttyTerminal -> Ptr () -> CBool -> IO ())
@@ -363,7 +363,7 @@ type GhosttyTerminalUnknownSequenceFn = FunPtr (GhosttyTerminal -> Ptr () -> Ptr
 foreign import ccall "wrapper"
   mkGhosttyTerminalUnknownSequenceFn :: (GhosttyTerminal -> Ptr () -> Ptr GhosttyTerminalUnknownSequence -> IO ()) -> IO GhosttyTerminalUnknownSequenceFn
 
--- | @GhosttyTerminalResizeWindowFn@: Callback function type for window resize requests. Called synchronously when the running program asks to resize the window, such as with CSI 8 ; rows ; columns t. Check @request-\>tag@ first, because more kinds of requests may be reported in later versions. The terminal is not resized by this: the embedder decides whether to allow the request, and if so resizes its window and the terminal. Letting any program resize the window is a nuisance at best, so consider making this opt-in for users.
+-- | @GhosttyTerminalResizeWindowFn@: Callback function type for window resize requests. Called synchronously when the running program asks to resize the window, such as with CSI 8 ; rows ; columns t. Check @request-\>tag@ first, because more kinds of requests may be reported in later versions. The terminal is not resized by this: you decide whether to allow the request, and if so resizes its window and the terminal. Letting any program resize the window is a nuisance at best, so consider making this opt-in for users.
 --
 -- Set with @GHOSTTY_TERMINAL_OPT_RESIZE_WINDOW@.
 type GhosttyTerminalResizeWindowFn = FunPtr (GhosttyTerminal -> Ptr () -> Ptr GhosttyTerminalResizeWindow -> IO ())
@@ -724,9 +724,7 @@ ghosttyClipboardWriteReplyLayout =
 
 -- | @GhosttyClipboardWrite@: A synchronous request to write clipboard contents.
 data GhosttyClipboardWrite = GhosttyClipboardWrite
-  { -- | @size@: Size of this struct in bytes.
-    size :: CSize,
-    -- | @location@: Clipboard destination.
+  { -- | @location@: Clipboard destination.
     location :: GhosttyClipboardLocation,
     -- | @contents@: Borrowed array of MIME representations.
     contents :: Ptr GhosttyClipboardContent,
@@ -734,9 +732,9 @@ data GhosttyClipboardWrite = GhosttyClipboardWrite
     contentsLen :: CSize,
     -- | @name@: Name of the writing program for permission prompts, if the protocol carries one. Empty otherwise.
     name :: GhosttyString,
-    -- | @granted@: True if the terminal already holds a session grant for this request The embedder should skip any permission prompt and perform the write.
+    -- | @granted@: True if the terminal already holds a session grant for this request You should skip any permission prompt and perform the write.
     granted :: CBool,
-    -- | @can_remember@: True if the program supplied a session password, so the embedder may offer to remember the user\'s decision through GhosttyClipboardWriteReply::remember. When false, remember is ignored.
+    -- | @can_remember@: True if the program supplied a session password, so you may offer to remember the decision through GhosttyClipboardWriteReply::remember. When false, remember is ignored.
     canRemember :: CBool,
     -- | @ctx@: Terminal-owned reply state. Do not access.
     ctx :: Ptr (),
@@ -750,8 +748,7 @@ instance Storable GhosttyClipboardWrite where
   alignment _ = (#alignment GhosttyClipboardWrite)
   peek p =
     GhosttyClipboardWrite
-      <$> (#peek GhosttyClipboardWrite, size) p
-      <*> (#peek GhosttyClipboardWrite, location) p
+      <$> (#peek GhosttyClipboardWrite, location) p
       <*> (#peek GhosttyClipboardWrite, contents) p
       <*> (#peek GhosttyClipboardWrite, contents_len) p
       <*> (#peek GhosttyClipboardWrite, name) p
@@ -760,7 +757,6 @@ instance Storable GhosttyClipboardWrite where
       <*> (#peek GhosttyClipboardWrite, ctx) p
       <*> (#peek GhosttyClipboardWrite, reply) p
   poke p s = do
-    (#poke GhosttyClipboardWrite, size) p s.size
     (#poke GhosttyClipboardWrite, location) p s.location
     (#poke GhosttyClipboardWrite, contents) p s.contents
     (#poke GhosttyClipboardWrite, contents_len) p s.contentsLen
@@ -778,8 +774,7 @@ ghosttyClipboardWriteLayout =
       size = (#size GhosttyClipboardWrite),
       align = (#alignment GhosttyClipboardWrite),
       fields =
-        [ CField "size" (#offset GhosttyClipboardWrite, size) (#const GVTFFI_FIELD_SIZE(GhosttyClipboardWrite, size)),
-          CField "location" (#offset GhosttyClipboardWrite, location) (#const GVTFFI_FIELD_SIZE(GhosttyClipboardWrite, location)),
+        [ CField "location" (#offset GhosttyClipboardWrite, location) (#const GVTFFI_FIELD_SIZE(GhosttyClipboardWrite, location)),
           CField "contents" (#offset GhosttyClipboardWrite, contents) (#const GVTFFI_FIELD_SIZE(GhosttyClipboardWrite, contents)),
           CField "contents_len" (#offset GhosttyClipboardWrite, contents_len) (#const GVTFFI_FIELD_SIZE(GhosttyClipboardWrite, contents_len)),
           CField "name" (#offset GhosttyClipboardWrite, name) (#const GVTFFI_FIELD_SIZE(GhosttyClipboardWrite, name)),
@@ -811,7 +806,7 @@ pattern GhosttyClipboardReadResultSuccess = GhosttyClipboardReadResult (#const G
 pattern GhosttyClipboardReadResultDenied :: GhosttyClipboardReadResult
 pattern GhosttyClipboardReadResultDenied = GhosttyClipboardReadResult (#const GHOSTTY_CLIPBOARD_READ_RESULT_DENIED)
 
--- | @GHOSTTY_CLIPBOARD_READ_RESULT_UNSUPPORTED@: The embedder cannot read this clipboard.
+-- | @GHOSTTY_CLIPBOARD_READ_RESULT_UNSUPPORTED@: You cannot read this clipboard.
 pattern GhosttyClipboardReadResultUnsupported :: GhosttyClipboardReadResult
 pattern GhosttyClipboardReadResultUnsupported = GhosttyClipboardReadResult (#const GHOSTTY_CLIPBOARD_READ_RESULT_UNSUPPORTED)
 
@@ -914,9 +909,7 @@ ghosttyClipboardReadReplyLayout =
 
 -- | @GhosttyClipboardRead@: A synchronous request to read clipboard contents.
 data GhosttyClipboardRead = GhosttyClipboardRead
-  { -- | @size@: Size of this struct in bytes.
-    size :: CSize,
-    -- | @location@: Clipboard to read.
+  { -- | @location@: Clipboard to read.
     location :: GhosttyClipboardLocation,
     -- | @mimes@: Borrowed array of the MIME types the program wants, in order of preference. Protocols that only carry text (OSC 52) request \"text\/plain\". NULL when mimes\_len is zero.
     mimes :: Ptr GhosttyString,
@@ -926,9 +919,9 @@ data GhosttyClipboardRead = GhosttyClipboardRead
     list :: CBool,
     -- | @name@: Name of the requesting program for permission prompts, if the protocol carries one. Empty otherwise.
     name :: GhosttyString,
-    -- | @granted@: True if the terminal already holds a session grant for this request (kitty clipboard protocol passwords). The embedder should skip any permission prompt and serve the read.
+    -- | @granted@: True if the terminal already holds a session grant for this request (kitty clipboard protocol passwords). You should skip any permission prompt and serve the read.
     granted :: CBool,
-    -- | @can_remember@: True if the program supplied a session password, so the embedder may offer to remember the user\'s decision through GhosttyClipboardReadReply::remember. When false, remember is ignored.
+    -- | @can_remember@: True if the program supplied a session password, so you may offer to remember the decision through GhosttyClipboardReadReply::remember. When false, remember is ignored.
     canRemember :: CBool,
     -- | @ctx@: Terminal-owned reply state. Do not access.
     ctx :: Ptr (),
@@ -942,8 +935,7 @@ instance Storable GhosttyClipboardRead where
   alignment _ = (#alignment GhosttyClipboardRead)
   peek p =
     GhosttyClipboardRead
-      <$> (#peek GhosttyClipboardRead, size) p
-      <*> (#peek GhosttyClipboardRead, location) p
+      <$> (#peek GhosttyClipboardRead, location) p
       <*> (#peek GhosttyClipboardRead, mimes) p
       <*> (#peek GhosttyClipboardRead, mimes_len) p
       <*> (#peek GhosttyClipboardRead, list) p
@@ -953,7 +945,6 @@ instance Storable GhosttyClipboardRead where
       <*> (#peek GhosttyClipboardRead, ctx) p
       <*> (#peek GhosttyClipboardRead, reply) p
   poke p s = do
-    (#poke GhosttyClipboardRead, size) p s.size
     (#poke GhosttyClipboardRead, location) p s.location
     (#poke GhosttyClipboardRead, mimes) p s.mimes
     (#poke GhosttyClipboardRead, mimes_len) p s.mimesLen
@@ -972,8 +963,7 @@ ghosttyClipboardReadLayout =
       size = (#size GhosttyClipboardRead),
       align = (#alignment GhosttyClipboardRead),
       fields =
-        [ CField "size" (#offset GhosttyClipboardRead, size) (#const GVTFFI_FIELD_SIZE(GhosttyClipboardRead, size)),
-          CField "location" (#offset GhosttyClipboardRead, location) (#const GVTFFI_FIELD_SIZE(GhosttyClipboardRead, location)),
+        [ CField "location" (#offset GhosttyClipboardRead, location) (#const GVTFFI_FIELD_SIZE(GhosttyClipboardRead, location)),
           CField "mimes" (#offset GhosttyClipboardRead, mimes) (#const GVTFFI_FIELD_SIZE(GhosttyClipboardRead, mimes)),
           CField "mimes_len" (#offset GhosttyClipboardRead, mimes_len) (#const GVTFFI_FIELD_SIZE(GhosttyClipboardRead, mimes_len)),
           CField "list" (#offset GhosttyClipboardRead, list) (#const GVTFFI_FIELD_SIZE(GhosttyClipboardRead, list)),
@@ -997,9 +987,7 @@ foreign import ccall unsafe "dynamic"
 
 -- | @GhosttyTerminalDesktopNotification@: A request to show a desktop notification.
 data GhosttyTerminalDesktopNotification = GhosttyTerminalDesktopNotification
-  { -- | @size@: Size of this struct in bytes.
-    size :: CSize,
-    -- | @title@: Notification title, or an empty string when the protocol omits it.
+  { -- | @title@: Notification title, or an empty string when the protocol omits it.
     title :: GhosttyString,
     -- | @body@: Notification body.
     body :: GhosttyString
@@ -1011,11 +999,9 @@ instance Storable GhosttyTerminalDesktopNotification where
   alignment _ = (#alignment GhosttyTerminalDesktopNotification)
   peek p =
     GhosttyTerminalDesktopNotification
-      <$> (#peek GhosttyTerminalDesktopNotification, size) p
-      <*> (#peek GhosttyTerminalDesktopNotification, title) p
+      <$> (#peek GhosttyTerminalDesktopNotification, title) p
       <*> (#peek GhosttyTerminalDesktopNotification, body) p
   poke p s = do
-    (#poke GhosttyTerminalDesktopNotification, size) p s.size
     (#poke GhosttyTerminalDesktopNotification, title) p s.title
     (#poke GhosttyTerminalDesktopNotification, body) p s.body
 
@@ -1027,8 +1013,7 @@ ghosttyTerminalDesktopNotificationLayout =
       size = (#size GhosttyTerminalDesktopNotification),
       align = (#alignment GhosttyTerminalDesktopNotification),
       fields =
-        [ CField "size" (#offset GhosttyTerminalDesktopNotification, size) (#const GVTFFI_FIELD_SIZE(GhosttyTerminalDesktopNotification, size)),
-          CField "title" (#offset GhosttyTerminalDesktopNotification, title) (#const GVTFFI_FIELD_SIZE(GhosttyTerminalDesktopNotification, title)),
+        [ CField "title" (#offset GhosttyTerminalDesktopNotification, title) (#const GVTFFI_FIELD_SIZE(GhosttyTerminalDesktopNotification, title)),
           CField "body" (#offset GhosttyTerminalDesktopNotification, body) (#const GVTFFI_FIELD_SIZE(GhosttyTerminalDesktopNotification, body))
         ]
     }
@@ -1091,9 +1076,7 @@ ghosttyTerminalProgressStateEnum =
 
 -- | @GhosttyTerminalProgressReport@: A progress report emitted by the running program.
 data GhosttyTerminalProgressReport = GhosttyTerminalProgressReport
-  { -- | @size@: Size of this struct in bytes.
-    size :: CSize,
-    -- | @state@: Literal progress state reported by the running program.
+  { -- | @state@: Literal progress state reported by the running program.
     state :: GhosttyTerminalProgressState,
     -- | @progress@: Progress percentage from 0 through 100, or -1 when omitted.
     progress :: Int8
@@ -1105,11 +1088,9 @@ instance Storable GhosttyTerminalProgressReport where
   alignment _ = (#alignment GhosttyTerminalProgressReport)
   peek p =
     GhosttyTerminalProgressReport
-      <$> (#peek GhosttyTerminalProgressReport, size) p
-      <*> (#peek GhosttyTerminalProgressReport, state) p
+      <$> (#peek GhosttyTerminalProgressReport, state) p
       <*> (#peek GhosttyTerminalProgressReport, progress) p
   poke p s = do
-    (#poke GhosttyTerminalProgressReport, size) p s.size
     (#poke GhosttyTerminalProgressReport, state) p s.state
     (#poke GhosttyTerminalProgressReport, progress) p s.progress
 
@@ -1121,8 +1102,7 @@ ghosttyTerminalProgressReportLayout =
       size = (#size GhosttyTerminalProgressReport),
       align = (#alignment GhosttyTerminalProgressReport),
       fields =
-        [ CField "size" (#offset GhosttyTerminalProgressReport, size) (#const GVTFFI_FIELD_SIZE(GhosttyTerminalProgressReport, size)),
-          CField "state" (#offset GhosttyTerminalProgressReport, state) (#const GVTFFI_FIELD_SIZE(GhosttyTerminalProgressReport, state)),
+        [ CField "state" (#offset GhosttyTerminalProgressReport, state) (#const GVTFFI_FIELD_SIZE(GhosttyTerminalProgressReport, state)),
           CField "progress" (#offset GhosttyTerminalProgressReport, progress) (#const GVTFFI_FIELD_SIZE(GhosttyTerminalProgressReport, progress))
         ]
     }
@@ -1241,9 +1221,7 @@ ghosttyProgramStatusKindEnum =
 
 -- | @GhosttyTerminalProgramStatus@: A program status report (OSC 7501).
 data GhosttyTerminalProgramStatus = GhosttyTerminalProgramStatus
-  { -- | @size@: Size of this struct in bytes.
-    size :: CSize,
-    -- | @state@: What the program is doing.
+  { -- | @state@: What the program is doing.
     state :: GhosttyProgramStatusState,
     -- | @kind@: What the program needs from the user. Only set for GHOSTTY\_PROGRAM\_STATUS\_STATE\_BLOCKED. It is GHOSTTY\_PROGRAM\_STATUS\_KIND\_NONE for other states, when the program didn\'t say, or when it sent a kind this version doesn\'t know.
     kind :: GhosttyProgramStatusKind,
@@ -1265,8 +1243,7 @@ instance Storable GhosttyTerminalProgramStatus where
   alignment _ = (#alignment GhosttyTerminalProgramStatus)
   peek p =
     GhosttyTerminalProgramStatus
-      <$> (#peek GhosttyTerminalProgramStatus, size) p
-      <*> (#peek GhosttyTerminalProgramStatus, state) p
+      <$> (#peek GhosttyTerminalProgramStatus, state) p
       <*> (#peek GhosttyTerminalProgramStatus, kind) p
       <*> (#peek GhosttyTerminalProgramStatus, progress) p
       <*> (#peek GhosttyTerminalProgramStatus, id) p
@@ -1274,7 +1251,6 @@ instance Storable GhosttyTerminalProgramStatus where
       <*> (#peek GhosttyTerminalProgramStatus, title) p
       <*> (#peek GhosttyTerminalProgramStatus, message) p
   poke p s = do
-    (#poke GhosttyTerminalProgramStatus, size) p s.size
     (#poke GhosttyTerminalProgramStatus, state) p s.state
     (#poke GhosttyTerminalProgramStatus, kind) p s.kind
     (#poke GhosttyTerminalProgramStatus, progress) p s.progress
@@ -1291,8 +1267,7 @@ ghosttyTerminalProgramStatusLayout =
       size = (#size GhosttyTerminalProgramStatus),
       align = (#alignment GhosttyTerminalProgramStatus),
       fields =
-        [ CField "size" (#offset GhosttyTerminalProgramStatus, size) (#const GVTFFI_FIELD_SIZE(GhosttyTerminalProgramStatus, size)),
-          CField "state" (#offset GhosttyTerminalProgramStatus, state) (#const GVTFFI_FIELD_SIZE(GhosttyTerminalProgramStatus, state)),
+        [ CField "state" (#offset GhosttyTerminalProgramStatus, state) (#const GVTFFI_FIELD_SIZE(GhosttyTerminalProgramStatus, state)),
           CField "kind" (#offset GhosttyTerminalProgramStatus, kind) (#const GVTFFI_FIELD_SIZE(GhosttyTerminalProgramStatus, kind)),
           CField "progress" (#offset GhosttyTerminalProgramStatus, progress) (#const GVTFFI_FIELD_SIZE(GhosttyTerminalProgramStatus, progress)),
           CField "id" (#offset GhosttyTerminalProgramStatus, id) (#const GVTFFI_FIELD_SIZE(GhosttyTerminalProgramStatus, id)),
@@ -1412,9 +1387,7 @@ ghosttySemanticPromptPromptKindEnum =
 
 -- | @GhosttyTerminalSemanticPrompt@: A shell integration event, passed to the @GHOSTTY_TERMINAL_OPT_SEMANTIC_PROMPT@ callback.
 data GhosttyTerminalSemanticPrompt = GhosttyTerminalSemanticPrompt
-  { -- | @size@: Size of this struct in bytes.
-    size :: CSize,
-    -- | @kind@: Which step of the command this event reports.
+  { -- | @kind@: Which step of the command this event reports.
     kind :: GhosttySemanticPromptKind,
     -- | @prompt_kind@: Which prompt is starting. Set for @GHOSTTY_SEMANTIC_PROMPT_PROMPT_START@. Always @GHOSTTY_SEMANTIC_PROMPT_PROMPT_PRIMARY@ for other kinds.
     promptKind :: GhosttySemanticPromptPromptKind,
@@ -1434,15 +1407,13 @@ instance Storable GhosttyTerminalSemanticPrompt where
   alignment _ = (#alignment GhosttyTerminalSemanticPrompt)
   peek p =
     GhosttyTerminalSemanticPrompt
-      <$> (#peek GhosttyTerminalSemanticPrompt, size) p
-      <*> (#peek GhosttyTerminalSemanticPrompt, kind) p
+      <$> (#peek GhosttyTerminalSemanticPrompt, kind) p
       <*> (#peek GhosttyTerminalSemanticPrompt, prompt_kind) p
       <*> (#peek GhosttyTerminalSemanticPrompt, has_exit_code) p
       <*> (#peek GhosttyTerminalSemanticPrompt, exit_code) p
       <*> (#peek GhosttyTerminalSemanticPrompt, command) p
       <*> (#peek GhosttyTerminalSemanticPrompt, error) p
   poke p s = do
-    (#poke GhosttyTerminalSemanticPrompt, size) p s.size
     (#poke GhosttyTerminalSemanticPrompt, kind) p s.kind
     (#poke GhosttyTerminalSemanticPrompt, prompt_kind) p s.promptKind
     (#poke GhosttyTerminalSemanticPrompt, has_exit_code) p s.hasExitCode
@@ -1458,8 +1429,7 @@ ghosttyTerminalSemanticPromptLayout =
       size = (#size GhosttyTerminalSemanticPrompt),
       align = (#alignment GhosttyTerminalSemanticPrompt),
       fields =
-        [ CField "size" (#offset GhosttyTerminalSemanticPrompt, size) (#const GVTFFI_FIELD_SIZE(GhosttyTerminalSemanticPrompt, size)),
-          CField "kind" (#offset GhosttyTerminalSemanticPrompt, kind) (#const GVTFFI_FIELD_SIZE(GhosttyTerminalSemanticPrompt, kind)),
+        [ CField "kind" (#offset GhosttyTerminalSemanticPrompt, kind) (#const GVTFFI_FIELD_SIZE(GhosttyTerminalSemanticPrompt, kind)),
           CField "prompt_kind" (#offset GhosttyTerminalSemanticPrompt, prompt_kind) (#const GVTFFI_FIELD_SIZE(GhosttyTerminalSemanticPrompt, prompt_kind)),
           CField "has_exit_code" (#offset GhosttyTerminalSemanticPrompt, has_exit_code) (#const GVTFFI_FIELD_SIZE(GhosttyTerminalSemanticPrompt, has_exit_code)),
           CField "exit_code" (#offset GhosttyTerminalSemanticPrompt, exit_code) (#const GVTFFI_FIELD_SIZE(GhosttyTerminalSemanticPrompt, exit_code)),

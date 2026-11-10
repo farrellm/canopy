@@ -35,6 +35,7 @@ module Ghostty.FFI.Mouse.Encoder
     GhosttyMouseEncoderSize (..),
     ghosttyMouseEncoderSizeLayout,
     GhosttyMouseEncoderOption (..),
+    pattern GhosttyMouseEncoderOptInvalid,
     pattern GhosttyMouseEncoderOptEvent,
     pattern GhosttyMouseEncoderOptFormat,
     pattern GhosttyMouseEncoderOptSize,
@@ -46,14 +47,14 @@ module Ghostty.FFI.Mouse.Encoder
     -- * Encoders
     ghosttyMouseEncoderNew,
     ghosttyMouseEncoderFree,
-    ghosttyMouseEncoderSetopt,
-    ghosttyMouseEncoderSetoptFromTerminal,
+    ghosttyMouseEncoderSet,
+    ghosttyMouseEncoderSetFromTerminal,
     ghosttyMouseEncoderReset,
     ghosttyMouseEncoderEncode,
   )
 where
 
-import Foreign.C.Types (CChar, CInt (..), CSize (..))
+import Foreign.C.Types (CInt (..), CSize (..))
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (Storable (..))
 import Ghostty.FFI.Allocator (GhosttyAllocator)
@@ -262,23 +263,27 @@ newtype GhosttyMouseEncoderOption = GhosttyMouseEncoderOption CInt
   deriving stock (Eq, Show)
   deriving newtype (Storable)
 
--- | @GHOSTTY_MOUSE_ENCODER_OPT_EVENT@: Mouse tracking mode (value: GhosttyMouseTrackingMode).
+-- | @GHOSTTY_MOUSE_ENCODER_OPT_INVALID@: Not a real option. ghostty\_mouse\_encoder\_set() returns GHOSTTY\_INVALID\_VALUE for it. Its value is 0, so a zeroed or uninitialized variable is never mistaken for a real option.
+pattern GhosttyMouseEncoderOptInvalid :: GhosttyMouseEncoderOption
+pattern GhosttyMouseEncoderOptInvalid = GhosttyMouseEncoderOption (#const GHOSTTY_MOUSE_ENCODER_OPT_INVALID)
+
+-- | @GHOSTTY_MOUSE_ENCODER_OPT_EVENT@: Mouse tracking mode (value: GhosttyMouseTrackingMode, default: GHOSTTY\_MOUSE\_TRACKING\_NONE).
 pattern GhosttyMouseEncoderOptEvent :: GhosttyMouseEncoderOption
 pattern GhosttyMouseEncoderOptEvent = GhosttyMouseEncoderOption (#const GHOSTTY_MOUSE_ENCODER_OPT_EVENT)
 
--- | @GHOSTTY_MOUSE_ENCODER_OPT_FORMAT@: Mouse output format (value: GhosttyMouseFormat).
+-- | @GHOSTTY_MOUSE_ENCODER_OPT_FORMAT@: Mouse output format (value: GhosttyMouseFormat, default: GHOSTTY\_MOUSE\_FORMAT\_X10).
 pattern GhosttyMouseEncoderOptFormat :: GhosttyMouseEncoderOption
 pattern GhosttyMouseEncoderOptFormat = GhosttyMouseEncoderOption (#const GHOSTTY_MOUSE_ENCODER_OPT_FORMAT)
 
--- | @GHOSTTY_MOUSE_ENCODER_OPT_SIZE@: Renderer size context (value: GhosttyMouseEncoderSize).
+-- | @GHOSTTY_MOUSE_ENCODER_OPT_SIZE@: Renderer size context (value: GhosttyMouseEncoderSize, default: a 1x1 pixel screen with 1x1 pixel cells and no padding).
 pattern GhosttyMouseEncoderOptSize :: GhosttyMouseEncoderOption
 pattern GhosttyMouseEncoderOptSize = GhosttyMouseEncoderOption (#const GHOSTTY_MOUSE_ENCODER_OPT_SIZE)
 
--- | @GHOSTTY_MOUSE_ENCODER_OPT_ANY_BUTTON_PRESSED@: Whether any mouse button is currently pressed (value: bool).
+-- | @GHOSTTY_MOUSE_ENCODER_OPT_ANY_BUTTON_PRESSED@: Whether any mouse button is currently pressed (value: bool, default: false).
 pattern GhosttyMouseEncoderOptAnyButtonPressed :: GhosttyMouseEncoderOption
 pattern GhosttyMouseEncoderOptAnyButtonPressed = GhosttyMouseEncoderOption (#const GHOSTTY_MOUSE_ENCODER_OPT_ANY_BUTTON_PRESSED)
 
--- | @GHOSTTY_MOUSE_ENCODER_OPT_TRACK_LAST_CELL@: Whether to enable motion deduplication by last cell (value: bool).
+-- | @GHOSTTY_MOUSE_ENCODER_OPT_TRACK_LAST_CELL@: Whether to enable motion deduplication by last cell (value: bool, default: false).
 pattern GhosttyMouseEncoderOptTrackLastCell :: GhosttyMouseEncoderOption
 pattern GhosttyMouseEncoderOptTrackLastCell = GhosttyMouseEncoderOption (#const GHOSTTY_MOUSE_ENCODER_OPT_TRACK_LAST_CELL)
 
@@ -289,6 +294,7 @@ pattern GhosttyMouseEncoderOptionUnknown n <- GhosttyMouseEncoderOption (unnamed
     GhosttyMouseEncoderOptionUnknown n = GhosttyMouseEncoderOption n
 
 {-# COMPLETE
+  GhosttyMouseEncoderOptInvalid,
   GhosttyMouseEncoderOptEvent,
   GhosttyMouseEncoderOptFormat,
   GhosttyMouseEncoderOptSize,
@@ -305,7 +311,8 @@ ghosttyMouseEncoderOptionEnum =
     { name = "GhosttyMouseEncoderOption",
       size = (#size GhosttyMouseEncoderOption),
       values =
-        [ ("GHOSTTY_MOUSE_ENCODER_OPT_EVENT", (#const GHOSTTY_MOUSE_ENCODER_OPT_EVENT)),
+        [ ("GHOSTTY_MOUSE_ENCODER_OPT_INVALID", (#const GHOSTTY_MOUSE_ENCODER_OPT_INVALID)),
+          ("GHOSTTY_MOUSE_ENCODER_OPT_EVENT", (#const GHOSTTY_MOUSE_ENCODER_OPT_EVENT)),
           ("GHOSTTY_MOUSE_ENCODER_OPT_FORMAT", (#const GHOSTTY_MOUSE_ENCODER_OPT_FORMAT)),
           ("GHOSTTY_MOUSE_ENCODER_OPT_SIZE", (#const GHOSTTY_MOUSE_ENCODER_OPT_SIZE)),
           ("GHOSTTY_MOUSE_ENCODER_OPT_ANY_BUTTON_PRESSED", (#const GHOSTTY_MOUSE_ENCODER_OPT_ANY_BUTTON_PRESSED)),
@@ -326,26 +333,28 @@ foreign import capi unsafe "ghostty/vt.h ghostty_mouse_encoder_new"
 foreign import capi unsafe "ghostty/vt.h ghostty_mouse_encoder_free"
   ghosttyMouseEncoderFree :: GhosttyMouseEncoder -> IO ()
 
--- | @ghostty_mouse_encoder_setopt@: set an option, the value's type depending
--- on the option ('GhosttyMouseEncoderOption' says which). @unsafe@: it does
--- not call back into Haskell.
-foreign import capi unsafe "ghostty/vt.h ghostty_mouse_encoder_setopt"
-  ghosttyMouseEncoderSetopt :: GhosttyMouseEncoder -> GhosttyMouseEncoderOption -> Ptr () -> IO ()
+-- | @ghostty_mouse_encoder_set@: set an option, the value's type depending
+-- on the option ('GhosttyMouseEncoderOption' says which). A null value
+-- restores the option's default. @GHOSTTY_INVALID_VALUE@ for a value that is
+-- not valid (an unknown mode or format, or a size with a zero cell
+-- dimension). @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_mouse_encoder_set"
+  ghosttyMouseEncoderSet :: GhosttyMouseEncoder -> GhosttyMouseEncoderOption -> Ptr () -> IO GhosttyResult
 
--- | @ghostty_mouse_encoder_setopt_from_terminal@: set the tracking mode and
+-- | @ghostty_mouse_encoder_set_from_terminal@: set the tracking mode and
 -- format from a terminal's modes; the size and the any-button state are left
 -- as they are. @unsafe@: it reads the terminal and calls nothing back.
-foreign import capi unsafe "ghostty/vt.h ghostty_mouse_encoder_setopt_from_terminal"
-  ghosttyMouseEncoderSetoptFromTerminal :: GhosttyMouseEncoder -> GhosttyTerminal -> IO ()
+foreign import capi unsafe "ghostty/vt.h ghostty_mouse_encoder_set_from_terminal"
+  ghosttyMouseEncoderSetFromTerminal :: GhosttyMouseEncoder -> GhosttyTerminal -> IO GhosttyResult
 
 -- | @ghostty_mouse_encoder_reset@: forget the last cell motion was reported
--- for (null is a no-op). @unsafe@: it does not call back into Haskell.
+-- for. @unsafe@: it does not call back into Haskell.
 foreign import capi unsafe "ghostty/vt.h ghostty_mouse_encoder_reset"
-  ghosttyMouseEncoderReset :: GhosttyMouseEncoder -> IO ()
+  ghosttyMouseEncoderReset :: GhosttyMouseEncoder -> IO GhosttyResult
 
 -- | @ghostty_mouse_encoder_encode@: encode an event into a buffer. An event the
 -- tracking mode does not report encodes to nothing, with success. A null
 -- buffer, or one too small, returns @GHOSTTY_OUT_OF_SPACE@ with the size
 -- needed. @unsafe@: it does not call back into Haskell.
 foreign import capi unsafe "ghostty/vt.h ghostty_mouse_encoder_encode"
-  ghosttyMouseEncoderEncode :: GhosttyMouseEncoder -> GhosttyMouseEvent -> Ptr CChar -> CSize -> Ptr CSize -> IO GhosttyResult
+  ghosttyMouseEncoderEncode :: GhosttyMouseEncoder -> GhosttyMouseEvent -> Ptr Word8 -> CSize -> Ptr CSize -> IO GhosttyResult

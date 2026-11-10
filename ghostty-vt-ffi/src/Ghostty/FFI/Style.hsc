@@ -6,6 +6,11 @@
 
 -- | @include/ghostty/vt/style.h@: a cell's SGR style, as grid references and
 -- the cursor report it.
+--
+-- @GhosttyStyle@ is frozen at 16 bytes: three colours and a 'GhosttyStyleFlags'
+-- word holding the on/off attributes (bits 0–7, the @GHOSTTY_STYLE_FLAG_*@
+-- patterns) and the underline style (bits 8–10, read with
+-- 'ghosttyStyleUnderline').
 module Ghostty.FFI.Style
   ( -- * Colours
     GhosttyStyleColorTag (..),
@@ -16,6 +21,20 @@ module Ghostty.FFI.Style
     ghosttyStyleColorTagEnum,
     GhosttyStyleColor (..),
     ghosttyStyleColorLayout,
+
+    -- * Flags
+    GhosttyStyleFlags,
+    pattern GhosttyStyleFlagBold,
+    pattern GhosttyStyleFlagItalic,
+    pattern GhosttyStyleFlagFaint,
+    pattern GhosttyStyleFlagBlink,
+    pattern GhosttyStyleFlagInverse,
+    pattern GhosttyStyleFlagInvisible,
+    pattern GhosttyStyleFlagStrikethrough,
+    pattern GhosttyStyleFlagOverline,
+    ghosttyStyleUnderlineShift,
+    pattern GhosttyStyleUnderlineMask,
+    ghosttyStyleUnderline,
 
     -- * Styles
     GhosttyStyle (..),
@@ -28,7 +47,8 @@ module Ghostty.FFI.Style
   )
 where
 
-import Foreign.C.Types (CBool (..), CInt (..), CSize (..))
+import Data.Bits (shiftR, (.&.))
+import Foreign.C.Types (CBool (..), CInt (..))
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (Storable (..))
 import Ghostty.FFI.Color (GhosttyColorPaletteIndex, GhosttyColorRgb)
@@ -38,6 +58,60 @@ import Ghostty.FFI.Layout (CEnum (..), CField (..), CStruct (..), unnamed)
 
 -- | @GhosttyStyleId@: a style's index in its page.
 type GhosttyStyleId = Word16
+
+-- | @GhosttyStyleFlags@: a style's attributes, a bit set of the
+-- @GHOSTTY_STYLE_FLAG_*@ flags below in bits 0–7, with the underline style
+-- (a 'Ghostty.FFI.Sgr.GhosttySgrUnderline' value) in bits 8–10. The rest are
+-- reserved and always zero in a style the library writes.
+type GhosttyStyleFlags = Word16
+
+-- | @GHOSTTY_STYLE_FLAG_BOLD@: Bold text.
+pattern GhosttyStyleFlagBold :: GhosttyStyleFlags
+pattern GhosttyStyleFlagBold = (#const GHOSTTY_STYLE_FLAG_BOLD)
+
+-- | @GHOSTTY_STYLE_FLAG_ITALIC@: Italic text.
+pattern GhosttyStyleFlagItalic :: GhosttyStyleFlags
+pattern GhosttyStyleFlagItalic = (#const GHOSTTY_STYLE_FLAG_ITALIC)
+
+-- | @GHOSTTY_STYLE_FLAG_FAINT@: Faint (dim) text.
+pattern GhosttyStyleFlagFaint :: GhosttyStyleFlags
+pattern GhosttyStyleFlagFaint = (#const GHOSTTY_STYLE_FLAG_FAINT)
+
+-- | @GHOSTTY_STYLE_FLAG_BLINK@: Blinking text.
+pattern GhosttyStyleFlagBlink :: GhosttyStyleFlags
+pattern GhosttyStyleFlagBlink = (#const GHOSTTY_STYLE_FLAG_BLINK)
+
+-- | @GHOSTTY_STYLE_FLAG_INVERSE@: Inverse text, with the foreground and background swapped.
+pattern GhosttyStyleFlagInverse :: GhosttyStyleFlags
+pattern GhosttyStyleFlagInverse = (#const GHOSTTY_STYLE_FLAG_INVERSE)
+
+-- | @GHOSTTY_STYLE_FLAG_INVISIBLE@: Invisible (hidden) text.
+pattern GhosttyStyleFlagInvisible :: GhosttyStyleFlags
+pattern GhosttyStyleFlagInvisible = (#const GHOSTTY_STYLE_FLAG_INVISIBLE)
+
+-- | @GHOSTTY_STYLE_FLAG_STRIKETHROUGH@: Strikethrough text.
+pattern GhosttyStyleFlagStrikethrough :: GhosttyStyleFlags
+pattern GhosttyStyleFlagStrikethrough = (#const GHOSTTY_STYLE_FLAG_STRIKETHROUGH)
+
+-- | @GHOSTTY_STYLE_FLAG_OVERLINE@: Overlined text.
+pattern GhosttyStyleFlagOverline :: GhosttyStyleFlags
+pattern GhosttyStyleFlagOverline = (#const GHOSTTY_STYLE_FLAG_OVERLINE)
+
+-- | @GHOSTTY_STYLE_UNDERLINE_SHIFT@: the lowest bit of the underline style in
+-- 'GhosttyStyleFlags'.
+ghosttyStyleUnderlineShift :: Int
+ghosttyStyleUnderlineShift = (#const GHOSTTY_STYLE_UNDERLINE_SHIFT)
+
+-- | @GHOSTTY_STYLE_UNDERLINE_MASK@: the bits of 'GhosttyStyleFlags' that hold
+-- the underline style.
+pattern GhosttyStyleUnderlineMask :: GhosttyStyleFlags
+pattern GhosttyStyleUnderlineMask = (#const GHOSTTY_STYLE_UNDERLINE_MASK)
+
+-- | @GHOSTTY_STYLE_UNDERLINE(style)@, a function-like macro in C: the
+-- underline style in a flags word, as a 'Ghostty.FFI.Sgr.GhosttySgrUnderline'
+-- value (0, @GHOSTTY_SGR_UNDERLINE_NONE@, for none).
+ghosttyStyleUnderline :: GhosttyStyleFlags -> CInt
+ghosttyStyleUnderline f = fromIntegral ((f .&. GhosttyStyleUnderlineMask) `shiftR` ghosttyStyleUnderlineShift)
 
 -- | @GhosttyStyleColorTag@: Style color tags.
 newtype GhosttyStyleColorTag = GhosttyStyleColorTag CInt
@@ -84,7 +158,8 @@ ghosttyStyleColorTagEnum =
     }
 
 -- | @GhosttyStyleColor@: a colour in a style. A tagged union in C, so a sum
--- here with an arm per tag (§3.3).
+-- here with an arm per tag (§3.3). Its @tag@ is a @uint8_t@ holding a
+-- 'GhosttyStyleColorTag' value, so the struct stays small.
 data GhosttyStyleColor
   = -- | @GHOSTTY_STYLE_COLOR_NONE@: no colour, the default.
     StyleColorNone
@@ -100,20 +175,22 @@ instance Storable GhosttyStyleColor where
   sizeOf _ = (#size GhosttyStyleColor)
   alignment _ = (#alignment GhosttyStyleColor)
   peek p =
-    (#peek GhosttyStyleColor, tag) p >>= \case
+    (GhosttyStyleColorTag . fromIntegral @Word8 <$> (#peek GhosttyStyleColor, tag) p) >>= \case
       GhosttyStyleColorNone -> pure StyleColorNone
       GhosttyStyleColorPalette -> StyleColorPalette <$> (#peek GhosttyStyleColor, value.palette) p
       GhosttyStyleColorRgb -> StyleColorRgb <$> (#peek GhosttyStyleColor, value.rgb) p
       tag@(GhosttyStyleColorTagUnknown _) -> pure (StyleColorOther tag)
   poke p = \case
-    StyleColorNone -> (#poke GhosttyStyleColor, tag) p GhosttyStyleColorNone
+    StyleColorNone -> pokeTag GhosttyStyleColorNone
     StyleColorPalette i -> do
-      (#poke GhosttyStyleColor, tag) p GhosttyStyleColorPalette
+      pokeTag GhosttyStyleColorPalette
       (#poke GhosttyStyleColor, value.palette) p i
     StyleColorRgb c -> do
-      (#poke GhosttyStyleColor, tag) p GhosttyStyleColorRgb
+      pokeTag GhosttyStyleColorRgb
       (#poke GhosttyStyleColor, value.rgb) p c
-    StyleColorOther tag -> (#poke GhosttyStyleColor, tag) p tag
+    StyleColorOther tag -> pokeTag tag
+    where
+      pokeTag (GhosttyStyleColorTag t) = (#poke GhosttyStyleColor, tag) p (fromIntegral t :: Word8)
 
 -- | The layout of @GhosttyStyleColor@ as compiled, for the layout test (§3.4).
 ghosttyStyleColorLayout :: CStruct
@@ -130,32 +207,16 @@ ghosttyStyleColorLayout =
 
 -- | @GhosttyStyle@: Terminal cell style.
 data GhosttyStyle = GhosttyStyle
-  { -- | @size@.
-    size :: CSize,
-    -- | @fg_color@.
+  { -- | @fg_color@: Foreground (text) color.
     fgColor :: GhosttyStyleColor,
-    -- | @bg_color@.
+    -- | @bg_color@: Background color.
     bgColor :: GhosttyStyleColor,
-    -- | @underline_color@.
+    -- | @underline_color@: Underline color.
     underlineColor :: GhosttyStyleColor,
-    -- | @bold@.
-    bold :: CBool,
-    -- | @italic@.
-    italic :: CBool,
-    -- | @faint@.
-    faint :: CBool,
-    -- | @blink@.
-    blink :: CBool,
-    -- | @inverse@.
-    inverse :: CBool,
-    -- | @invisible@.
-    invisible :: CBool,
-    -- | @strikethrough@.
-    strikethrough :: CBool,
-    -- | @overline@.
-    overline :: CBool,
-    -- | @underline@: One of GHOSTTY\_SGR\_UNDERLINE\_\* values.
-    underline :: CInt
+    -- | @flags@: Text attributes and underline style. See GhosttyStyleFlags.
+    flags :: GhosttyStyleFlags,
+    -- | @reserved@: Reserved for future use. Always zero.
+    reserved :: Word16
   }
   deriving stock (Eq, Show)
 
@@ -164,33 +225,17 @@ instance Storable GhosttyStyle where
   alignment _ = (#alignment GhosttyStyle)
   peek p =
     GhosttyStyle
-      <$> (#peek GhosttyStyle, size) p
-      <*> (#peek GhosttyStyle, fg_color) p
+      <$> (#peek GhosttyStyle, fg_color) p
       <*> (#peek GhosttyStyle, bg_color) p
       <*> (#peek GhosttyStyle, underline_color) p
-      <*> (#peek GhosttyStyle, bold) p
-      <*> (#peek GhosttyStyle, italic) p
-      <*> (#peek GhosttyStyle, faint) p
-      <*> (#peek GhosttyStyle, blink) p
-      <*> (#peek GhosttyStyle, inverse) p
-      <*> (#peek GhosttyStyle, invisible) p
-      <*> (#peek GhosttyStyle, strikethrough) p
-      <*> (#peek GhosttyStyle, overline) p
-      <*> (#peek GhosttyStyle, underline) p
+      <*> (#peek GhosttyStyle, flags) p
+      <*> (#peek GhosttyStyle, reserved) p
   poke p s = do
-    (#poke GhosttyStyle, size) p s.size
     (#poke GhosttyStyle, fg_color) p s.fgColor
     (#poke GhosttyStyle, bg_color) p s.bgColor
     (#poke GhosttyStyle, underline_color) p s.underlineColor
-    (#poke GhosttyStyle, bold) p s.bold
-    (#poke GhosttyStyle, italic) p s.italic
-    (#poke GhosttyStyle, faint) p s.faint
-    (#poke GhosttyStyle, blink) p s.blink
-    (#poke GhosttyStyle, inverse) p s.inverse
-    (#poke GhosttyStyle, invisible) p s.invisible
-    (#poke GhosttyStyle, strikethrough) p s.strikethrough
-    (#poke GhosttyStyle, overline) p s.overline
-    (#poke GhosttyStyle, underline) p s.underline
+    (#poke GhosttyStyle, flags) p s.flags
+    (#poke GhosttyStyle, reserved) p s.reserved
 
 -- | The layout of @GhosttyStyle@ as compiled, for the layout test (§3.4).
 ghosttyStyleLayout :: CStruct
@@ -200,24 +245,16 @@ ghosttyStyleLayout =
       size = (#size GhosttyStyle),
       align = (#alignment GhosttyStyle),
       fields =
-        [ CField "size" (#offset GhosttyStyle, size) (#const GVTFFI_FIELD_SIZE(GhosttyStyle, size)),
-          CField "fg_color" (#offset GhosttyStyle, fg_color) (#const GVTFFI_FIELD_SIZE(GhosttyStyle, fg_color)),
+        [ CField "fg_color" (#offset GhosttyStyle, fg_color) (#const GVTFFI_FIELD_SIZE(GhosttyStyle, fg_color)),
           CField "bg_color" (#offset GhosttyStyle, bg_color) (#const GVTFFI_FIELD_SIZE(GhosttyStyle, bg_color)),
           CField "underline_color" (#offset GhosttyStyle, underline_color) (#const GVTFFI_FIELD_SIZE(GhosttyStyle, underline_color)),
-          CField "bold" (#offset GhosttyStyle, bold) (#const GVTFFI_FIELD_SIZE(GhosttyStyle, bold)),
-          CField "italic" (#offset GhosttyStyle, italic) (#const GVTFFI_FIELD_SIZE(GhosttyStyle, italic)),
-          CField "faint" (#offset GhosttyStyle, faint) (#const GVTFFI_FIELD_SIZE(GhosttyStyle, faint)),
-          CField "blink" (#offset GhosttyStyle, blink) (#const GVTFFI_FIELD_SIZE(GhosttyStyle, blink)),
-          CField "inverse" (#offset GhosttyStyle, inverse) (#const GVTFFI_FIELD_SIZE(GhosttyStyle, inverse)),
-          CField "invisible" (#offset GhosttyStyle, invisible) (#const GVTFFI_FIELD_SIZE(GhosttyStyle, invisible)),
-          CField "strikethrough" (#offset GhosttyStyle, strikethrough) (#const GVTFFI_FIELD_SIZE(GhosttyStyle, strikethrough)),
-          CField "overline" (#offset GhosttyStyle, overline) (#const GVTFFI_FIELD_SIZE(GhosttyStyle, overline)),
-          CField "underline" (#offset GhosttyStyle, underline) (#const GVTFFI_FIELD_SIZE(GhosttyStyle, underline))
+          CField "flags" (#offset GhosttyStyle, flags) (#const GVTFFI_FIELD_SIZE(GhosttyStyle, flags)),
+          CField "reserved" (#offset GhosttyStyle, reserved) (#const GVTFFI_FIELD_SIZE(GhosttyStyle, reserved))
         ]
     }
 
 -- | @ghostty_style_default@: write the default style (every colour none, every
--- flag off) to the pointer, @size@ included. @unsafe@: it does not call back
+-- flag off: all zero bytes) to the pointer. @unsafe@: it does not call back
 -- into Haskell.
 foreign import capi unsafe "ghostty/vt.h ghostty_style_default"
   ghosttyStyleDefault :: Ptr GhosttyStyle -> IO ()

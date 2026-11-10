@@ -20,20 +20,40 @@ module Ghostty.Effectful.Internal.Effect
     runGhosttyPinnedTo,
 
     -- * Build identity
-    linkedBuild,
+    linkedVersion,
+    optionalFeatures,
   )
 where
 
 import Control.Concurrent (ThreadId, myThreadId)
 import Control.Exception (throwIO)
+import Data.ByteString qualified as BS
+import Data.Text qualified as T
 import Effectful (Dispatch (..), DispatchOf, Eff, Effect, IOE, (:>))
 import Effectful.Dispatch.Static (SideEffects (..), StaticRep, evalStaticRep, getStaticRep, unsafeEff_)
+import Foreign.C.ConstPtr (ConstPtr (..))
+import Foreign.C.Types (CBool)
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (Ptr, castPtr)
 import Foreign.Storable (peek)
 import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), VersionMismatch (..))
-import Ghostty.FFI.BuildInfo (ghosttyBuildInfo, ghosttyPinnedCommit, pattern GhosttyBuildInfoVersionBuild)
-import Ghostty.FFI.Types (GhosttyString, ghosttyStringBytes, pattern GhosttySuccess)
+import Ghostty.FFI.BuildInfo
+  ( GhosttyBuildInfo,
+    ghosttyBuildInfo,
+    ghosttyPinnedVersion,
+    ghosttyVersion,
+    pattern GhosttyBuildInfoFeatureColor,
+    pattern GhosttyBuildInfoFeatureFormatter,
+    pattern GhosttyBuildInfoFeatureGlyphProtocol,
+    pattern GhosttyBuildInfoFeatureGridIntrospection,
+    pattern GhosttyBuildInfoFeatureInputEncode,
+    pattern GhosttyBuildInfoFeatureRenderState,
+    pattern GhosttyBuildInfoFeatureSearch,
+    pattern GhosttyBuildInfoFeatureSelection,
+    pattern GhosttyBuildInfoFeatureSnapshot,
+    pattern GhosttyBuildInfoKittyGraphics,
+  )
+import Ghostty.FFI.Types (pattern GhosttySuccess)
 
 -- | The libghostty-vt binding: the right to make calls, from the thread that
 -- ran 'runGhostty', on handles opened in its scope.
@@ -70,17 +90,17 @@ owned op = do
     pure hs
 
 -- | Run the effect against the linked libghostty-vt, which must be the pinned
--- build (§3.4): otherwise nothing runs, and the result is the mismatch. Every
--- operation must then come from this thread, or it throws 'WrongThread'
--- (§4.6).
+-- release, built with every optional feature (§3.4, D-1, D-2): otherwise
+-- nothing runs, and the result is the mismatch. Every operation must then
+-- come from this thread, or it throws 'WrongThread' (§4.6).
 runGhostty :: (IOE :> es) => Eff (Ghostty : es) a -> Eff es (Either VersionMismatch a)
-runGhostty = runGhosttyPinnedTo (decodeUtf8 ghosttyPinnedCommit)
+runGhostty = runGhosttyPinnedTo (decodeUtf8 ghosttyPinnedVersion)
 
--- | 'runGhostty' with another pin in place of @GHOSTTY_COMMIT@, which is how
--- the mismatch is tested.
+-- | 'runGhostty' with another pin in place of @LIBGHOSTTY_VT_VERSION@, which is
+-- how the mismatch is tested.
 runGhosttyPinnedTo :: (IOE :> es) => Text -> Eff (Ghostty : es) a -> Eff es (Either VersionMismatch a)
 runGhosttyPinnedTo pin act = do
-  linked <- liftIO linkedBuild
+  linked <- liftIO linkedVersion
   if linked /= Just pin
     then pure (Left VersionMismatch {pinned = pin, linked})
     else do
@@ -91,13 +111,44 @@ runGhosttyPinnedTo pin act = do
       encoders <- newIORef 0
       Right <$> evalStaticRep (GhosttyRep Handles {owner, openCount = open, refCount = refs, renderCount = renders, encoderCount = encoders}) act
 
--- | The linked library's build metadata (@VERSION_BUILD@), which
--- @scripts/build-libghostty.sh@ stamps with the commit it built; 'Nothing' if
--- the library would not say. Build info is a constant of the library, so this
--- needs no owner.
-linkedBuild :: IO (Maybe Text)
-linkedBuild = alloca $ \(p :: Ptr GhosttyString) -> do
-  r <- ghosttyBuildInfo GhosttyBuildInfoVersionBuild (castPtr p)
-  if r /= GhosttySuccess
-    then pure Nothing
-    else Just . decodeUtf8 <$> (ghosttyStringBytes =<< peek p)
+-- | The linked library's identity: its full version (@ghostty_version@, which
+-- a development build suffixes with @-dev+…@), then @without@ each optional
+-- feature it was built without (@-Dvt-features@, 'optionalFeatures'), whose
+-- calls would return @GHOSTTY_UNSUPPORTED@. So it equals the pin exactly when
+-- the library is the pinned release, whole. 'Nothing' if the library would
+-- not say whether it has a feature. Build info is a constant of the library,
+-- so this needs no owner.
+linkedVersion :: IO (Maybe Text)
+linkedVersion = do
+  ConstPtr p <- ghosttyVersion
+  version <- decodeUtf8 <$> BS.packCString p
+  missing <- fmap concat . sequence <$> traverse absent optionalFeatures
+  pure $ (\ms -> T.unwords (version : concatMap (\m -> ["without", m]) ms)) <$> missing
+  where
+    -- The feature's name if the library was built without it.
+    absent :: (GhosttyBuildInfo, Text) -> IO (Maybe [Text])
+    absent (key, name) = alloca $ \(b :: Ptr CBool) -> do
+      r <- ghosttyBuildInfo key (castPtr b)
+      if r /= GhosttySuccess
+        then pure Nothing
+        else do
+          present <- peek b
+          pure (Just [name | present == 0])
+
+-- | Every optional feature @-Dvt-features@ can leave out, with its build-info
+-- key and its name there: the nine @FEATURE_*@ keys, and @KITTY_GRAPHICS@,
+-- whose terminal keys return @GHOSTTY_UNSUPPORTED@ in a build without it
+-- (regression 12).
+optionalFeatures :: [(GhosttyBuildInfo, Text)]
+optionalFeatures =
+  [ (GhosttyBuildInfoFeatureSnapshot, "snapshot"),
+    (GhosttyBuildInfoFeatureFormatter, "formatter"),
+    (GhosttyBuildInfoFeatureSelection, "selection"),
+    (GhosttyBuildInfoFeatureSearch, "search"),
+    (GhosttyBuildInfoFeatureRenderState, "render-state"),
+    (GhosttyBuildInfoFeatureInputEncode, "input-encode"),
+    (GhosttyBuildInfoFeatureColor, "color"),
+    (GhosttyBuildInfoFeatureGridIntrospection, "grid-introspection"),
+    (GhosttyBuildInfoFeatureGlyphProtocol, "glyph-protocol"),
+    (GhosttyBuildInfoKittyGraphics, "kitty-graphics")
+  ]

@@ -10,6 +10,11 @@
 -- pointer to keep alive. And a range is a pair of untracked grid references,
 -- valid only until the next call that changes the terminal: resolving the
 -- range's points and formatting in the same call is what keeps them valid.
+--
+-- A new formatter starts with the library's defaults, which are not
+-- canopy's (it trims and emits the palette, cursor style and hyperlink as
+-- extras). So every option is set on every formatter made, and none is left
+-- to the library (regression 10).
 module Ghostty.Effectful.Internal.Format
   ( -- * Options
     Format (..),
@@ -30,13 +35,15 @@ module Ghostty.Effectful.Internal.Format
 where
 
 import Control.Exception (bracket, finally, throwIO)
+import Data.Bits ((.|.))
 import Data.ByteString qualified as BS
+import Foreign.C.Types (CBool)
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Marshal.Utils (fromBool, with)
 import Foreign.Ptr (Ptr, castPtr, nullPtr)
-import Foreign.Storable (peek)
+import Foreign.Storable (Storable, peek)
 import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), ResultCode (..))
-import Ghostty.Effectful.Internal.Convert (refTemplate, toPoint, withSize)
+import Ghostty.Effectful.Internal.Convert (emptyRef, toPoint)
 import Ghostty.Effectful.Internal.Error (expectSuccess, resultCode)
 import Ghostty.Effectful.Internal.Keys (getData)
 import Ghostty.Effectful.Internal.Terminal (Terminal (..), pastHistory)
@@ -44,12 +51,31 @@ import Ghostty.Effectful.Point (KnownCoord, Point (..))
 import Ghostty.Effectful.Terminal.Keys (TerminalData (..))
 import Ghostty.FFI.Allocator (ghosttyFree)
 import Ghostty.FFI.Formatter
-  ( GhosttyFormatterScreenExtra (..),
-    GhosttyFormatterTerminalExtra (..),
-    GhosttyFormatterTerminalOptions (..),
+  ( GhosttyFormatter,
+    GhosttyFormatterExtras,
+    GhosttyFormatterOption,
     ghosttyFormatterFormatAlloc,
     ghosttyFormatterFree,
+    ghosttyFormatterSet,
     ghosttyFormatterTerminalNew,
+    pattern GhosttyFormatterExtraCharsets,
+    pattern GhosttyFormatterExtraCursor,
+    pattern GhosttyFormatterExtraHyperlink,
+    pattern GhosttyFormatterExtraKeyboard,
+    pattern GhosttyFormatterExtraKittyKeyboard,
+    pattern GhosttyFormatterExtraModes,
+    pattern GhosttyFormatterExtraPalette,
+    pattern GhosttyFormatterExtraProtection,
+    pattern GhosttyFormatterExtraPwd,
+    pattern GhosttyFormatterExtraScrollingRegion,
+    pattern GhosttyFormatterExtraStyle,
+    pattern GhosttyFormatterExtraTabstops,
+    pattern GhosttyFormatterExtrasNone,
+    pattern GhosttyFormatterOptEmit,
+    pattern GhosttyFormatterOptExtras,
+    pattern GhosttyFormatterOptSelection,
+    pattern GhosttyFormatterOptTrim,
+    pattern GhosttyFormatterOptUnwrap,
   )
 import Ghostty.FFI.GridRef (GhosttyGridRef)
 import Ghostty.FFI.Selection (GhosttySelection (..))
@@ -166,25 +192,41 @@ data Range c
     WholeRows Word32 Word32
   deriving stock (Eq, Show)
 
--- | @ghostty_formatter_terminal_new@, then @ghostty_formatter_format_alloc@:
--- the terminal's active screen, scrollback included, or the selection when
--- the pointer is not null.
+-- | @ghostty_formatter_terminal_new@, @ghostty_formatter_set@ for every
+-- option, then @ghostty_formatter_format_alloc@: the terminal's active
+-- screen, scrollback included, or the selection when the pointer is not null
+-- (the formatter copies it).
 formatWith :: Terminal s -> FormatOptions -> Ptr GhosttySelection -> IO ByteString
 formatWith t o sel =
-  with (terminalOptions o sel) $ \op ->
-    bracket (newFormatter op) ghosttyFormatterFree $ \f ->
-      alloca $ \outPtr -> alloca $ \outLen -> do
-        expectSuccess (CallSite "ghostty_formatter_format_alloc")
-          =<< ghosttyFormatterFormatAlloc f nullPtr outPtr outLen
-        p <- peek outPtr
-        n <- peek outLen
-        -- Empty output is a null pointer, which ghostty_free accepts.
-        BS.packCStringLen (castPtr p, fromIntegral n) `finally` ghosttyFree nullPtr p n
+  bracket newFormatter ghosttyFormatterFree $ \f -> do
+    setOption f GhosttyFormatterOptEmit (formatCode o.emit)
+    setOption f GhosttyFormatterOptUnwrap (fromBool o.unwrap :: CBool)
+    setOption f GhosttyFormatterOptTrim (fromBool o.trim :: CBool)
+    setOption f GhosttyFormatterOptExtras (extrasMask o.extras)
+    -- Null is the default, no selection: the whole screen.
+    expectSuccess setSite =<< ghosttyFormatterSet f GhosttyFormatterOptSelection (castPtr sel)
+    alloca $ \outPtr -> alloca $ \outLen -> do
+      expectSuccess (CallSite "ghostty_formatter_format_alloc")
+        =<< ghosttyFormatterFormatAlloc f nullPtr outPtr outLen
+      p <- peek outPtr
+      n <- peek outLen
+      -- Empty output is a null pointer, which ghostty_free accepts.
+      BS.packCStringLen (castPtr p, fromIntegral n) `finally` ghosttyFree nullPtr p n
   where
-    newFormatter op = alloca $ \out -> do
+    newFormatter = alloca $ \out -> do
       expectSuccess (CallSite "ghostty_formatter_terminal_new")
-        =<< ghosttyFormatterTerminalNew nullPtr out t.handle op
+        =<< ghosttyFormatterTerminalNew nullPtr out t.handle
       peek out
+
+-- | @ghostty_formatter_set@ from a value of the option's type. Every value
+-- this module passes is valid for its option, so any failure is an
+-- invariant.
+setOption :: (Storable a) => GhosttyFormatter -> GhosttyFormatterOption -> a -> IO ()
+setOption f key v = with v $ \vp -> expectSuccess setSite =<< ghosttyFormatterSet f key (castPtr vp)
+
+-- | Where a formatter option's errors come from.
+setSite :: CallSite
+setSite = CallSite "ghostty_formatter_set"
 
 -- | The whole active screen, scrollback included.
 formatTerminal :: Terminal s -> FormatOptions -> IO ByteString
@@ -211,7 +253,7 @@ formatTerminalRange t o range = do
       gridRef t to >>= \case
         Nothing -> pure Nothing
         Just end ->
-          let sel = withSize $ \size -> GhosttySelection {size, start, end, rectangle = fromBool rectangle}
+          let sel = GhosttySelection {start, end, rectangle = fromBool rectangle}
            in Just <$> with sel (formatWith t o)
 
 -- | @ghostty_terminal_grid_ref@: the untracked reference to the cell at a
@@ -222,7 +264,7 @@ gridRef :: (KnownCoord c) => Terminal s -> Point c -> IO (Maybe GhosttyGridRef)
 gridRef t p =
   pastHistory t.handle point >>= \case
     True -> pure Nothing
-    False -> with point $ \pp -> with (withSize refTemplate) $ \rp -> do
+    False -> with point $ \pp -> with emptyRef $ \rp -> do
       r <- ghosttyTerminalGridRef t.handle pp rp
       case resultCode r of
         ResultSuccess -> Just <$> peek rp
@@ -231,44 +273,29 @@ gridRef t p =
   where
     point = toPoint p
 
--- | The library's options, the selection pointer included.
-terminalOptions :: FormatOptions -> Ptr GhosttySelection -> GhosttyFormatterTerminalOptions
-terminalOptions o sel = withSize $ \size ->
-  GhosttyFormatterTerminalOptions
-    { size,
-      emit = formatCode o.emit,
-      unwrap = fromBool o.unwrap,
-      trim = fromBool o.trim,
-      extra = terminalExtra o.extras,
-      selection = sel
-    }
-
--- | The library's terminal extras.
-terminalExtra :: TerminalExtras -> GhosttyFormatterTerminalExtra
-terminalExtra e = withSize $ \size ->
-  GhosttyFormatterTerminalExtra
-    { size,
-      palette = fromBool e.palette,
-      modes = fromBool e.modes,
-      scrollingRegion = fromBool e.scrollingRegion,
-      tabstops = fromBool e.tabstops,
-      pwd = fromBool e.pwd,
-      keyboard = fromBool e.keyboard,
-      screen = screenExtra e.screen
-    }
-
--- | The library's screen extras.
-screenExtra :: ScreenExtras -> GhosttyFormatterScreenExtra
-screenExtra e = withSize $ \size ->
-  GhosttyFormatterScreenExtra
-    { size,
-      cursor = fromBool e.cursor,
-      style = fromBool e.style,
-      hyperlink = fromBool e.hyperlink,
-      protection = fromBool e.protection,
-      kittyKeyboard = fromBool e.kittyKeyboard,
-      charsets = fromBool e.charsets
-    }
+-- | The library's extras: a bit per field of 'TerminalExtras' and its
+-- 'ScreenExtras'.
+extrasMask :: TerminalExtras -> GhosttyFormatterExtras
+extrasMask e =
+  foldl'
+    (.|.)
+    GhosttyFormatterExtrasNone
+    [ bit
+    | (True, bit) <-
+        [ (e.palette, GhosttyFormatterExtraPalette),
+          (e.modes, GhosttyFormatterExtraModes),
+          (e.scrollingRegion, GhosttyFormatterExtraScrollingRegion),
+          (e.tabstops, GhosttyFormatterExtraTabstops),
+          (e.pwd, GhosttyFormatterExtraPwd),
+          (e.keyboard, GhosttyFormatterExtraKeyboard),
+          (e.screen.cursor, GhosttyFormatterExtraCursor),
+          (e.screen.style, GhosttyFormatterExtraStyle),
+          (e.screen.hyperlink, GhosttyFormatterExtraHyperlink),
+          (e.screen.protection, GhosttyFormatterExtraProtection),
+          (e.screen.kittyKeyboard, GhosttyFormatterExtraKittyKeyboard),
+          (e.screen.charsets, GhosttyFormatterExtraCharsets)
+        ]
+    ]
 
 -- | The library's output format.
 formatCode :: Format -> GhosttyFormatterFormat

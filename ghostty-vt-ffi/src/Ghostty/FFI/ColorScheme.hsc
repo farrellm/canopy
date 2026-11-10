@@ -11,7 +11,7 @@ module Ghostty.FFI.ColorScheme
   )
 where
 
-import Foreign.C.Types (CChar, CInt (..), CSize (..))
+import Foreign.C.Types (CInt (..), CSize (..))
 import Foreign.Ptr (Ptr)
 import Ghostty.FFI.Device (GhosttyColorScheme (..))
 import Ghostty.FFI.Types (GhosttyResult (..))
@@ -22,4 +22,4 @@ import Ghostty.FFI.Types (GhosttyResult (..))
 -- buffer. A null buffer, or one too small, returns @GHOSTTY_OUT_OF_SPACE@
 -- with the size needed. @unsafe@: it does not call back into Haskell.
 foreign import capi unsafe "ghostty/vt.h ghostty_color_scheme_report_encode"
-  ghosttyColorSchemeReportEncode :: GhosttyColorScheme -> Ptr CChar -> CSize -> Ptr CSize -> IO GhosttyResult
+  ghosttyColorSchemeReportEncode :: GhosttyColorScheme -> Ptr Word8 -> CSize -> Ptr CSize -> IO GhosttyResult

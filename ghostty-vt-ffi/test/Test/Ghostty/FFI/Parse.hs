@@ -27,14 +27,16 @@ tests =
     "Parse"
     [ testGroup
         "OSC"
-        [ testCase "a window title, read as a C string" $
+        [ testCase "a window title, read as a GhosttyString" $
             withOsc $ \p -> do
               cmd <- oscCommand p "2;hello" 0x07
               ghosttyOscCommandType cmd >>= (@?= GhosttyOscCommandChangeWindowTitle)
-              alloca $ \sp -> do
-                ghosttyOscCommandData cmd GhosttyOscDataChangeWindowTitleStr (castPtr sp) >>= (@?= 1)
-                ConstPtr s <- peek sp
-                BS.packCString s >>= (@?= "hello"),
+              oscDatum cmd GhosttyOscDataChangeWindowTitleStr >>= ghosttyStringBytes >>= (@?= "hello"),
+          testCase "a datum the command does not have is NO_VALUE" $
+            withOsc $ \p -> do
+              cmd <- oscCommand p "2;hello" 0x07
+              alloca $ \(vp :: Ptr GhosttyString) ->
+                ghosttyOscCommandData cmd GhosttyOscDataUnknownContent (castPtr vp) >>= (@?= GhosttyNoValue),
           testCase "an unknown number: invalid by default, kept with the option" $
             withOsc $ \p -> do
               oscCommand p "7400;status=busy" 0x07 >>= ghosttyOscCommandType >>= (@?= GhosttyOscCommandInvalid)
@@ -42,10 +44,7 @@ tests =
               with (1024 :: CSize) $ \v -> ghosttyOscSet p GhosttyOscOptUnknownMaxBytes (castPtr v) >>= (@?= GhosttySuccess)
               cmd <- oscCommand p "7400;status=busy" 0x5c
               ghosttyOscCommandType cmd >>= (@?= GhosttyOscCommandUnknown)
-              content <- alloca $ \sp -> do
-                ghosttyOscCommandData cmd GhosttyOscDataUnknownContent (castPtr sp) >>= (@?= 1)
-                peek sp >>= ghosttyStringBytes
-              content @?= "7400;status=busy"
+              oscDatum cmd GhosttyOscDataUnknownContent >>= ghosttyStringBytes >>= (@?= "7400;status=busy")
               oscDatum cmd GhosttyOscDataUnknownTruncated >>= (@?= (0 :: CBool))
               oscDatum cmd GhosttyOscDataUnknownTerminator >>= (@?= GhosttyOscTerminatorSt),
           testCase "a cancelled sequence (CAN) is no command" $
@@ -123,7 +122,7 @@ oscCommand p bytes end = do
 
 oscDatum :: (Storable a) => GhosttyOscCommand -> GhosttyOscCommandData -> IO a
 oscDatum cmd d = alloca $ \vp -> do
-  ghosttyOscCommandData cmd d (castPtr vp) >>= (@?= 1)
+  ghosttyOscCommandData cmd d (castPtr vp) >>= (@?= GhosttySuccess)
   peek vp
 
 -- * SGR

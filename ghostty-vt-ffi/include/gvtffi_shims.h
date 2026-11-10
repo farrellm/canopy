@@ -30,10 +30,10 @@
 /* terminal.h, grid_ref_tracked.h (M1.2) */
 
 /* ghostty_terminal_scroll_viewport (terminal.h), taking `behavior` by pointer. */
-static inline void gvtffi_terminal_scroll_viewport(
+static inline GhosttyResult gvtffi_terminal_scroll_viewport(
     GhosttyTerminal terminal,
     const GhosttyTerminalScrollViewport *behavior) {
-  ghostty_terminal_scroll_viewport(terminal, *behavior);
+  return ghostty_terminal_scroll_viewport(terminal, *behavior);
 }
 
 /* ghostty_terminal_grid_ref (terminal.h), taking `point` by pointer. */
@@ -69,48 +69,11 @@ static inline GhosttyResult gvtffi_terminal_continuation_write(
 
 /* formatter.h, selection.h (M1.3) */
 
-/* ghostty_formatter_terminal_new (formatter.h), taking `options` by pointer. */
-static inline GhosttyResult gvtffi_formatter_terminal_new(
-    const GhosttyAllocator *allocator,
-    GhosttyFormatter *formatter,
-    GhosttyTerminal terminal,
-    const GhosttyFormatterTerminalOptions *options) {
-  return ghostty_formatter_terminal_new(allocator, formatter, terminal, *options);
-}
-
 /* ghostty_formatter_format (formatter.h), taking `writer` by pointer. */
 static inline GhosttyResult gvtffi_formatter_format(
     GhosttyFormatter formatter,
     const GhosttyWriter *writer) {
   return ghostty_formatter_format(formatter, *writer);
-}
-
-/* ghostty_terminal_select_output (selection.h), taking `ref` by pointer. */
-static inline GhosttyResult gvtffi_terminal_select_output(
-    GhosttyTerminal terminal,
-    const GhosttyGridRef *ref,
-    GhosttySelection *out_selection) {
-  return ghostty_terminal_select_output(terminal, *ref, out_selection);
-}
-
-/* ghostty_terminal_selection_format_buf (selection.h), taking `options` by pointer. */
-static inline GhosttyResult gvtffi_terminal_selection_format_buf(
-    GhosttyTerminal terminal,
-    const GhosttyTerminalSelectionFormatOptions *options,
-    uint8_t *buf,
-    size_t buf_len,
-    size_t *out_written) {
-  return ghostty_terminal_selection_format_buf(terminal, *options, buf, buf_len, out_written);
-}
-
-/* ghostty_terminal_selection_format_alloc (selection.h), taking `options` by pointer. */
-static inline GhosttyResult gvtffi_terminal_selection_format_alloc(
-    GhosttyTerminal terminal,
-    const GhosttyAllocator *allocator,
-    const GhosttyTerminalSelectionFormatOptions *options,
-    uint8_t **out_ptr,
-    size_t *out_len) {
-  return ghostty_terminal_selection_format_alloc(terminal, allocator, *options, out_ptr, out_len);
 }
 
 /* ghostty_terminal_selection_contains (selection.h), taking `point` by pointer. */
@@ -123,23 +86,13 @@ static inline GhosttyResult gvtffi_terminal_selection_contains(
 }
 
 
-/* size_report.h, mouse/event.h, sgr.h (M1.3) */
-
-/* ghostty_size_report_encode (size_report.h), taking `size` by pointer. */
-static inline GhosttyResult gvtffi_size_report_encode(
-    GhosttySizeReportStyle style,
-    const GhosttySizeReportSize *size,
-    char *buf,
-    size_t buf_len,
-    size_t *out_written) {
-  return ghostty_size_report_encode(style, *size, buf, buf_len, out_written);
-}
+/* mouse/event.h, sgr.h (M1.3) */
 
 /* ghostty_mouse_event_set_position (mouse/event.h), taking `position` by pointer. */
-static inline void gvtffi_mouse_event_set_position(
+static inline GhosttyResult gvtffi_mouse_event_set_position(
     GhosttyMouseEvent event,
     const GhosttyMousePosition *position) {
-  ghostty_mouse_event_set_position(event, *position);
+  return ghostty_mouse_event_set_position(event, *position);
 }
 
 /* ghostty_mouse_event_get_position (mouse/event.h), returning its GhosttyMousePosition through a pointer. */
@@ -163,10 +116,21 @@ static inline size_t gvtffi_sgr_unknown_partial(
   return ghostty_sgr_unknown_partial(*unknown, ptr);
 }
 
-/* ghostty_sgr_attribute_tag (sgr.h), taking `attr` by pointer. */
-static inline GhosttySgrAttributeTag gvtffi_sgr_attribute_tag(
-    const GhosttySgrAttribute *attr) {
-  return ghostty_sgr_attribute_tag(*attr);
+
+/* key/event.h (M1.11) */
+
+/* ghostty_key_event_set_utf8 (key/event.h), taking `utf8` by pointer. */
+static inline GhosttyResult gvtffi_key_event_set_utf8(
+    GhosttyKeyEvent event,
+    const GhosttyString *utf8) {
+  return ghostty_key_event_set_utf8(event, *utf8);
+}
+
+/* ghostty_key_event_get_utf8 (key/event.h), returning its GhosttyString through a pointer. */
+static inline void gvtffi_key_event_get_utf8(
+    GhosttyKeyEvent event,
+    GhosttyString *out_result) {
+  *out_result = ghostty_key_event_get_utf8(event);
 }
 
 #endif /* GVTFFI_SHIMS_H */

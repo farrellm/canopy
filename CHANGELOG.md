@@ -220,6 +220,46 @@ Written as changes land, not at release (DESIGN.md §2.9).
   `scripts/check-allocation.py` (cassini's, 10% and a 4 KiB slack); time is reported. First
   figures: plain text at about 700 MB/s; the OSC 133 transcript at about 3.2 µs and 2.9 KB per
   stop, linear in the stops.
+- libghostty-vt is pinned at its first stable release, **1.0.0** (M1.11), from commit `c7f68a7f`,
+  118 commits behind it. 1.0 freezes the C ABI for 1.x (additions only, a SONAME of
+  `libghostty-vt.so.1`, versioned symbols), so this should be the last migration of its size; it
+  broke the C API in many small ways to get there. The pin is now a version,
+  `ghostty-vt-ffi/LIBGHOSTTY_VT_VERSION` (DESIGN.md D14), built offline from the release tarball and
+  its deps tarball, whose sha256 sums the build script pins (checked against upstream's minisign
+  key). `scripts/prefetch-zig-deps.py`, the git checkout and the `-Dlib-version-string` stamp are
+  gone. `build-libghostty.sh --release` builds for the baseline CPU, for statically linked releases
+  (D17). `pkgconfig-depends` is `==1.0.0` (D15).
+- The version check (DESIGN.md §3.4) compares the linked `ghostty_version()`, the headers'
+  `GHOSTTY_VT_VERSION` and every optional `FEATURE_*` with the pin. `buildMetadata` reports the
+  linked version (`1.0.0`), followed by any feature it lacks. `VersionMismatch` keeps its shape,
+  with versions.
+- The binding follows 1.0: every key enum's `INVALID = 0`; setters returning `GhosttyResult`; the
+  encoders' `setopt` renamed `set`; one `uint8_t` buffer shape; `GhosttyGridRef`,
+  `GhosttySelection`, `GhosttyStyle` and every callback payload frozen (no `size`; `GhosttyStyle` is
+  16 bytes, its attributes and underline in a `GhosttyStyleFlags` word); the formatter's keyed
+  options (`ghostty_formatter_set`/`_get`, `GhosttyFormatterOption`, `GhosttyFormatterExtras`) in
+  place of its options structs; the selection-format functions removed (a selection is formatted
+  through the formatter); `GhosttyCursorStyle` and `GhosttyImageLayer` merged into `types.h`;
+  `ghostty_version` and `GhosttyCodepointBuffer` bound. Six shims went and two came (13 bound).
+  Every bound function's rewritten doc was re-read for `safe`/`unsafe`: no mode changed.
+- Public renames following upstream (D16): `ModeKey`'s constructors take the `GHOSTTY_MODE_*` names
+  (`ModeKam` is `ModeDisableKeyboard`, `ModeDecckm` `ModeCursorKeys`, `ModeSyncOutput`
+  `ModeSynchronizedOutput`, `ModePasteEvents` `ModeKittyPasteEvents`, and 18 more), and the
+  terminal data key `CursorStyle` is `CursorSgrStyle`. `GhosttyError`'s `ShortStruct` is gone, since
+  no callback receives a sized struct (regression 4's case went with it), and `ResultCode` has
+  `ResultUnsupported`. `SetGlyphProtocol` is documented as off in a new terminal, as 1.0 has it.
+- Fixed, the silent changes no shape check catches, each with a numbered regression case that
+  failed before its fix: an OSC window title is a `GhosttyString`, not a C string, so reading it as
+  one stopped at an embedded NUL and could run past the title (regression 8); a cell with no colour
+  of its own is `NO_VALUE`, not `INVALID_VALUE`, so every default-coloured cell threw `Invariant`
+  (regression 9); a new formatter starts with trimming and the palette, cursor-style and hyperlink
+  extras on, so every option is now set on every formatter (regression 10); a null scrollback byte
+  limit restores its 10,000-byte default, so no limit is now `SIZE_MAX` (regression 11).
+- Fixed: the version check asked build info for the nine `FEATURE_*` keys but not
+  `KITTY_GRAPHICS`, which `-Dvt-features` also gates. A 1.0.0 built without it passed the check,
+  and every kitty-image key then threw `Invariant` on its `UNSUPPORTED` (regression 12).
+- The format goldens are unchanged. The feed benchmark's allocation is within the gate, each
+  iteration about 2 KB more, from the version check's feature queries in every `runGhostty`.
 
 ### M0: infrastructure
 

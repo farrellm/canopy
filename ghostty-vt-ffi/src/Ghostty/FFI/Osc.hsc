@@ -29,6 +29,7 @@ module Ghostty.FFI.Osc
 
     -- * Parsers
     GhosttyOscOption (..),
+    pattern GhosttyOscOptInvalid,
     pattern GhosttyOscOptUnknownMaxBytes,
     pattern GhosttyOscOptionUnknown,
     ghosttyOscOptionEnum,
@@ -85,7 +86,7 @@ module Ghostty.FFI.Osc
   )
 where
 
-import Foreign.C.Types (CBool (..), CInt (..))
+import Foreign.C.Types (CInt (..))
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (Storable (..))
 import Ghostty.FFI.Allocator (GhosttyAllocator)
@@ -162,6 +163,10 @@ newtype GhosttyOscOption = GhosttyOscOption CInt
   deriving stock (Eq, Show)
   deriving newtype (Storable)
 
+-- | @GHOSTTY_OSC_OPT_INVALID@: Not a real option. ghostty\_osc\_set() returns GHOSTTY\_INVALID\_VALUE for it. Its value is 0, so a zeroed or uninitialized variable is never mistaken for a real option.
+pattern GhosttyOscOptInvalid :: GhosttyOscOption
+pattern GhosttyOscOptInvalid = GhosttyOscOption (#const GHOSTTY_OSC_OPT_INVALID)
+
 -- | @GHOSTTY_OSC_OPT_UNKNOWN_MAX_BYTES@: The most bytes to keep from each OSC sequence whose number the parser does not implement.
 --
 -- Input type: @size_t*@.
@@ -175,6 +180,7 @@ pattern GhosttyOscOptionUnknown n <- GhosttyOscOption (unnamed ghosttyOscOptionE
     GhosttyOscOptionUnknown n = GhosttyOscOption n
 
 {-# COMPLETE
+  GhosttyOscOptInvalid,
   GhosttyOscOptUnknownMaxBytes,
   GhosttyOscOptionUnknown
   #-}
@@ -187,7 +193,8 @@ ghosttyOscOptionEnum =
     { name = "GhosttyOscOption",
       size = (#size GhosttyOscOption),
       values =
-        [ ("GHOSTTY_OSC_OPT_UNKNOWN_MAX_BYTES", (#const GHOSTTY_OSC_OPT_UNKNOWN_MAX_BYTES))
+        [ ("GHOSTTY_OSC_OPT_INVALID", (#const GHOSTTY_OSC_OPT_INVALID)),
+          ("GHOSTTY_OSC_OPT_UNKNOWN_MAX_BYTES", (#const GHOSTTY_OSC_OPT_UNKNOWN_MAX_BYTES))
         ]
     }
 
@@ -438,7 +445,7 @@ pattern GhosttyOscDataInvalid = GhosttyOscCommandData (#const GHOSTTY_OSC_DATA_I
 
 -- | @GHOSTTY_OSC_DATA_CHANGE_WINDOW_TITLE_STR@: Window title string data.
 --
--- Output type: @const char ** (pointer to null-terminated string)@.
+-- Output type: @GhosttyString *@.
 pattern GhosttyOscDataChangeWindowTitleStr :: GhosttyOscCommandData
 pattern GhosttyOscDataChangeWindowTitleStr = GhosttyOscCommandData (#const GHOSTTY_OSC_DATA_CHANGE_WINDOW_TITLE_STR)
 
@@ -498,7 +505,7 @@ foreign import capi unsafe "ghostty/vt.h ghostty_osc_command_type"
 
 -- | @ghostty_osc_command_data@: read one datum of a command into the out
 -- pointer, whose type depends on the datum ('GhosttyOscCommandData' says
--- which). False if the command has no such datum. @unsafe@: it does not call
--- back into Haskell.
+-- which). @GHOSTTY_NO_VALUE@ if the command has no such datum. @unsafe@: it
+-- does not call back into Haskell.
 foreign import capi unsafe "ghostty/vt.h ghostty_osc_command_data"
-  ghosttyOscCommandData :: GhosttyOscCommand -> GhosttyOscCommandData -> Ptr () -> IO CBool
+  ghosttyOscCommandData :: GhosttyOscCommand -> GhosttyOscCommandData -> Ptr () -> IO GhosttyResult

@@ -5,12 +5,15 @@ module Test.Ghostty.Effectful.Terminal (tests) where
 
 import Control.Concurrent (forkIO)
 import Control.Exception (ErrorCall (..), throwIO, try)
+import Data.Text qualified as T
 import Effectful (Eff, IOE, Limit (..), Persistence (..), UnliftStrategy (..), runEff, withEffToIO, (:>))
 import Effectful.Exception qualified as E
 import Ghostty.Effectful (runGhostty)
 import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), VersionMismatch (..))
-import Ghostty.Effectful.Internal.Effect (linkedBuild, runGhosttyPinnedTo)
+import Ghostty.Effectful.Internal.Effect (linkedVersion, optionalFeatures, runGhosttyPinnedTo)
 import Ghostty.Effectful.Terminal
+import Ghostty.FFI.BuildInfo (GhosttyBuildInfo (..), ghosttyBuildInfoEnum)
+import Ghostty.FFI.Layout (CEnum (..))
 import Test.Ghostty.Effectful.Support (config, ghostty, grid)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=))
@@ -24,10 +27,17 @@ tests =
         r @?= Right (),
       testCase "a version mismatch refuses, and runs nothing" $ do
         ran <- newIORef False
-        linked <- linkedBuild
+        linked <- linkedVersion
         r <- runEff (runGhosttyPinnedTo "not-the-pin" (writeIORef ran True))
         r @?= Left VersionMismatch {pinned = "not-the-pin", linked}
         readIORef ran >>= (@?= False),
+      testCase "regression 12: the version check asks for every optional feature, kitty graphics included" $
+        sort [toInteger n | (GhosttyBuildInfo n, _) <- optionalFeatures]
+          @?= sort
+            [ v
+            | (name, v) <- ghosttyBuildInfoEnum.values,
+              "GHOSTTY_BUILD_INFO_FEATURE_" `T.isPrefixOf` name || name == "GHOSTTY_BUILD_INFO_KITTY_GRAPHICS"
+            ],
       testCase "a terminal is open inside its scope and freed after" $ do
         r <- ghostty $ do
           inside <- withTerminal config (const openTerminals)

@@ -6,7 +6,8 @@
 
 -- | Types shared by every libghostty-vt header (@include/ghostty/vt/types.h@,
 -- DESIGN.md §3.2): the result code, borrowed strings and codepoint lists,
--- caller buffers, surface positions and the formatter's output format.
+-- caller buffers, surface positions, the formatter's output format, and the
+-- cursor shape and image layer that @terminal.h@ and @render.h@ share.
 --
 -- The header's opaque handles are bound in the module of the header that
 -- uses each: @GhosttyRenderState@ in "Ghostty.FFI.Render",
@@ -26,6 +27,7 @@ module Ghostty.FFI.Types
     pattern GhosttyIoError,
     pattern GhosttyLimitExceeded,
     pattern GhosttyRejected,
+    pattern GhosttyUnsupported,
     pattern GhosttyResultUnknown,
     ghosttyResultEnum,
 
@@ -39,6 +41,8 @@ module Ghostty.FFI.Types
     -- * Buffers
     GhosttyBuffer (..),
     ghosttyBufferLayout,
+    GhosttyCodepointBuffer (..),
+    ghosttyCodepointBufferLayout,
 
     -- * Surface positions
     GhosttySurfacePosition (..),
@@ -51,6 +55,26 @@ module Ghostty.FFI.Types
     pattern GhosttyFormatterFormatHtml,
     pattern GhosttyFormatterFormatUnknown,
     ghosttyFormatterFormatEnum,
+
+    -- * Cursor shapes
+    GhosttyCursorStyle (..),
+    pattern GhosttyCursorStyleBar,
+    pattern GhosttyCursorStyleBlock,
+    pattern GhosttyCursorStyleUnderline,
+    pattern GhosttyCursorStyleBlockHollow,
+    pattern GhosttyCursorStyleUnknown,
+    ghosttyCursorStyleEnum,
+
+    -- * Image layers
+    GhosttyImageLayer (..),
+    pattern GhosttyImageLayerBelowBackground,
+    pattern GhosttyImageLayerBelowText,
+    pattern GhosttyImageLayerAboveText,
+    pattern GhosttyImageLayerUnknown,
+    ghosttyImageLayerEnum,
+    pattern GhosttyImageLayerMaskBelowBackground,
+    pattern GhosttyImageLayerMaskBelowText,
+    pattern GhosttyImageLayerMaskAboveText,
 
     -- * Type manifest
     ghosttyTypeJson,
@@ -79,7 +103,7 @@ pattern GhosttySuccess = GhosttyResult (#const GHOSTTY_SUCCESS)
 pattern GhosttyOutOfMemory :: GhosttyResult
 pattern GhosttyOutOfMemory = GhosttyResult (#const GHOSTTY_OUT_OF_MEMORY)
 
--- | @GHOSTTY_INVALID_VALUE@: Operation failed due to invalid value.
+-- | @GHOSTTY_INVALID_VALUE@: An argument is not valid.
 pattern GhosttyInvalidValue :: GhosttyResult
 pattern GhosttyInvalidValue = GhosttyResult (#const GHOSTTY_INVALID_VALUE)
 
@@ -99,9 +123,13 @@ pattern GhosttyIoError = GhosttyResult (#const GHOSTTY_IO_ERROR)
 pattern GhosttyLimitExceeded :: GhosttyResult
 pattern GhosttyLimitExceeded = GhosttyResult (#const GHOSTTY_LIMIT_EXCEEDED)
 
--- | @GHOSTTY_REJECTED@: Operation was rejected by a safety check (e.g. pasted text that could inject commands). Nothing was done. Confirm with the user and retry with the operation\'s allow flag set.
+-- | @GHOSTTY_REJECTED@: Operation was rejected by a safety check (e.g. pasted text that could inject commands). Nothing was done. Confirm with the person using your terminal and retry with the operation\'s allow flag set.
 pattern GhosttyRejected :: GhosttyResult
 pattern GhosttyRejected = GhosttyResult (#const GHOSTTY_REJECTED)
+
+-- | @GHOSTTY_UNSUPPORTED@: This library cannot do what was asked.
+pattern GhosttyUnsupported :: GhosttyResult
+pattern GhosttyUnsupported = GhosttyResult (#const GHOSTTY_UNSUPPORTED)
 
 -- | Any value this binding does not name: a newer library's.
 pattern GhosttyResultUnknown :: CInt -> GhosttyResult
@@ -118,6 +146,7 @@ pattern GhosttyResultUnknown n <- GhosttyResult (unnamed ghosttyResultEnum -> Ju
   GhosttyIoError,
   GhosttyLimitExceeded,
   GhosttyRejected,
+  GhosttyUnsupported,
   GhosttyResultUnknown
   #-}
 
@@ -136,7 +165,8 @@ ghosttyResultEnum =
           ("GHOSTTY_NO_VALUE", (#const GHOSTTY_NO_VALUE)),
           ("GHOSTTY_IO_ERROR", (#const GHOSTTY_IO_ERROR)),
           ("GHOSTTY_LIMIT_EXCEEDED", (#const GHOSTTY_LIMIT_EXCEEDED)),
-          ("GHOSTTY_REJECTED", (#const GHOSTTY_REJECTED))
+          ("GHOSTTY_REJECTED", (#const GHOSTTY_REJECTED)),
+          ("GHOSTTY_UNSUPPORTED", (#const GHOSTTY_UNSUPPORTED))
         ]
     }
 
@@ -254,6 +284,44 @@ ghosttyBufferLayout =
         ]
     }
 
+-- | @GhosttyCodepointBuffer@: A buffer you provide for the library to fill with Unicode codepoints.
+data GhosttyCodepointBuffer = GhosttyCodepointBuffer
+  { -- | @ptr@: Where codepoints are written. May be NULL when cap is 0.
+    ptr :: Ptr Word32,
+    -- | @cap@: Number of uint32\_t elements ptr can hold.
+    cap :: CSize,
+    -- | @len@: Set by the library to the total number of codepoints, whether or not they all fit.
+    len :: CSize
+  }
+  deriving stock (Eq, Show)
+
+instance Storable GhosttyCodepointBuffer where
+  sizeOf _ = (#size GhosttyCodepointBuffer)
+  alignment _ = (#alignment GhosttyCodepointBuffer)
+  peek p =
+    GhosttyCodepointBuffer
+      <$> (#peek GhosttyCodepointBuffer, ptr) p
+      <*> (#peek GhosttyCodepointBuffer, cap) p
+      <*> (#peek GhosttyCodepointBuffer, len) p
+  poke p s = do
+    (#poke GhosttyCodepointBuffer, ptr) p s.ptr
+    (#poke GhosttyCodepointBuffer, cap) p s.cap
+    (#poke GhosttyCodepointBuffer, len) p s.len
+
+-- | The layout of @GhosttyCodepointBuffer@ as compiled, for the layout test (§3.4).
+ghosttyCodepointBufferLayout :: CStruct
+ghosttyCodepointBufferLayout =
+  CStruct
+    { name = "GhosttyCodepointBuffer",
+      size = (#size GhosttyCodepointBuffer),
+      align = (#alignment GhosttyCodepointBuffer),
+      fields =
+        [ CField "ptr" (#offset GhosttyCodepointBuffer, ptr) (#const GVTFFI_FIELD_SIZE(GhosttyCodepointBuffer, ptr)),
+          CField "cap" (#offset GhosttyCodepointBuffer, cap) (#const GVTFFI_FIELD_SIZE(GhosttyCodepointBuffer, cap)),
+          CField "len" (#offset GhosttyCodepointBuffer, len) (#const GVTFFI_FIELD_SIZE(GhosttyCodepointBuffer, len))
+        ]
+    }
+
 -- | @GhosttySurfacePosition@: A surface-space position in pixels.
 data GhosttySurfacePosition = GhosttySurfacePosition
   { -- | @x@: X position in surface pixels.
@@ -330,6 +398,112 @@ ghosttyFormatterFormatEnum =
           ("GHOSTTY_FORMATTER_FORMAT_HTML", (#const GHOSTTY_FORMATTER_FORMAT_HTML))
         ]
     }
+
+-- | @GhosttyCursorStyle@: The shape of the cursor.
+newtype GhosttyCursorStyle = GhosttyCursorStyle CInt
+  deriving stock (Eq, Show)
+  deriving newtype (Storable)
+
+-- | @GHOSTTY_CURSOR_STYLE_BAR@: Bar cursor (DECSCUSR 5, 6).
+pattern GhosttyCursorStyleBar :: GhosttyCursorStyle
+pattern GhosttyCursorStyleBar = GhosttyCursorStyle (#const GHOSTTY_CURSOR_STYLE_BAR)
+
+-- | @GHOSTTY_CURSOR_STYLE_BLOCK@: Block cursor (DECSCUSR 1, 2).
+pattern GhosttyCursorStyleBlock :: GhosttyCursorStyle
+pattern GhosttyCursorStyleBlock = GhosttyCursorStyle (#const GHOSTTY_CURSOR_STYLE_BLOCK)
+
+-- | @GHOSTTY_CURSOR_STYLE_UNDERLINE@: Underline cursor (DECSCUSR 3, 4).
+pattern GhosttyCursorStyleUnderline :: GhosttyCursorStyle
+pattern GhosttyCursorStyleUnderline = GhosttyCursorStyle (#const GHOSTTY_CURSOR_STYLE_UNDERLINE)
+
+-- | @GHOSTTY_CURSOR_STYLE_BLOCK_HOLLOW@: Hollow block cursor.
+pattern GhosttyCursorStyleBlockHollow :: GhosttyCursorStyle
+pattern GhosttyCursorStyleBlockHollow = GhosttyCursorStyle (#const GHOSTTY_CURSOR_STYLE_BLOCK_HOLLOW)
+
+-- | Any value this binding does not name: a newer library's.
+pattern GhosttyCursorStyleUnknown :: CInt -> GhosttyCursorStyle
+pattern GhosttyCursorStyleUnknown n <- GhosttyCursorStyle (unnamed ghosttyCursorStyleEnum -> Just n)
+  where
+    GhosttyCursorStyleUnknown n = GhosttyCursorStyle n
+
+{-# COMPLETE
+  GhosttyCursorStyleBar,
+  GhosttyCursorStyleBlock,
+  GhosttyCursorStyleUnderline,
+  GhosttyCursorStyleBlockHollow,
+  GhosttyCursorStyleUnknown
+  #-}
+
+-- | Every value of @GhosttyCursorStyle@, for the layout test (§3.4). It is also what
+-- 'GhosttyCursorStyleUnknown' excludes.
+ghosttyCursorStyleEnum :: CEnum
+ghosttyCursorStyleEnum =
+  CEnum
+    { name = "GhosttyCursorStyle",
+      size = (#size GhosttyCursorStyle),
+      values =
+        [ ("GHOSTTY_CURSOR_STYLE_BAR", (#const GHOSTTY_CURSOR_STYLE_BAR)),
+          ("GHOSTTY_CURSOR_STYLE_BLOCK", (#const GHOSTTY_CURSOR_STYLE_BLOCK)),
+          ("GHOSTTY_CURSOR_STYLE_UNDERLINE", (#const GHOSTTY_CURSOR_STYLE_UNDERLINE)),
+          ("GHOSTTY_CURSOR_STYLE_BLOCK_HOLLOW", (#const GHOSTTY_CURSOR_STYLE_BLOCK_HOLLOW))
+        ]
+    }
+
+-- | @GhosttyImageLayer@: Where an image is drawn relative to the terminal\'s text.
+newtype GhosttyImageLayer = GhosttyImageLayer CInt
+  deriving stock (Eq, Show)
+  deriving newtype (Storable)
+
+-- | @GHOSTTY_IMAGE_LAYER_BELOW_BACKGROUND@: Below the cell background colors. Kitty z-index below INT32\_MIN \/ 2 (-1,073,741,824).
+pattern GhosttyImageLayerBelowBackground :: GhosttyImageLayer
+pattern GhosttyImageLayerBelowBackground = GhosttyImageLayer (#const GHOSTTY_IMAGE_LAYER_BELOW_BACKGROUND)
+
+-- | @GHOSTTY_IMAGE_LAYER_BELOW_TEXT@: Above the cell background colors and below the text. Kitty z-index from INT32\_MIN \/ 2 up to -1.
+pattern GhosttyImageLayerBelowText :: GhosttyImageLayer
+pattern GhosttyImageLayerBelowText = GhosttyImageLayer (#const GHOSTTY_IMAGE_LAYER_BELOW_TEXT)
+
+-- | @GHOSTTY_IMAGE_LAYER_ABOVE_TEXT@: Above the text. Kitty z-index 0 and above.
+pattern GhosttyImageLayerAboveText :: GhosttyImageLayer
+pattern GhosttyImageLayerAboveText = GhosttyImageLayer (#const GHOSTTY_IMAGE_LAYER_ABOVE_TEXT)
+
+-- | Any value this binding does not name: a newer library's.
+pattern GhosttyImageLayerUnknown :: CInt -> GhosttyImageLayer
+pattern GhosttyImageLayerUnknown n <- GhosttyImageLayer (unnamed ghosttyImageLayerEnum -> Just n)
+  where
+    GhosttyImageLayerUnknown n = GhosttyImageLayer n
+
+{-# COMPLETE
+  GhosttyImageLayerBelowBackground,
+  GhosttyImageLayerBelowText,
+  GhosttyImageLayerAboveText,
+  GhosttyImageLayerUnknown
+  #-}
+
+-- | Every value of @GhosttyImageLayer@, for the layout test (§3.4). It is also what
+-- 'GhosttyImageLayerUnknown' excludes.
+ghosttyImageLayerEnum :: CEnum
+ghosttyImageLayerEnum =
+  CEnum
+    { name = "GhosttyImageLayer",
+      size = (#size GhosttyImageLayer),
+      values =
+        [ ("GHOSTTY_IMAGE_LAYER_BELOW_BACKGROUND", (#const GHOSTTY_IMAGE_LAYER_BELOW_BACKGROUND)),
+          ("GHOSTTY_IMAGE_LAYER_BELOW_TEXT", (#const GHOSTTY_IMAGE_LAYER_BELOW_TEXT)),
+          ("GHOSTTY_IMAGE_LAYER_ABOVE_TEXT", (#const GHOSTTY_IMAGE_LAYER_ABOVE_TEXT))
+        ]
+    }
+
+-- | @GHOSTTY_IMAGE_LAYER_MASK_BELOW_BACKGROUND@: Mask bit for GHOSTTY\_IMAGE\_LAYER\_BELOW\_BACKGROUND. The GHOSTTY\_IMAGE\_LAYER\_MASK\_\* macros select layers in a filter such as GHOSTTY\_KITTY\_GRAPHICS\_PLACEMENT\_ITERATOR\_OPT\_LAYER. Combine them with @|@.
+pattern GhosttyImageLayerMaskBelowBackground :: Word32
+pattern GhosttyImageLayerMaskBelowBackground = (#const GHOSTTY_IMAGE_LAYER_MASK_BELOW_BACKGROUND)
+
+-- | @GHOSTTY_IMAGE_LAYER_MASK_BELOW_TEXT@: Mask bit for GHOSTTY\_IMAGE\_LAYER\_BELOW\_TEXT.
+pattern GhosttyImageLayerMaskBelowText :: Word32
+pattern GhosttyImageLayerMaskBelowText = (#const GHOSTTY_IMAGE_LAYER_MASK_BELOW_TEXT)
+
+-- | @GHOSTTY_IMAGE_LAYER_MASK_ABOVE_TEXT@: Mask bit for GHOSTTY\_IMAGE\_LAYER\_ABOVE\_TEXT.
+pattern GhosttyImageLayerMaskAboveText :: Word32
+pattern GhosttyImageLayerMaskAboveText = (#const GHOSTTY_IMAGE_LAYER_MASK_ABOVE_TEXT)
 
 -- | @ghostty_type_json@: the linked library's description of every public
 -- type (sizes, alignments, field offsets, enum values), as a static

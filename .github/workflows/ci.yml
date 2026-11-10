@@ -37,16 +37,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 1: libghostty-vt at the pinned commit (§3.1), cached by commit. The
-      # script fetches its own pinned Zig.
+      # 1: libghostty-vt at the pinned release (§3.1), cached by version. The
+      # script fetches its own pinned Zig and the release's two tarballs.
       - name: Read the libghostty pin
-        run: echo "GHOSTTY_COMMIT=$(tr -d '[:space:]' < ghostty-vt-ffi/GHOSTTY_COMMIT)" >> "$GITHUB_ENV"
+        run: echo "LIBGHOSTTY_VT_VERSION=$(tr -d '[:space:]' < ghostty-vt-ffi/LIBGHOSTTY_VT_VERSION)" >> "$GITHUB_ENV"
 
       - name: Restore libghostty-vt
         uses: actions/cache@v4
         with:
-          path: _deps/ghostty/${{ env.GHOSTTY_COMMIT }}
-          key: libghostty-vt-${{ runner.os }}-${{ env.GHOSTTY_COMMIT }}-${{ hashFiles('scripts/build-libghostty.sh', 'scripts/prefetch-zig-deps.py') }}
+          path: _deps/ghostty/${{ env.LIBGHOSTTY_VT_VERSION }}
+          key: libghostty-vt-${{ runner.os }}-${{ env.LIBGHOSTTY_VT_VERSION }}-${{ hashFiles('scripts/build-libghostty.sh') }}
 
       - name: Build libghostty-vt
         run: |

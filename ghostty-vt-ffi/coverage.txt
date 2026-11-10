@@ -19,3 +19,8 @@ sys.h                  M6.15    the PNG decoder kitty graphics needs; logging an
 # Never.
 wasm.h                 never    WebAssembly builds only
 GhosttyAllocatorVtable never    allocators are not marshalled (DESIGN.md §3.3)
+GhosttyAllocatorAllocFn never   allocators are not marshalled (DESIGN.md §3.3)
+GhosttyAllocatorResizeFn never  allocators are not marshalled (DESIGN.md §3.3)
+GhosttyAllocatorRemapFn never   allocators are not marshalled (DESIGN.md §3.3)
+GhosttyAllocatorFreeFn never    allocators are not marshalled (DESIGN.md §3.3)
+ghostty_sized_init     never    withSize does the same, and the layout test checks every size

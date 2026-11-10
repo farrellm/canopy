@@ -36,9 +36,6 @@ module Ghostty.Effectful.Internal.Callbacks
     setEnquiryAnswer,
     setXtversionAnswer,
 
-    -- * Callbacks
-    onClipboardWrite,
-
     -- * Frame capture
     captureAttach,
     captureDetach,
@@ -65,7 +62,7 @@ import Ghostty.Effectful.Internal.Size (CellPixels (..), GridSize (..), extent, 
 import Ghostty.Effectful.Point (Point (..))
 import Ghostty.Effectful.Terminal.Keys (ColorScheme (..), DeviceAttributes (..), TerminalData (..))
 import Ghostty.FFI.Device
-import Ghostty.FFI.Layout (CEnum, CStruct (..))
+import Ghostty.FFI.Layout (CEnum)
 import Ghostty.FFI.Osc (ghosttyOscTerminatorEnum, pattern GhosttyOscTerminatorBel, pattern GhosttyOscTerminatorSt, pattern GhosttyOscTerminatorUnknown)
 import Ghostty.FFI.Render (GhosttyRenderState (..))
 import Ghostty.FFI.SizeReport (GhosttySizeReportSize (..))
@@ -426,23 +423,11 @@ onAttributesAnswer buf answers _ _ out = sheltered buf 0 $ do
 
 -- | @CLIPBOARD_WRITE@: accepted, recorded and answered with success;
 -- refused, answered with a denial. The reply is the one call a callback
--- makes, because the header requires it before the callback returns.
---
--- The request is a sized struct, whose fields may be read only as far as its
--- @size@ covers. One smaller than the binding's is recorded as 'ShortStruct'
--- and not read, not even its @reply@; the header says returning without a
--- reply denies the write.
+-- makes, because the header requires it before the callback returns. The
+-- request is a frozen struct (it has no @size@, and never grows), so it is
+-- read whole; the reply is sized.
 onClipboardWrite :: IORef [Pending] -> IORef Answers -> GhosttyTerminal -> Ptr () -> Ptr GhosttyClipboardWrite -> IO ()
 onClipboardWrite buf answers _ _ wp = sheltered buf () $ do
-  -- @size@ is the first field, so at offset 0 whatever the struct's size.
-  given <- peekByteOff wp 0 :: IO CSize
-  if toInteger given < toInteger ghosttyClipboardWriteLayout.size
-    then push buf (Failed (toException (ShortStruct clipboardSite ghosttyClipboardWriteLayout.name (toInteger given))))
-    else answerClipboardWrite buf answers wp
-
--- | Answer a clipboard write whose struct is whole.
-answerClipboardWrite :: IORef [Pending] -> IORef Answers -> Ptr GhosttyClipboardWrite -> IO ()
-answerClipboardWrite buf answers wp = do
   a <- readIORef answers
   w <- peek wp
   location <- case w.location of

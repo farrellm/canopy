@@ -21,7 +21,7 @@ entry that defers nothing, because what it names is bound or does not exist, is
 a failure too, so the list shrinks as the binding grows.
 
 Run from the repository root. The headers are read from
-`_deps/ghostty/<GHOSTTY_COMMIT>/include` (scripts/build-libghostty.sh), or
+`_deps/ghostty/<LIBGHOSTTY_VT_VERSION>/include` (scripts/build-libghostty.sh), or
 from `--include`.
 """
 
@@ -80,8 +80,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--include", type=Path, help="the libghostty-vt include directory")
     args = parser.parse_args()
-    commit = (PKG / "GHOSTTY_COMMIT").read_text().strip()
-    root = (args.include or Path("_deps/ghostty") / commit / "include") / "ghostty" / "vt"
+    version = (PKG / "LIBGHOSTTY_VT_VERSION").read_text().strip()
+    root = (args.include or Path("_deps/ghostty") / version / "include") / "ghostty" / "vt"
     if not root.is_dir():
         sys.exit(f"check-ghostty-coverage: no headers at {root}; run scripts/build-libghostty.sh")
 

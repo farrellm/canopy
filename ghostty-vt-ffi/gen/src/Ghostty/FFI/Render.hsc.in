@@ -41,7 +41,6 @@ module Ghostty.FFI.Render
     {{xenum render.h GhosttyRenderStateOption}}
     ghosttyRenderStateSet,
     {{xenum render.h GhosttyRenderStateDirty}}
-    {{xenum render.h GhosttyRenderStateCursorVisualStyle}}
     {{xstruct render.h GhosttyRenderStateOverscan}}
     {{xstruct render.h GhosttyRenderStateCursor}}
     GhosttyRenderStateColors (..),
@@ -78,7 +77,6 @@ module Ghostty.FFI.Render
     ghosttyRenderStateImageGet,
     ghosttyRenderStateImageGetMulti,
     {{xenum render.h GhosttyImageProtocol}}
-    {{xenum render.h GhosttyRenderStateImageLayer}}
     {{xenum render.h GhosttyRenderStateKittyPlacementKind}}
   )
 where
@@ -91,7 +89,7 @@ import Ghostty.FFI.Allocator (GhosttyAllocator)
 import Ghostty.FFI.Color (GhosttyColorRgb (..))
 import Ghostty.FFI.Layout (CEnum (..), CField (..), CStruct (..), unnamed)
 import Ghostty.FFI.Terminal.Handle (GhosttyTerminal (..))
-import Ghostty.FFI.Types (GhosttyResult (..))
+import Ghostty.FFI.Types (GhosttyCursorStyle (..), GhosttyResult (..))
 
 #include <gvtffi_shims.h>
 
@@ -197,7 +195,6 @@ foreign import capi unsafe "ghostty/vt.h ghostty_render_state_set"
   ghosttyRenderStateSet :: GhosttyRenderState -> GhosttyRenderStateOption -> Ptr () -> IO GhosttyResult
 
 {{enum render.h GhosttyRenderStateDirty}}
-{{enum render.h GhosttyRenderStateCursorVisualStyle}}
 {{struct render.h GhosttyRenderStateOverscan}}
 {{struct render.h GhosttyRenderStateCursor}}
 -- | @GhosttyRenderStateColors@: every colour of a render state, as one sized
@@ -380,5 +377,4 @@ foreign import capi unsafe "ghostty/vt.h ghostty_render_state_image_get_multi"
   ghosttyRenderStateImageGetMulti :: GhosttyRenderStateImageIterator -> CSize -> Ptr GhosttyRenderStateImageData -> Ptr (Ptr ()) -> Ptr CSize -> IO GhosttyResult
 
 {{enum render.h GhosttyImageProtocol}}
-{{enum render.h GhosttyRenderStateImageLayer}}
 {{enum render.h GhosttyRenderStateKittyPlacementKind}}

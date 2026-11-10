@@ -24,7 +24,7 @@ module Ghostty.FFI.Modes
   )
 where
 
-import Foreign.C.Types (CBool (..), CChar, CInt (..), CSize (..))
+import Foreign.C.Types (CBool (..), CInt (..), CSize (..))
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (Storable (..))
 import Ghostty.FFI.Layout (CEnum (..), unnamed)
@@ -61,4 +61,4 @@ foreign import capi unsafe "ghostty/vt.h ghostty_mode_ansi"
 -- null buffer, or one too small, returns @GHOSTTY_OUT_OF_SPACE@ with the size
 -- needed. @unsafe@: it does not call back into Haskell.
 foreign import capi unsafe "ghostty/vt.h ghostty_mode_report_encode"
-  ghosttyModeReportEncode :: GhosttyMode -> GhosttyModeReportState -> Ptr CChar -> CSize -> Ptr CSize -> IO GhosttyResult
+  ghosttyModeReportEncode :: GhosttyMode -> GhosttyModeReportState -> Ptr Word8 -> CSize -> Ptr CSize -> IO GhosttyResult

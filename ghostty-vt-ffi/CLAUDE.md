@@ -15,11 +15,18 @@ Only `Ghostty.Effectful.**` and `Test.Ghostty.**` may import it (§2.6 rule 1).
   PLAN.md step that binds it (`scripts/check-ghostty-coverage.py`). Binding a header's last symbol
   means deleting its line; the check fails on an entry that defers nothing.
 - **Enums are exhaustive at the pin**: the layout test fails on a library value without a pattern.
-- `GHOSTTY_COMMIT` is the pin. `scripts/build-libghostty.sh` builds that commit. The library is found
+- `LIBGHOSTTY_VT_VERSION` is the pin, a release (`1.0.0`). `scripts/build-libghostty.sh` builds it
+  offline from upstream's release tarball and deps tarball, each checked against a pinned sha256. The
+  ABI is stable across 1.x: a minor bump only adds. The library is found
   through `pkgconfig-depends` at configure time, and the `static` flag switches to
   `libghostty-vt-static`.
 - **C enums are newtypes with pattern synonyms, `COMPLETE` with an `…Unknown` view** (§3.3). Never
-  use a closed sum. Every value comes from `hsc2hs` (`#const`), never a hand-copied number.
+  use a closed sum. Every value comes from `hsc2hs` (`#const`), never a hand-copied number. Every
+  key enum starts at `INVALID = 0` (`…Invalid`), which no binding maps; a test that holds keys
+  against a header leaves it out.
+- **Sized or frozen**: a struct with a leading `size` is initialised as `GHOSTTY_INIT_SIZED` does
+  (`withSized`); a frozen one (`GhosttyGridRef`, `GhosttySelection`, `GhosttyStyle`, every callback
+  payload) has no `size` and is zeroed (`withZeroed`). A setter given null restores the default.
 - **Each import's comment says why it is `safe` or `unsafe`.** An `unsafe` call that re-enters
   Haskell crashes, and the compiler cannot catch that. `safety.txt` ties each decision to a
   fingerprint of the function's header text; after binding a function, or when
@@ -63,11 +70,13 @@ Only `Ghostty.Effectful.**` and `Test.Ghostty.**` may import it (§2.6 rule 1).
   can name it without a cycle. `GhosttyKittyGraphics` is in `KittyGraphics`, the header that uses
   it, though only the handle is bound there yet.
 - **`safe` for long calls too.** A call that runs no callback is still `safe` when it can walk the
-  scrollback (`terminal_compress`, the formatter's and selection's format calls): an `unsafe` one
+  scrollback (`terminal_compress`, the formatter's format calls): an `unsafe` one
   holds up every Haskell thread at the next GC.
 - Callback types are `FunPtr` synonyms, each with a `mk…` `wrapper`; the library's own function
   pointers handed to a callback (clipboard `reply`) have a `call…` `dynamic` import.
 - Write hsc2hs directives inside expressions parenthesised, `(#const X)`: a bare one takes the rest
   of the line.
-- `ghostty-vt-ffi-test` compiles `GHOSTTY_COMMIT` in (Template Haskell, `makeRelativeToProject`), so
-  it runs from any directory and rebuilds when the pin moves.
+- `ghostty-vt-ffi-test` compiles `LIBGHOSTTY_VT_VERSION` in (Template Haskell,
+  `makeRelativeToProject`), so it runs from any directory and rebuilds when the pin moves. It checks
+  the linked `ghostty_version()`, the headers' `GHOSTTY_VT_VERSION` and every optional feature
+  (`FEATURE_*` and `KITTY_GRAPHICS`) against it.

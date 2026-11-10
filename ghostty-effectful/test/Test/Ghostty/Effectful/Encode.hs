@@ -132,7 +132,7 @@ tests =
             r @?= ["\ESC[48;24;80;432;720t", "\ESC[4;432;720t", "\ESC[6;18;9t", "\ESC[8;24;80t", "\ESC[9;24;80t"],
           testCase "mode reports: DEC private, ANSI, and a mode the library does not know" $ do
             r <- ghostty $ do
-              dec <- encodeModeReport (knownMode ModeDecckm) ModeIsSet
+              dec <- encodeModeReport (knownMode ModeCursorKeys) ModeIsSet
               ansi <- traverse (`encodeModeReport` ModeIsReset) (modeNumber True 4)
               other <- traverse (`encodeModeReport` ModeNotRecognized) (modeNumber False 9999)
               pure (dec, ansi, other)

@@ -6,17 +6,15 @@
 
 -- | @include/ghostty/vt/selection.h@: selections of a terminal's content,
 -- deriving them (word, line, command output, all), adjusting and comparing
--- them, formatting one in a single call, and the gesture state machine that
--- turns pointer events into selections.
+-- them, and the gesture state machine that turns pointer events into
+-- selections. A selection is formatted through the formatter's
+-- @GHOSTTY_FORMATTER_OPT_SELECTION@ ("Ghostty.FFI.Formatter").
 --
 -- A 'GhosttySelection' holds two untracked grid references, so it is valid
 -- only until the next call that mutates its terminal ("Ghostty.FFI.GridRef").
 --
--- __@safe@ and @unsafe@.__ No call here runs a callback. The two formatting
--- calls are @safe@ anyway, as the formatter's are ("Ghostty.FFI.Formatter"):
--- a selection may span the whole scrollback, and an @unsafe@ call that long
--- would hold up every other Haskell thread at the next garbage collection.
--- The rest are @unsafe@.
+-- __@safe@ and @unsafe@.__ No call here runs a callback, and none walks the
+-- scrollback, so all are @unsafe@.
 module Ghostty.FFI.Selection
   ( -- * Selections
     GhosttySelection (..),
@@ -64,12 +62,6 @@ module Ghostty.FFI.Selection
     ghosttyTerminalSelectionContains,
     ghosttyTerminalSelectionEqual,
 
-    -- * Formatting
-    GhosttyTerminalSelectionFormatOptions (..),
-    ghosttyTerminalSelectionFormatOptionsLayout,
-    ghosttyTerminalSelectionFormatBuf,
-    ghosttyTerminalSelectionFormatAlloc,
-
     -- * Gestures
     GhosttySelectionGesture (..),
     GhosttySelectionGestureImpl,
@@ -77,6 +69,7 @@ module Ghostty.FFI.Selection
     ghosttySelectionGestureFree,
     ghosttySelectionGestureReset,
     GhosttySelectionGestureData (..),
+    pattern GhosttySelectionGestureDataInvalid,
     pattern GhosttySelectionGestureDataClickCount,
     pattern GhosttySelectionGestureDataDragged,
     pattern GhosttySelectionGestureDataAutoscroll,
@@ -118,6 +111,7 @@ module Ghostty.FFI.Selection
     ghosttySelectionGestureEventNew,
     ghosttySelectionGestureEventFree,
     GhosttySelectionGestureEventOption (..),
+    pattern GhosttySelectionGestureEventOptInvalid,
     pattern GhosttySelectionGestureEventOptRef,
     pattern GhosttySelectionGestureEventOptPosition,
     pattern GhosttySelectionGestureEventOptRepeatDistance,
@@ -143,21 +137,19 @@ import Ghostty.FFI.GridRef (GhosttyGridRef (..))
 import Ghostty.FFI.Layout (CEnum (..), CField (..), CStruct (..), unnamed)
 import Ghostty.FFI.Point (GhosttyPoint)
 import Ghostty.FFI.Terminal.Handle (GhosttyTerminal (..))
-import Ghostty.FFI.Types (GhosttyFormatterFormat (..), GhosttyResult (..))
+import Ghostty.FFI.Types (GhosttyResult (..))
 
 #include <gvtffi_shims.h>
 
 -- * Selections
 
--- | @GhosttySelection@: A snapshot selection range defined by two grid references.
+-- | @GhosttySelection@: A range of terminal content between two cells.
 data GhosttySelection = GhosttySelection
-  { -- | @size@: Size of this struct in bytes. Must be set to sizeof(GhosttySelection).
-    size :: CSize,
-    -- | @start@: Start of the selection range (inclusive).
+  { -- | @start@: The cell where the selection starts. It is included in the selection.
     start :: GhosttyGridRef,
-    -- | @end@: End of the selection range (inclusive).
+    -- | @end@: The cell where the selection ends. It is included in the selection.
     end :: GhosttyGridRef,
-    -- | @rectangle@: Whether the endpoints are interpreted as a rectangular\/block selection rather than a linear selection.
+    -- | @rectangle@: Whether this is a rectangular selection. When true, @start@ and @end@ are opposite corners of a block of cells.
     rectangle :: CBool
   }
   deriving stock (Eq, Show)
@@ -167,12 +159,10 @@ instance Storable GhosttySelection where
   alignment _ = (#alignment GhosttySelection)
   peek p =
     GhosttySelection
-      <$> (#peek GhosttySelection, size) p
-      <*> (#peek GhosttySelection, start) p
+      <$> (#peek GhosttySelection, start) p
       <*> (#peek GhosttySelection, end) p
       <*> (#peek GhosttySelection, rectangle) p
   poke p s = do
-    (#poke GhosttySelection, size) p s.size
     (#poke GhosttySelection, start) p s.start
     (#poke GhosttySelection, end) p s.end
     (#poke GhosttySelection, rectangle) p s.rectangle
@@ -185,8 +175,7 @@ ghosttySelectionLayout =
       size = (#size GhosttySelection),
       align = (#alignment GhosttySelection),
       fields =
-        [ CField "size" (#offset GhosttySelection, size) (#const GVTFFI_FIELD_SIZE(GhosttySelection, size)),
-          CField "start" (#offset GhosttySelection, start) (#const GVTFFI_FIELD_SIZE(GhosttySelection, start)),
+        [ CField "start" (#offset GhosttySelection, start) (#const GVTFFI_FIELD_SIZE(GhosttySelection, start)),
           CField "end" (#offset GhosttySelection, end) (#const GVTFFI_FIELD_SIZE(GhosttySelection, end)),
           CField "rectangle" (#offset GhosttySelection, rectangle) (#const GVTFFI_FIELD_SIZE(GhosttySelection, rectangle))
         ]
@@ -396,10 +385,9 @@ foreign import capi unsafe "ghostty/vt.h ghostty_terminal_select_all"
   ghosttyTerminalSelectAll :: GhosttyTerminal -> Ptr GhosttySelection -> IO GhosttyResult
 
 -- | @ghostty_terminal_select_output@: the command output (OSC 133) under a
--- grid reference. @GHOSTTY_NO_VALUE@ when it is not in command output. The C
--- function takes the reference by value, so this calls a pointer shim
--- (@gvtffi_shims.h@, §3.3). @unsafe@: it does not call back into Haskell.
-foreign import capi unsafe "gvtffi_shims.h gvtffi_terminal_select_output"
+-- grid reference. @GHOSTTY_NO_VALUE@ when it is not in command output.
+-- @unsafe@: it does not call back into Haskell.
+foreign import capi unsafe "ghostty/vt.h ghostty_terminal_select_output"
   ghosttyTerminalSelectOutput :: GhosttyTerminal -> Ptr GhosttyGridRef -> Ptr GhosttySelection -> IO GhosttyResult
 
 -- * Adjusting and comparing
@@ -568,73 +556,6 @@ foreign import capi unsafe "gvtffi_shims.h gvtffi_terminal_selection_contains"
 foreign import capi unsafe "ghostty/vt.h ghostty_terminal_selection_equal"
   ghosttyTerminalSelectionEqual :: GhosttyTerminal -> Ptr GhosttySelection -> Ptr GhosttySelection -> Ptr CBool -> IO GhosttyResult
 
--- * Formatting
-
--- | @GhosttyTerminalSelectionFormatOptions@: Options for one-shot formatting of a terminal selection.
-data GhosttyTerminalSelectionFormatOptions = GhosttyTerminalSelectionFormatOptions
-  { -- | @size@: Size of this struct in bytes. Must be set to sizeof(GhosttyTerminalSelectionFormatOptions).
-    size :: CSize,
-    -- | @emit@: Output format to emit.
-    emit :: GhosttyFormatterFormat,
-    -- | @unwrap@: Whether to unwrap soft-wrapped lines.
-    unwrap :: CBool,
-    -- | @trim@: Whether to trim trailing whitespace on non-blank lines. Trailing blank lines are always trimmed, except in VT output without trimming, where they are kept as part of the layout.
-    trim :: CBool,
-    -- | @selection@: Optional selection to format.
-    selection :: Ptr GhosttySelection
-  }
-  deriving stock (Eq, Show)
-
-instance Storable GhosttyTerminalSelectionFormatOptions where
-  sizeOf _ = (#size GhosttyTerminalSelectionFormatOptions)
-  alignment _ = (#alignment GhosttyTerminalSelectionFormatOptions)
-  peek p =
-    GhosttyTerminalSelectionFormatOptions
-      <$> (#peek GhosttyTerminalSelectionFormatOptions, size) p
-      <*> (#peek GhosttyTerminalSelectionFormatOptions, emit) p
-      <*> (#peek GhosttyTerminalSelectionFormatOptions, unwrap) p
-      <*> (#peek GhosttyTerminalSelectionFormatOptions, trim) p
-      <*> (#peek GhosttyTerminalSelectionFormatOptions, selection) p
-  poke p s = do
-    (#poke GhosttyTerminalSelectionFormatOptions, size) p s.size
-    (#poke GhosttyTerminalSelectionFormatOptions, emit) p s.emit
-    (#poke GhosttyTerminalSelectionFormatOptions, unwrap) p s.unwrap
-    (#poke GhosttyTerminalSelectionFormatOptions, trim) p s.trim
-    (#poke GhosttyTerminalSelectionFormatOptions, selection) p s.selection
-
--- | The layout of @GhosttyTerminalSelectionFormatOptions@ as compiled, for the layout test (§3.4).
-ghosttyTerminalSelectionFormatOptionsLayout :: CStruct
-ghosttyTerminalSelectionFormatOptionsLayout =
-  CStruct
-    { name = "GhosttyTerminalSelectionFormatOptions",
-      size = (#size GhosttyTerminalSelectionFormatOptions),
-      align = (#alignment GhosttyTerminalSelectionFormatOptions),
-      fields =
-        [ CField "size" (#offset GhosttyTerminalSelectionFormatOptions, size) (#const GVTFFI_FIELD_SIZE(GhosttyTerminalSelectionFormatOptions, size)),
-          CField "emit" (#offset GhosttyTerminalSelectionFormatOptions, emit) (#const GVTFFI_FIELD_SIZE(GhosttyTerminalSelectionFormatOptions, emit)),
-          CField "unwrap" (#offset GhosttyTerminalSelectionFormatOptions, unwrap) (#const GVTFFI_FIELD_SIZE(GhosttyTerminalSelectionFormatOptions, unwrap)),
-          CField "trim" (#offset GhosttyTerminalSelectionFormatOptions, trim) (#const GVTFFI_FIELD_SIZE(GhosttyTerminalSelectionFormatOptions, trim)),
-          CField "selection" (#offset GhosttyTerminalSelectionFormatOptions, selection) (#const GVTFFI_FIELD_SIZE(GhosttyTerminalSelectionFormatOptions, selection))
-        ]
-    }
-
--- | @ghostty_terminal_selection_format_buf@: format a selection (the options'
--- or, when that is null, the terminal's) into a buffer;
--- @GHOSTTY_OUT_OF_SPACE@ reports the size needed, and @GHOSTTY_NO_VALUE@ that
--- there is no selection. The C function takes the options by value, so this
--- calls a pointer shim (@gvtffi_shims.h@, §3.3). @safe@: it calls nothing
--- back, but a selection can span the whole scrollback.
-foreign import capi safe "gvtffi_shims.h gvtffi_terminal_selection_format_buf"
-  ghosttyTerminalSelectionFormatBuf :: GhosttyTerminal -> Ptr GhosttyTerminalSelectionFormatOptions -> Ptr Word8 -> CSize -> Ptr CSize -> IO GhosttyResult
-
--- | @ghostty_terminal_selection_format_alloc@: format a selection into an
--- allocated buffer, to be released with 'Ghostty.FFI.Allocator.ghosttyFree';
--- empty output is a null pointer. Through a pointer shim, as
--- 'ghosttyTerminalSelectionFormatBuf'. @safe@: as
--- 'ghosttyTerminalSelectionFormatBuf'.
-foreign import capi safe "gvtffi_shims.h gvtffi_terminal_selection_format_alloc"
-  ghosttyTerminalSelectionFormatAlloc :: GhosttyTerminal -> Ptr GhosttyAllocator -> Ptr GhosttyTerminalSelectionFormatOptions -> Ptr (Ptr Word8) -> Ptr CSize -> IO GhosttyResult
-
 -- * Gestures
 
 -- | The C side of a 'GhosttySelectionGesture'. Never dereferenced.
@@ -668,6 +589,10 @@ newtype GhosttySelectionGestureData = GhosttySelectionGestureData CInt
   deriving stock (Eq, Show)
   deriving newtype (Storable)
 
+-- | @GHOSTTY_SELECTION_GESTURE_DATA_INVALID@: Not a real data type. ghostty\_selection\_gesture\_get() returns GHOSTTY\_INVALID\_VALUE for it. Its value is 0, so a zeroed or uninitialized variable is never mistaken for a real data type.
+pattern GhosttySelectionGestureDataInvalid :: GhosttySelectionGestureData
+pattern GhosttySelectionGestureDataInvalid = GhosttySelectionGestureData (#const GHOSTTY_SELECTION_GESTURE_DATA_INVALID)
+
 -- | @GHOSTTY_SELECTION_GESTURE_DATA_CLICK_COUNT@: Current click count: uint8\_t\*. 0 means inactive.
 pattern GhosttySelectionGestureDataClickCount :: GhosttySelectionGestureData
 pattern GhosttySelectionGestureDataClickCount = GhosttySelectionGestureData (#const GHOSTTY_SELECTION_GESTURE_DATA_CLICK_COUNT)
@@ -695,6 +620,7 @@ pattern GhosttySelectionGestureDataUnknown n <- GhosttySelectionGestureData (unn
     GhosttySelectionGestureDataUnknown n = GhosttySelectionGestureData n
 
 {-# COMPLETE
+  GhosttySelectionGestureDataInvalid,
   GhosttySelectionGestureDataClickCount,
   GhosttySelectionGestureDataDragged,
   GhosttySelectionGestureDataAutoscroll,
@@ -711,7 +637,8 @@ ghosttySelectionGestureDataEnum =
     { name = "GhosttySelectionGestureData",
       size = (#size GhosttySelectionGestureData),
       values =
-        [ ("GHOSTTY_SELECTION_GESTURE_DATA_CLICK_COUNT", (#const GHOSTTY_SELECTION_GESTURE_DATA_CLICK_COUNT)),
+        [ ("GHOSTTY_SELECTION_GESTURE_DATA_INVALID", (#const GHOSTTY_SELECTION_GESTURE_DATA_INVALID)),
+          ("GHOSTTY_SELECTION_GESTURE_DATA_CLICK_COUNT", (#const GHOSTTY_SELECTION_GESTURE_DATA_CLICK_COUNT)),
           ("GHOSTTY_SELECTION_GESTURE_DATA_DRAGGED", (#const GHOSTTY_SELECTION_GESTURE_DATA_DRAGGED)),
           ("GHOSTTY_SELECTION_GESTURE_DATA_AUTOSCROLL", (#const GHOSTTY_SELECTION_GESTURE_DATA_AUTOSCROLL)),
           ("GHOSTTY_SELECTION_GESTURE_DATA_BEHAVIOR", (#const GHOSTTY_SELECTION_GESTURE_DATA_BEHAVIOR)),
@@ -989,6 +916,10 @@ newtype GhosttySelectionGestureEventOption = GhosttySelectionGestureEventOption 
   deriving stock (Eq, Show)
   deriving newtype (Storable)
 
+-- | @GHOSTTY_SELECTION_GESTURE_EVENT_OPT_INVALID@: Not a real option. ghostty\_selection\_gesture\_event\_set() returns GHOSTTY\_INVALID\_VALUE for it. Its value is 0, so a zeroed or uninitialized variable is never mistaken for a real option.
+pattern GhosttySelectionGestureEventOptInvalid :: GhosttySelectionGestureEventOption
+pattern GhosttySelectionGestureEventOptInvalid = GhosttySelectionGestureEventOption (#const GHOSTTY_SELECTION_GESTURE_EVENT_OPT_INVALID)
+
 -- | @GHOSTTY_SELECTION_GESTURE_EVENT_OPT_REF@: Grid reference under the pointer: GhosttyGridRef\*.
 pattern GhosttySelectionGestureEventOptRef :: GhosttySelectionGestureEventOption
 pattern GhosttySelectionGestureEventOptRef = GhosttySelectionGestureEventOption (#const GHOSTTY_SELECTION_GESTURE_EVENT_OPT_REF)
@@ -1036,6 +967,7 @@ pattern GhosttySelectionGestureEventOptionUnknown n <- GhosttySelectionGestureEv
     GhosttySelectionGestureEventOptionUnknown n = GhosttySelectionGestureEventOption n
 
 {-# COMPLETE
+  GhosttySelectionGestureEventOptInvalid,
   GhosttySelectionGestureEventOptRef,
   GhosttySelectionGestureEventOptPosition,
   GhosttySelectionGestureEventOptRepeatDistance,
@@ -1057,7 +989,8 @@ ghosttySelectionGestureEventOptionEnum =
     { name = "GhosttySelectionGestureEventOption",
       size = (#size GhosttySelectionGestureEventOption),
       values =
-        [ ("GHOSTTY_SELECTION_GESTURE_EVENT_OPT_REF", (#const GHOSTTY_SELECTION_GESTURE_EVENT_OPT_REF)),
+        [ ("GHOSTTY_SELECTION_GESTURE_EVENT_OPT_INVALID", (#const GHOSTTY_SELECTION_GESTURE_EVENT_OPT_INVALID)),
+          ("GHOSTTY_SELECTION_GESTURE_EVENT_OPT_REF", (#const GHOSTTY_SELECTION_GESTURE_EVENT_OPT_REF)),
           ("GHOSTTY_SELECTION_GESTURE_EVENT_OPT_POSITION", (#const GHOSTTY_SELECTION_GESTURE_EVENT_OPT_POSITION)),
           ("GHOSTTY_SELECTION_GESTURE_EVENT_OPT_REPEAT_DISTANCE", (#const GHOSTTY_SELECTION_GESTURE_EVENT_OPT_REPEAT_DISTANCE)),
           ("GHOSTTY_SELECTION_GESTURE_EVENT_OPT_TIME_NS", (#const GHOSTTY_SELECTION_GESTURE_EVENT_OPT_TIME_NS)),

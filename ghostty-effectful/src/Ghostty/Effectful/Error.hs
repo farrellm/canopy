@@ -32,6 +32,9 @@ data ResultCode
   | ResultIoError
   | ResultLimitExceeded
   | ResultRejected
+  | -- | a key or feature this library does not know or has compiled out;
+    -- the version check rules both out, so it is only ever an 'Invariant'
+    ResultUnsupported
   | -- | a value this binding does not name
     ResultUnknown Int
   deriving stock (Eq, Show)
@@ -53,20 +56,17 @@ data GhosttyError
     -- together rule this out: the linked library is the pinned one, and the
     -- binding names every value the pinned one has (DESIGN.md §3.3, §3.4).
     UnknownEnum CallSite Text Integer
-  | -- | The library passed a sized struct (named by the 'Text') of fewer
-    -- bytes (the 'Integer') than the binding reads, so its fields are not
-    -- read. The version check and the layout test rule this out, as they
-    -- do 'UnknownEnum'.
-    ShortStruct CallSite Text Integer
   deriving stock (Eq, Show)
   deriving anyclass (Exception)
 
 -- | The linked libghostty-vt is not the build this binding was generated
 -- against (DESIGN.md §3.4).
 data VersionMismatch = VersionMismatch
-  { -- | the pinned commit, @GHOSTTY_COMMIT@
+  { -- | the pinned release, @LIBGHOSTTY_VT_VERSION@
     pinned :: Text,
-    -- | the linked library's build metadata, or 'Nothing' if it would not say
+    -- | the linked library's version, followed by each optional feature it
+    -- was built without (@1.0.0 without formatter@); 'Nothing' if it would
+    -- not say
     linked :: Maybe Text
   }
   deriving stock (Eq, Show)

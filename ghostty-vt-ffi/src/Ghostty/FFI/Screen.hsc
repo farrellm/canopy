@@ -316,7 +316,7 @@ pattern GhosttyCellDataHasStyling = GhosttyCellData (#const GHOSTTY_CELL_DATA_HA
 
 -- | @GHOSTTY_CELL_DATA_STYLE_ID@: The style ID for the cell (for use with style lookups).
 --
--- Output type: @uint16_t *@.
+-- Output type: @GhosttyStyleId * (uint16_t *)@.
 pattern GhosttyCellDataStyleId :: GhosttyCellData
 pattern GhosttyCellDataStyleId = GhosttyCellData (#const GHOSTTY_CELL_DATA_STYLE_ID)
 

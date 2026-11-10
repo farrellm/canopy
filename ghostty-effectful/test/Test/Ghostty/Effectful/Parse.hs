@@ -3,6 +3,7 @@
 -- mean, and the OSC commands held against the header's names.
 module Test.Ghostty.Effectful.Parse (tests) where
 
+import Data.ByteString.Char8 qualified as BC
 import Data.Char (isAlphaNum, toLower)
 import Data.Text qualified as T
 import Ghostty.Effectful.Color (Rgb (..))
@@ -45,6 +46,16 @@ tests =
         [ testCase "a window title, ended by BEL or ST" $ do
             r <- ghostty (traverse (\e -> parseOsc 0 e "2;hello") universe)
             r @?= [Just (OscChangeWindowTitle "hello"), Just (OscChangeWindowTitle "hello")],
+          -- Regression 8 (DESIGN.md §4.8): at libghostty-vt 1.0 a title is a
+          -- GhosttyString, its bytes not NUL-terminated, where it was a C
+          -- string. Read as one, it stopped at the first NUL in the title
+          -- and could run past the title's end. The 1.0 library happens to
+          -- leave a NUL after the bytes, so the embedded NUL is what shows it.
+          testCase "regression 8: a title is exactly its bytes, NUL included" $ do
+            r <- ghostty $ do
+              _ <- parseOsc 0 TerminatedByBel ("2;" <> BC.replicate 200 'x')
+              traverse (parseOsc 0 TerminatedByBel) ["2;a\0b", "2;hi"]
+            r @?= [Just (OscChangeWindowTitle "a\0b"), Just (OscChangeWindowTitle "hi")],
           testCase "commands the parser only identifies" $ do
             r <- ghostty (traverse (parseOsc 0 TerminatedByBel) ["8;;https://example.com", "8;;", "133;A", "7;file:///tmp"])
             r @?= map Just [OscHyperlinkStart, OscHyperlinkEnd, OscSemanticPrompt, OscReportPwd],

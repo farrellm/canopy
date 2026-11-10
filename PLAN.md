@@ -4,7 +4,7 @@ The milestones of DESIGN.md §13, broken into steps. **Each step is one CR**: it
 `-Werror`, passes every CI step, adds its `CHANGELOG.md` line, and updates `DESIGN.md` in the same
 commit if it changes a decision (§2.9). Section references (§) are to DESIGN.md.
 
-M0 is done (PR #1), and M1 (PRs #2–#12). Steps are numbered `M<n>.<k>`
+M0 is done (PR #1), and M1 (PRs #2–#13). Steps are numbered `M<n>.<k>`
 and are in dependency order within a milestone.
 
 ## Tracks
@@ -148,7 +148,26 @@ Exit: formatter goldens; every typed key exercised (§13).
   writes) and an empty terminal's life, each iteration a whole `runGhostty`-open-feed-free.
   `scripts/check-allocation.py` is cassini's, with a 4 KiB slack: the streams that allocate nothing
   per byte move by up to 1.3 KB between runs. The OSC 133 transcript costs about 3.2 µs and 2.9 KB
-  per stop, recorded in DESIGN.md §12.3. **Done; M1 complete.**
+  per stop, recorded in DESIGN.md §12.3. **Done.**
+
+### M1.11 libghostty-vt 1.0.0
+
+- Move the pin from commit `c7f68a7f` to libghostty-vt's first stable release, `1.0.0`
+  (`ghostty-vt-ffi/LIBGHOSTTY_VT_VERSION`), built offline from the minisign-verified release
+  tarball and its deps tarball (DESIGN.md §3.1, D14); `prefetch-zig-deps.py` and the git build go.
+  `--release` builds for the baseline CPU (D17).
+- Regenerate the binding against 1.0's ABI freeze: `INVALID = 0` in every key enum, setters that
+  return results, one `uint8_t` buffer shape, frozen `GridRef`/`Selection`/`Style` and callback
+  payloads, keyed formatter options, the merged `GhosttyCursorStyle` and `GhosttyImageLayer`, the
+  renamed modes. Six shims go, two come (13 bound). Every bound function's doc was re-read for
+  `safe`/`unsafe`; no mode changed.
+- The version check compares `ghostty_version()`, the headers' `GHOSTTY_VT_VERSION` and every
+  optional feature with the pin, exactly (D15, D-deferred-11).
+- The silent changes, each a regression case that failed first: the OSC title is a
+  `GhosttyString` (regression 8), a cell's absent colour is `NO_VALUE` (9), a new formatter's
+  defaults are not canopy's (10), and a null scrollback byte limit restores the 10,000-byte default
+  (11). `ShortStruct` goes with the sized payloads; `ResultUnsupported` arrives. Public renames
+  follow upstream (D16). Goldens unchanged; allocation within the gate. **Done; M1 complete.**
 
 ---
 
@@ -527,6 +546,8 @@ Exit: feature table §8 complete. Steps are mostly independent of each other.
 ### M6.6 Search
 
 - `Ghostty.Effectful.Search` (FFI + effectful) and transcript search including folded output.
+- At libghostty-vt 1.0 the search's selection moves with `ghostty_search_select_next`/`_prev` (the
+  `OPT_SELECT_NEXT`/`PREV` options are gone), and its data and option keys start at `INVALID = 0`.
 
 ### M6.7 Export
 
@@ -544,6 +565,9 @@ Exit: feature table §8 complete. Steps are mostly independent of each other.
 ### M6.10 Snapshots
 
 - `Ghostty.Effectful.Snapshot` (FFI + effectful); exact screen restore without re-running.
+- The snapshot byte format is outside libghostty-vt's 1.x ABI promise, so a stored snapshot must be
+  allowed to fail to decode after an upgrade: the session falls back to replay (DESIGN.md §8.7).
+  `snapshot.h`'s two by-value functions get shims then.
 
 ### M6.11 Paste-transcript cleaning
 
@@ -571,6 +595,12 @@ Exit: feature table §8 complete. Steps are mostly independent of each other.
 - Kitty graphics placements (render-state FFI, `kitty_graphics.h`, and `sys.h`'s PNG decoder hook;
   passthrough when the host supports it), OSC 8
   hyperlinks end to end, opt-in output-as-code highlighting per profile (§8.3).
+- At libghostty-vt 1.0: the placement iterator's `LAYER` option is a bitmask of the
+  `GHOSTTY_IMAGE_LAYER_MASK_*` bits (`Ghostty.FFI.Types`, 0 for no filter); the image data keys are
+  `GHOSTTY_KITTY_GRAPHICS_IMAGE_DATA_*`, with `PIXELS`/`EXPECTED_LEN` for `DATA_PTR`/`DATA_LEN`;
+  `sys.h`'s options start at `INVALID = 0`; the oldest image is evicted by transmission.
+- Consider binding `GRAPHEMES_BUF` (into the already bound `GhosttyCodepointBuffer`) if M2's width
+  oracle wants codepoints without a UTF-8 round trip.
 
 ### M6.16 Node, Julia, utop profiles
 

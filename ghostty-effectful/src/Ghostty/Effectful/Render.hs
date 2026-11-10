@@ -16,7 +16,7 @@
 -- until the hold ends ('frameHeld'). The terminal has no clock, so a program
 -- that never ends its hold would freeze the frame; the caller ends a hold
 -- that lasts too long by turning the mode off
--- (@setT t (SetMode ModeSyncOutput) False@), and the next frame is live.
+-- (@setT t (SetMode ModeSynchronizedOutput) False@), and the next frame is live.
 module Ghostty.Effectful.Render
   ( -- * Render states
     RenderState,

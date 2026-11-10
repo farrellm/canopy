@@ -5,11 +5,23 @@
 
 -- | @include/ghostty/vt/style.h@: a cell's SGR style, as grid references and
 -- the cursor report it.
+--
+-- @GhosttyStyle@ is frozen at 16 bytes: three colours and a 'GhosttyStyleFlags'
+-- word holding the on/off attributes (bits 0–7, the @GHOSTTY_STYLE_FLAG_*@
+-- patterns) and the underline style (bits 8–10, read with
+-- 'ghosttyStyleUnderline').
 module Ghostty.FFI.Style
   ( -- * Colours
     {{xenum style.h GhosttyStyleColorTag}}
     GhosttyStyleColor (..),
     ghosttyStyleColorLayout,
+
+    -- * Flags
+    GhosttyStyleFlags,
+    {{xdefines style.h GhosttyStyleFlags GHOSTTY_STYLE_FLAG_}}
+    ghosttyStyleUnderlineShift,
+    pattern GhosttyStyleUnderlineMask,
+    ghosttyStyleUnderline,
 
     -- * Styles
     {{xstruct style.h GhosttyStyle}}
@@ -21,7 +33,8 @@ module Ghostty.FFI.Style
   )
 where
 
-import Foreign.C.Types (CBool (..), CInt (..), CSize (..))
+import Data.Bits (shiftR, (.&.))
+import Foreign.C.Types (CBool (..), CInt (..))
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (Storable (..))
 import Ghostty.FFI.Color (GhosttyColorPaletteIndex, GhosttyColorRgb)
@@ -32,9 +45,33 @@ import Ghostty.FFI.Layout (CEnum (..), CField (..), CStruct (..), unnamed)
 -- | @GhosttyStyleId@: a style's index in its page.
 type GhosttyStyleId = Word16
 
+-- | @GhosttyStyleFlags@: a style's attributes, a bit set of the
+-- @GHOSTTY_STYLE_FLAG_*@ flags below in bits 0–7, with the underline style
+-- (a 'Ghostty.FFI.Sgr.GhosttySgrUnderline' value) in bits 8–10. The rest are
+-- reserved and always zero in a style the library writes.
+type GhosttyStyleFlags = Word16
+
+{{defines style.h GhosttyStyleFlags GHOSTTY_STYLE_FLAG_}}
+-- | @GHOSTTY_STYLE_UNDERLINE_SHIFT@: the lowest bit of the underline style in
+-- 'GhosttyStyleFlags'.
+ghosttyStyleUnderlineShift :: Int
+ghosttyStyleUnderlineShift = (#const GHOSTTY_STYLE_UNDERLINE_SHIFT)
+
+-- | @GHOSTTY_STYLE_UNDERLINE_MASK@: the bits of 'GhosttyStyleFlags' that hold
+-- the underline style.
+pattern GhosttyStyleUnderlineMask :: GhosttyStyleFlags
+pattern GhosttyStyleUnderlineMask = (#const GHOSTTY_STYLE_UNDERLINE_MASK)
+
+-- | @GHOSTTY_STYLE_UNDERLINE(style)@, a function-like macro in C: the
+-- underline style in a flags word, as a 'Ghostty.FFI.Sgr.GhosttySgrUnderline'
+-- value (0, @GHOSTTY_SGR_UNDERLINE_NONE@, for none).
+ghosttyStyleUnderline :: GhosttyStyleFlags -> CInt
+ghosttyStyleUnderline f = fromIntegral ((f .&. GhosttyStyleUnderlineMask) `shiftR` ghosttyStyleUnderlineShift)
+
 {{enum style.h GhosttyStyleColorTag}}
 -- | @GhosttyStyleColor@: a colour in a style. A tagged union in C, so a sum
--- here with an arm per tag (§3.3).
+-- here with an arm per tag (§3.3). Its @tag@ is a @uint8_t@ holding a
+-- 'GhosttyStyleColorTag' value, so the struct stays small.
 data GhosttyStyleColor
   = -- | @GHOSTTY_STYLE_COLOR_NONE@: no colour, the default.
     StyleColorNone
@@ -50,25 +87,27 @@ instance Storable GhosttyStyleColor where
   sizeOf _ = (#size GhosttyStyleColor)
   alignment _ = (#alignment GhosttyStyleColor)
   peek p =
-    (#peek GhosttyStyleColor, tag) p >>= \case
+    (GhosttyStyleColorTag . fromIntegral @Word8 <$> (#peek GhosttyStyleColor, tag) p) >>= \case
       GhosttyStyleColorNone -> pure StyleColorNone
       GhosttyStyleColorPalette -> StyleColorPalette <$> (#peek GhosttyStyleColor, value.palette) p
       GhosttyStyleColorRgb -> StyleColorRgb <$> (#peek GhosttyStyleColor, value.rgb) p
       tag@(GhosttyStyleColorTagUnknown _) -> pure (StyleColorOther tag)
   poke p = \case
-    StyleColorNone -> (#poke GhosttyStyleColor, tag) p GhosttyStyleColorNone
+    StyleColorNone -> pokeTag GhosttyStyleColorNone
     StyleColorPalette i -> do
-      (#poke GhosttyStyleColor, tag) p GhosttyStyleColorPalette
+      pokeTag GhosttyStyleColorPalette
       (#poke GhosttyStyleColor, value.palette) p i
     StyleColorRgb c -> do
-      (#poke GhosttyStyleColor, tag) p GhosttyStyleColorRgb
+      pokeTag GhosttyStyleColorRgb
       (#poke GhosttyStyleColor, value.rgb) p c
-    StyleColorOther tag -> (#poke GhosttyStyleColor, tag) p tag
+    StyleColorOther tag -> pokeTag tag
+    where
+      pokeTag (GhosttyStyleColorTag t) = (#poke GhosttyStyleColor, tag) p (fromIntegral t :: Word8)
 
 {{layout GhosttyStyleColor tag value}}
 {{struct style.h GhosttyStyle}}
 -- | @ghostty_style_default@: write the default style (every colour none, every
--- flag off) to the pointer, @size@ included. @unsafe@: it does not call back
+-- flag off: all zero bytes) to the pointer. @unsafe@: it does not call back
 -- into Haskell.
 foreign import capi unsafe "ghostty/vt.h ghostty_style_default"
   ghosttyStyleDefault :: Ptr GhosttyStyle -> IO ()
