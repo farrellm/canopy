@@ -10,6 +10,7 @@ module Ghostty.Effectful.Internal.Error
     newHandle,
     outVia,
     optionalVia,
+    optionalViaWith,
     bytesVia,
   )
 where
@@ -96,14 +97,21 @@ outVia site call = alloca $ \out -> do
 -- | 'outVia' for a call with one documented refusal besides running out of
 -- memory ('succeedsUnless'): 'Nothing' on that refusal.
 optionalVia :: (Storable b) => ResultCode -> CallSite -> (Ptr b -> IO GhosttyResult) -> IO (Maybe b)
-optionalVia refusal site call = alloca $ \out -> do
+optionalVia = optionalViaWith id
+{-# INLINE optionalVia #-}
+
+-- | 'optionalVia', the value converted as it is read. (An 'fmap' over
+-- 'optionalVia''s result would build the 'Just' twice, which costs the
+-- per-cell colour reads.)
+optionalViaWith :: (Storable b) => (b -> c) -> ResultCode -> CallSite -> (Ptr b -> IO GhosttyResult) -> IO (Maybe c)
+optionalViaWith convert refusal site call = alloca $ \out -> do
   r <- call out
   case resultCode r of
-    ResultSuccess -> Just <$> peek out
+    ResultSuccess -> Just . convert <$> peek out
     c
       | c == refusal -> pure Nothing
       | otherwise -> throwIO (resultError site c)
-{-# INLINE optionalVia #-}
+{-# INLINE optionalViaWith #-}
 
 -- | The bytes a call writes into a buffer: given the buffer and its
 -- capacity, the call returns its result and the length it wrote, or, with
@@ -121,3 +129,4 @@ bytesVia site call = attempt 64 >>= either (attempt . max 1 >=> either (const ou
         ResultOutOfSpace -> pure (Left n)
         other -> throwIO (resultError site other)
     outOfSpace = throwIO (Invariant site ResultOutOfSpace)
+{-# INLINE bytesVia #-}

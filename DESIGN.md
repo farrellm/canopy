@@ -2074,6 +2074,15 @@ linear in the stops and the same in 4 KiB writes. A REPL block has four marks, s
 child-throughput budget's (§12.1) path, but the per-stop cost is the first place to look if a
 stream of marks ever is.
 
+**Rendering**, the same suite's `Render` group: the same terminal life with a screen fed and a
+render state opened, then one frame of every cell copied out (plain, SGR-coloured and wide/combining
+screens), one frame's cursor and colours, and 24 frames of one new line each, the steady state of a
+REPL. `no frame` is the life without the read. First figures (2026-11-10; GHC 9.12.4, one developer
+machine): a full 80×24 frame takes 1.5–1.9 ms and allocates 1.6–1.9 KB a cell. Local helpers
+inside a per-read or per-cell function are the cost to watch here. GHC binds each `Storable`
+specialisation of a local polymorphic helper as a closure, which the function allocates on every
+call. So the binding's readers are top level, and its small FFI read helpers are `INLINE`.
+
 ---
 
 ## 13. Milestones

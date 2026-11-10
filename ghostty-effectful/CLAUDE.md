@@ -11,7 +11,8 @@ events instead of callbacks. No export may expose a pointer.
   public modules re-export their types without constructors. Raw pointers appear only in `Internal`
   (§10.6).
 - **Results become `GhosttyError` through `Ghostty.Effectful.Internal.Error`** (`expectSuccess`,
-  `succeedsUnless`, `outVia`, `optionalVia`, `bytesVia`; never a hand-written switch): out of
+  `succeedsUnless`, `outVia`, `optionalVia`/`optionalViaWith`, `bytesVia`; never a hand-written
+  switch): out of
   memory is `OutOfMemory`, and a result the header says cannot happen for the arguments the types
   allow is `Invariant`. Marshalling shared between modules (strings, flags, palettes, enum call
   sites) is in `Internal.Convert`. Make the bad argument
@@ -57,8 +58,11 @@ events instead of callbacks. No export may expose a pointer.
 - **A C enum is closed at this level, with no unknown case**: an unnamed value is `UnknownEnum`
   (`Internal.Convert.unknownEnum`), because the version check and the layout test rule it out.
 - Tests may import `Internal` (to build values or reach `runGhosttyPinnedTo`).
-- **Benchmarks** (§12.3, M1.10) are `ghostty-effectful-bench`, in `bench/Bench/**`, through the public
-  API only. CI gates their allocation against `bench/baseline/ghc-9.12.4.csv`. Each iteration is a
+- **Benchmarks** (§12.3, M1.10) are `ghostty-effectful-bench`, in `bench/Bench/**` (`Feed`,
+  `Render`), through the public API only. A per-read or per-cell function keeps its helpers at top
+  level (`Internal.Keys.KeyRead`, `Internal.Render`'s cell readers), not in a `where`: GHC allocates
+  each local helper's specialisations as closures on every call. Measure a hot-path change against
+  `master`, alternating runs, before keeping it. CI gates their allocation against `bench/baseline/ghc-9.12.4.csv`. Each iteration is a
   whole terminal life (`runGhostty`, open, feed, free), so no iteration feeds a terminal another
   left scrollback in.
 

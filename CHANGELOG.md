@@ -277,6 +277,12 @@ Written as changes land, not at release (DESIGN.md §2.9).
   render-hold callback's function pointer is also registered masked, like the others, so an
   asynchronous exception can no longer leak it. A key or mouse encoder whose options cannot be set is freed
   rather than leaked; no option value the types allow is refused, so neither has a test case.
+- `ghostty-effectful-bench` has a `Render` group (DESIGN.md §12.3): full frames of every cell on
+  three screens, cursor and colours, and 24 frames of one new line each, gated like the feed.
+  Measuring it found the refactor's per-cell readers 20% slower than before. The cause was local
+  `Storable` helpers that GHC allocated as closures on every call, an `fmap` over the colour
+  reads, and an unfold into a vector. All three are fixed: the render path is at parity in time
+  and 2–4% under in allocation. The same fix in `getData` takes the feed's prompts to 161 MB.
 
 ### M0: infrastructure
 

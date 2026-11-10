@@ -58,19 +58,20 @@ import Foreign.Marshal.Utils (toBool, with)
 import Foreign.Ptr (Ptr, castPtr)
 import Foreign.Storable (Storable (..))
 import Ghostty.Effectful.Cell (Cell (..), CellWidth (..), Hyperlink (..), SemanticContent (..))
+import Ghostty.Effectful.Color (Rgb)
 import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), ResultCode (..))
 import Ghostty.Effectful.Internal.Callbacks (Framing (..), captureAttach, captureDetach, captureFraming, captureHeld)
 import Ghostty.Effectful.Internal.Convert (emptyRef, enumSite, fromCursorStyle, fromPalette, fromRgb, fromStyle, readPalette, toPoint, unfoldWhileM, unknownEnum, withSize)
-import Ghostty.Effectful.Internal.Error (bytesVia, expectSuccess, newHandle, optionalVia, outVia)
+import Ghostty.Effectful.Internal.Error (bytesVia, expectSuccess, newHandle, optionalViaWith, outVia)
 import Ghostty.Effectful.Internal.Terminal (Terminal (..), forgetRegion)
 import Ghostty.Effectful.Point (Coord (..), Point (..))
 import Ghostty.Effectful.Render.Keys
-import Ghostty.Effectful.Style (defaultStyle)
+import Ghostty.Effectful.Style (Style, defaultStyle)
 import Ghostty.FFI.Color (GhosttyColorRgb (..))
 import Ghostty.FFI.GridRef (ghosttyGridRefHyperlinkUri)
 import Ghostty.FFI.Render
 import Ghostty.FFI.Screen
-import Ghostty.FFI.Style (GhosttyStyle, ghosttyStyleDefault)
+import Ghostty.FFI.Style (ghosttyStyleDefault)
 import Ghostty.FFI.Terminal (ghosttyTerminalGridRef)
 import Ghostty.FFI.Types (GhosttyBuffer (..), GhosttyResult, pattern GhosttyCursorStyleBar)
 
@@ -452,16 +453,20 @@ copyCells row = do
       =<< ghosttyRenderStateRowGet rs.rowIterator GhosttyRenderStateRowDataCells (castPtr p)
   now <- readIORef rs.terminal.writes
   let live = not row.frame.info.held && now == row.frame.info.writes
-  flip V.unfoldrM 0 $ \x ->
-    ifM
-      (toBool <$> ghosttyRenderStateRowCellsNext rs.rowCells)
-      (Just . (,x + 1) <$> copyCell rs live row.y x)
-      (pure Nothing)
+  -- Collected as a list and then sized once: the row's width is not
+  -- known up front, and an unfold into a vector would grow it by copying.
+  let go x acc =
+        ifM
+          (toBool <$> ghosttyRenderStateRowCellsNext rs.rowCells)
+          (copyCell rs live row.y x >>= \c -> go (x + 1) (c : acc))
+          (pure (V.fromListN (fromIntegral x) (reverse acc)))
+  go 0 []
 
 -- | Copy the cell the cell iterator is on, at column @x@ of row @y@.
 copyCell :: RenderState s -> Bool -> Word16 -> Word16 -> IO Cell
 copyCell rs live y x = do
-  raw :: GhosttyCell <- fetch GhosttyRenderStateRowCellsDataRaw
+  let cs = rs.rowCells
+  raw :: GhosttyCell <- cellsValue cs GhosttyRenderStateRowCellsDataRaw
   width <-
     cellValue raw GhosttyCellDataWide >>= \case
       GhosttyCellWideNarrow -> pure Narrow
@@ -477,50 +482,63 @@ copyCell rs live y x = do
       GhosttyCellSemanticContentUnknown n -> unknownEnum cellSite ghosttyCellSemanticContentEnum n
   protected <- toBool @CBool <$> cellValue raw GhosttyCellDataProtected
   linked <- toBool @CBool <$> cellValue raw GhosttyCellDataHasHyperlink
-  styled <- toBool @CBool <$> fetch GhosttyRenderStateRowCellsDataHasStyling
-  style <-
-    if styled
-      then fromStyle (site GhosttyRenderStateRowCellsDataStyle) =<< styleOf
-      else pure defaultStyle
-  text <- decodeUtf8 <$> graphemes
-  foreground <- color GhosttyRenderStateRowCellsDataFgColor
-  background <- color GhosttyRenderStateRowCellsDataBgColor
+  styled <- toBool @CBool <$> cellsValue cs GhosttyRenderStateRowCellsDataHasStyling
+  style <- if styled then cellStyle cs else pure defaultStyle
+  text <- decodeUtf8 <$> cellGraphemes cs
+  foreground <- cellColor cs GhosttyRenderStateRowCellsDataFgColor
+  background <- cellColor cs GhosttyRenderStateRowCellsDataBgColor
   hyperlink <-
     if linked
       then Just . Hyperlink <$> if live then Just . decodeUtf8 <$> linkUri rs x y else pure Nothing
       else pure Nothing
   pure Cell {text, width, style, foreground, background, hyperlink, protected, semantic}
+
+-- The readers of a cell are top level, not local to 'copyCell': local,
+-- each of their specialisations would be a closure 'copyCell' allocated
+-- for every cell (see 'Ghostty.Effectful.Internal.Keys.KeyRead').
+
+-- | Where a cell-iterator read's errors come from.
+cellsSite :: GhosttyRenderStateRowCellsData -> CallSite
+cellsSite = enumSite "ghostty_render_state_row_cells_get" ghosttyRenderStateRowCellsDataEnum . coerce
+
+-- | Where a raw cell read's errors come from.
+cellSite :: CallSite
+cellSite = CallSite "ghostty_cell_get"
+
+-- | @ghostty_render_state_row_cells_get@ into the given memory.
+cellsGet :: GhosttyRenderStateRowCells -> GhosttyRenderStateRowCellsData -> Ptr b -> IO GhosttyResult
+cellsGet cs d = ghosttyRenderStateRowCellsGet cs d . castPtr
+
+-- | A value of the current cell.
+cellsValue :: (Storable b) => GhosttyRenderStateRowCells -> GhosttyRenderStateRowCellsData -> IO b
+cellsValue cs d = outVia (cellsSite d) (cellsGet cs d)
+
+-- | A value of a raw cell.
+cellValue :: (Storable b) => GhosttyCell -> GhosttyCellData -> IO b
+cellValue raw d = outVia cellSite (ghosttyCellGet raw d . castPtr)
+
+-- | The current cell's style, read into a style set to the default first.
+cellStyle :: GhosttyRenderStateRowCells -> IO Style
+cellStyle cs = fromStyle site =<< outVia site (\p -> ghosttyStyleDefault p >> cellsGet cs d p)
   where
-    site = enumSite "ghostty_render_state_row_cells_get" ghosttyRenderStateRowCellsDataEnum . coerce
-    cellSite = CallSite "ghostty_cell_get"
+    d = GhosttyRenderStateRowCellsDataStyle
+    site = cellsSite d
 
-    get :: GhosttyRenderStateRowCellsData -> Ptr b -> IO GhosttyResult
-    get d = ghosttyRenderStateRowCellsGet rs.rowCells d . castPtr
+-- | One of the current cell's colours. The header's NO_VALUE is "none of
+-- its own: use the default" (INVALID_VALUE before libghostty-vt 1.0;
+-- regression 9).
+cellColor :: GhosttyRenderStateRowCells -> GhosttyRenderStateRowCellsData -> IO (Maybe Rgb)
+cellColor cs d = optionalViaWith fromRgb ResultNoValue (cellsSite d) (cellsGet cs d)
 
-    fetch :: (Storable b) => GhosttyRenderStateRowCellsData -> IO b
-    fetch d = outVia (site d) (get d)
-
-    cellValue :: (Storable b) => GhosttyCell -> GhosttyCellData -> IO b
-    cellValue raw d = outVia cellSite (ghosttyCellGet raw d . castPtr)
-
-    -- A sized struct, defaulted first.
-    styleOf :: IO GhosttyStyle
-    styleOf = outVia (site d) (\p -> ghosttyStyleDefault p >> get d p)
-      where
-        d = GhosttyRenderStateRowCellsDataStyle
-
-    -- The header's NO_VALUE for a colour is "none of its own: use the
-    -- default" (INVALID_VALUE before libghostty-vt 1.0; regression 9).
-    color d = fmap fromRgb <$> optionalVia ResultNoValue (site d) (get d)
-
-    -- GRAPHEMES_UTF8, through a buffer struct that reports the length.
-    graphemes :: IO ByteString
-    graphemes = bytesVia (site d) $ \buf cap ->
-      with GhosttyBuffer {ptr = buf, cap = fromIntegral cap, len = 0} $ \bp -> do
-        r <- get d bp
-        (r,) . fromIntegral . (.len) <$> peek bp
-      where
-        d = GhosttyRenderStateRowCellsDataGraphemesUtf8
+-- | The current cell's text, @GRAPHEMES_UTF8@, through a buffer struct that
+-- reports the length.
+cellGraphemes :: GhosttyRenderStateRowCells -> IO ByteString
+cellGraphemes cs = bytesVia (cellsSite d) $ \buf cap ->
+  with GhosttyBuffer {ptr = buf, cap = fromIntegral cap, len = 0} $ \bp -> do
+    r <- cellsGet cs d bp
+    (r,) . fromIntegral . (.len) <$> peek bp
+  where
+    d = GhosttyRenderStateRowCellsDataGraphemesUtf8
 
 -- | The URI of the link at a viewport cell of the terminal
 -- (@ghostty_terminal_grid_ref@, then @ghostty_grid_ref_hyperlink_uri@).
