@@ -21,6 +21,7 @@ module Ghostty.Effectful.Internal.Effect
 
     -- * Build identity
     linkedVersion,
+    optionalFeatures,
   )
 where
 
@@ -50,6 +51,7 @@ import Ghostty.FFI.BuildInfo
     pattern GhosttyBuildInfoFeatureSearch,
     pattern GhosttyBuildInfoFeatureSelection,
     pattern GhosttyBuildInfoFeatureSnapshot,
+    pattern GhosttyBuildInfoKittyGraphics,
   )
 import Ghostty.FFI.Types (pattern GhosttySuccess)
 
@@ -111,16 +113,16 @@ runGhosttyPinnedTo pin act = do
 
 -- | The linked library's identity: its full version (@ghostty_version@, which
 -- a development build suffixes with @-dev+…@), then @without@ each optional
--- feature it was built without (@-Dvt-features@), whose calls would return
--- @GHOSTTY_UNSUPPORTED@. So it equals the pin exactly when the library is the
--- pinned release, whole. 'Nothing' if the library would not say whether it
--- has a feature. Build info is a constant of the library, so this needs no
--- owner.
+-- feature it was built without (@-Dvt-features@, 'optionalFeatures'), whose
+-- calls would return @GHOSTTY_UNSUPPORTED@. So it equals the pin exactly when
+-- the library is the pinned release, whole. 'Nothing' if the library would
+-- not say whether it has a feature. Build info is a constant of the library,
+-- so this needs no owner.
 linkedVersion :: IO (Maybe Text)
 linkedVersion = do
   ConstPtr p <- ghosttyVersion
   version <- decodeUtf8 <$> BS.packCString p
-  missing <- fmap concat . sequence <$> traverse absent features
+  missing <- fmap concat . sequence <$> traverse absent optionalFeatures
   pure $ (\ms -> T.unwords (version : concatMap (\m -> ["without", m]) ms)) <$> missing
   where
     -- The feature's name if the library was built without it.
@@ -132,15 +134,21 @@ linkedVersion = do
         else do
           present <- peek b
           pure (Just [name | present == 0])
-    features :: [(GhosttyBuildInfo, Text)]
-    features =
-      [ (GhosttyBuildInfoFeatureSnapshot, "snapshot"),
-        (GhosttyBuildInfoFeatureFormatter, "formatter"),
-        (GhosttyBuildInfoFeatureSelection, "selection"),
-        (GhosttyBuildInfoFeatureSearch, "search"),
-        (GhosttyBuildInfoFeatureRenderState, "render-state"),
-        (GhosttyBuildInfoFeatureInputEncode, "input-encode"),
-        (GhosttyBuildInfoFeatureColor, "color"),
-        (GhosttyBuildInfoFeatureGridIntrospection, "grid-introspection"),
-        (GhosttyBuildInfoFeatureGlyphProtocol, "glyph-protocol")
-      ]
+
+-- | Every optional feature @-Dvt-features@ can leave out, with its build-info
+-- key and its name there: the nine @FEATURE_*@ keys, and @KITTY_GRAPHICS@,
+-- whose terminal keys return @GHOSTTY_UNSUPPORTED@ in a build without it
+-- (regression 12).
+optionalFeatures :: [(GhosttyBuildInfo, Text)]
+optionalFeatures =
+  [ (GhosttyBuildInfoFeatureSnapshot, "snapshot"),
+    (GhosttyBuildInfoFeatureFormatter, "formatter"),
+    (GhosttyBuildInfoFeatureSelection, "selection"),
+    (GhosttyBuildInfoFeatureSearch, "search"),
+    (GhosttyBuildInfoFeatureRenderState, "render-state"),
+    (GhosttyBuildInfoFeatureInputEncode, "input-encode"),
+    (GhosttyBuildInfoFeatureColor, "color"),
+    (GhosttyBuildInfoFeatureGridIntrospection, "grid-introspection"),
+    (GhosttyBuildInfoFeatureGlyphProtocol, "glyph-protocol"),
+    (GhosttyBuildInfoKittyGraphics, "kitty-graphics")
+  ]

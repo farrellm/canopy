@@ -445,7 +445,7 @@ pattern GhosttyOscDataInvalid = GhosttyOscCommandData (#const GHOSTTY_OSC_DATA_I
 
 -- | @GHOSTTY_OSC_DATA_CHANGE_WINDOW_TITLE_STR@: Window title string data.
 --
--- Output type: @GhosttyString *. The bytes are not null-terminated, so@.
+-- Output type: @GhosttyString *@.
 pattern GhosttyOscDataChangeWindowTitleStr :: GhosttyOscCommandData
 pattern GhosttyOscDataChangeWindowTitleStr = GhosttyOscCommandData (#const GHOSTTY_OSC_DATA_CHANGE_WINDOW_TITLE_STR)
 

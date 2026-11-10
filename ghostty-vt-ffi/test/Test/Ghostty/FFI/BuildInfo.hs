@@ -36,8 +36,9 @@ pinned =
           String
       )
 
--- | Every @FEATURE_*@ key. A library built with @-Dvt-features@ leaving one out
--- would turn the bound calls of that feature into @GHOSTTY_UNSUPPORTED@.
+-- | Every optional feature's key: the @FEATURE_*@ keys and @KITTY_GRAPHICS@.
+-- A library built with @-Dvt-features@ leaving one out would turn the bound
+-- calls of that feature into @GHOSTTY_UNSUPPORTED@.
 features :: [GhosttyBuildInfo]
 features =
   [ GhosttyBuildInfoFeatureSnapshot,
@@ -48,7 +49,8 @@ features =
     GhosttyBuildInfoFeatureInputEncode,
     GhosttyBuildInfoFeatureColor,
     GhosttyBuildInfoFeatureGridIntrospection,
-    GhosttyBuildInfoFeatureGlyphProtocol
+    GhosttyBuildInfoFeatureGlyphProtocol,
+    GhosttyBuildInfoKittyGraphics
   ]
 
 tests :: TestTree

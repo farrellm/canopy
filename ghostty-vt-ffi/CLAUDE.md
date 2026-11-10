@@ -78,4 +78,5 @@ Only `Ghostty.Effectful.**` and `Test.Ghostty.**` may import it (§2.6 rule 1).
   of the line.
 - `ghostty-vt-ffi-test` compiles `LIBGHOSTTY_VT_VERSION` in (Template Haskell,
   `makeRelativeToProject`), so it runs from any directory and rebuilds when the pin moves. It checks
-  the linked `ghostty_version()`, the headers' `GHOSTTY_VT_VERSION` and every `FEATURE_*` against it.
+  the linked `ghostty_version()`, the headers' `GHOSTTY_VT_VERSION` and every optional feature
+  (`FEATURE_*` and `KITTY_GRAPHICS`) against it.

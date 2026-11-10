@@ -261,8 +261,6 @@ encodeKeyEvent enc e = do
       -- The event keeps the pointer; leave none behind that outlives it,
       -- even when the encode throws.
       encode `finally` setText noText
-  where
-    setEvent site call = expectSuccess (CallSite site) =<< call
 
 -- | The binding's key.
 keyCode :: Key -> GhosttyKey
@@ -651,8 +649,11 @@ encodeMouseEvent enc e = do
     with (GhosttyMousePosition (realToFrac e.position.x) (realToFrac e.position.y)) $
       ghosttyMouseEventSetPosition enc.event
   bytesVia (CallSite "ghostty_mouse_encoder_encode") (ghosttyMouseEncoderEncode enc.encoder enc.event)
-  where
-    setEvent site call = expectSuccess (CallSite site) =<< call
+
+-- | An event setter's call, which refuses only what the binding never passes:
+-- any refusal is 'Invariant' at the named function.
+setEvent :: Text -> IO GhosttyResult -> IO ()
+setEvent site call = expectSuccess (CallSite site) =<< call
 
 -- | The binding's tracking mode.
 trackingCode :: MouseTracking -> GhosttyMouseTrackingMode

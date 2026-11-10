@@ -86,7 +86,7 @@ if [[ -z $zig ]] || ! zig_ok "$zig"; then
     # fetch never leaves a zig binary without its lib/ for the next run.
     mkdir -p "$root/_deps/zig"
     tarball=$root/_deps/zig/zig-$platform-$ZIG_VERSION.tar.xz
-    curl -sSfL -o "$tarball" "https://ziglang.org/download/$ZIG_VERSION/zig-$platform-$ZIG_VERSION.tar.xz"
+    curl -sSfL --retry 5 -o "$tarball" "https://ziglang.org/download/$ZIG_VERSION/zig-$platform-$ZIG_VERSION.tar.xz"
     echo "$sha  $tarball" | sha256sum -c --quiet - >&2
     rm -rf "$zdir" "$zdir.partial"
     mkdir -p "$zdir.partial"
@@ -111,12 +111,12 @@ for name in "libghostty-vt-$version" "libghostty-vt-$version-deps"; do
   }
   [[ -d $src_root/$name ]] && continue
   echo "build-libghostty: fetching $tarball" >&2
-  curl -sSfL -o "$src_root/$tarball" "https://release.files.ghostty.org/libghostty-vt/$version/$tarball"
+  curl -sSfL --retry 5 -o "$src_root/$tarball" "https://release.files.ghostty.org/libghostty-vt/$version/$tarball"
   echo "$sha  $src_root/$tarball" | sha256sum -c --quiet - >&2
   # The pinned sum is the required check. A signature check is extra, when
   # minisign is installed.
   if command -v minisign >/dev/null; then
-    curl -sSfL -o "$src_root/$tarball.minisig" "https://release.files.ghostty.org/libghostty-vt/$version/$tarball.minisig"
+    curl -sSfL --retry 5 -o "$src_root/$tarball.minisig" "https://release.files.ghostty.org/libghostty-vt/$version/$tarball.minisig"
     minisign -Vq -P "$MINISIGN_KEY" -m "$src_root/$tarball" >&2
     rm -f "$src_root/$tarball.minisig"
   fi

@@ -562,7 +562,8 @@ row.
 The identity check (D14, D15, M1.11) has three parts: the linked library's `ghostty_version()` equals
 `LIBGHOSTTY_VT_VERSION` exactly (a development build's has a `-dev+…` suffix, so no pre-release or
 build metadata passes); the headers' `GHOSTTY_VT_VERSION` equals it too, which catches headers left in
-`_deps` from another pin; and build info reports every optional feature (`FEATURE_*`) compiled in,
+`_deps` from another pin; and build info reports every optional feature (`FEATURE_*`, and
+`KITTY_GRAPHICS`, which `-Dvt-features` gates too: regression 12) compiled in,
 since a `-Dvt-features` build still reports the release's version but turns the calls of a missing
 feature into `UNSUPPORTED`. (Until M1.11 the pin was a commit, stamped into the library's
 `VERSION_BUILD` with `-Dlib-version-string`, since a git build reported only `0.1.0-dev`; a release

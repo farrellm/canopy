@@ -137,7 +137,9 @@ def sentence(p: str) -> str:
 
 def type_line(paras):
     for p in paras:
-        m = re.match(r"(Input/output|Input|Output|Value) type: (.*?)(?:\. Default:.*)?$", p, re.M)
+        # The type ends at the first full stop that ends a sentence: "T *. The
+        # bytes..." and "T. Default: ..." are both T.
+        m = re.match(r"(Input/output|Input|Output|Value) type: (.*?)(?:\.\s.*|\.)?$", p, re.M)
         if m:
             return f"{m.group(1)} type: @{m.group(2).strip()}@."
     return None

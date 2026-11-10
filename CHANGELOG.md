@@ -255,6 +255,9 @@ Written as changes land, not at release (DESIGN.md §2.9).
   (regression 9); a new formatter starts with trimming and the palette, cursor-style and hyperlink
   extras on, so every option is now set on every formatter (regression 10); a null scrollback byte
   limit restores its 10,000-byte default, so no limit is now `SIZE_MAX` (regression 11).
+- Fixed: the version check asked build info for the nine `FEATURE_*` keys but not
+  `KITTY_GRAPHICS`, which `-Dvt-features` also gates. A 1.0.0 built without it passed the check,
+  and every kitty-image key then threw `Invariant` on its `UNSUPPORTED` (regression 12).
 - The format goldens are unchanged. The feed benchmark's allocation is within the gate, each
   iteration about 2 KB more, from the version check's feature queries in every `runGhostty`.
 
