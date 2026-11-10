@@ -82,6 +82,14 @@ tests =
           setT t SetScrollbackMaxBytes Nothing
           getT t ScrollbackMaxBytes
         r @?= Nothing,
+      testCase "an empty title or working directory writes, and reads back empty" $ do
+        r <- withFresh $ \t -> do
+          setT t SetTitle "x"
+          setT t SetPwd "file:///x"
+          setT t SetTitle ""
+          setT t SetPwd ""
+          (,) <$> getT t Title <*> getT t Pwd
+        r @?= ("", ""),
       -- Regression 3 (DESIGN.md §4.5): 'setT' returns no events because
       -- none of its C calls runs a callback; were one to, its event would
       -- wait here for the next 'feed'.

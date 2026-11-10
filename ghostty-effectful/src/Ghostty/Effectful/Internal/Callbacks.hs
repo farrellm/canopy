@@ -9,7 +9,7 @@
 -- 'sheltered': an exception inside one is recorded, not let into C, and thrown
 -- by whoever drains the buffer. What needs the terminal (the title after a
 -- title change, the cursor after a prompt mark) is a 'Pending' entry,
--- 'resolve'd between writes, because a callback must not call back into its
+-- resolved ('resolveOnto') between writes, because a callback must not call back into its
 -- terminal. A C enum value the binding does not name is recorded the same
 -- way, and becomes 'UnknownEnum' then.
 --
