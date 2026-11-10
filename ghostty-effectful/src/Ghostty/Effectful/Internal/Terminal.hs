@@ -92,6 +92,7 @@ import Ghostty.FFI.Terminal
 -- 'Ghostty.Effectful.Terminal.withTerminal' opens. The type variable is
 -- rank-2 there, as in @ST@, so a 'Terminal' cannot be used after its region
 -- has freed it.
+type Terminal :: Type -> Type
 data Terminal s = Terminal
   { -- | the library's handle
     handle :: GhosttyTerminal,
@@ -105,6 +106,9 @@ data Terminal s = Terminal
     answers :: IORef Answers,
     -- | the callbacks, freed with the terminal
     installed :: Installed,
+    -- | the interpreter's count of live tracked references, across its
+    -- terminals ('Ghostty.Effectful.Internal.Effect.refCount')
+    liveRefs :: IORef Int,
     -- | how many calls have changed the terminal or its viewport: a frame
     -- read when this was one value describes the terminal only while it
     -- still is. Every operation that writes, resizes, resets, sets an
@@ -172,8 +176,8 @@ terminalConfig g =
 -- cell size is the caller's to set, inside the scope that frees the
 -- terminal on every path. If the callbacks cannot be installed, the terminal
 -- is freed and the error thrown.
-openTerminal :: TerminalConfig -> IO (Terminal s)
-openTerminal cfg = do
+openTerminal :: IORef Int -> TerminalConfig -> IO (Terminal s)
+openTerminal liveRefs cfg = do
   handle <- alloca $ \out -> do
     r <- ghosttyTerminalNew nullPtr out (fromExtent cfg.size.cols) (fromExtent cfg.size.rows)
     expectSuccess (CallSite "ghostty_terminal_new") r
@@ -195,7 +199,7 @@ openTerminal cfg = do
     installCallbacks handle events answers cfg.enquiry (encodeUtf8 cfg.xtversion)
       `onException` ghosttyTerminalFree handle
   writes <- newIORef 0
-  pure Terminal {handle, refs, nextRef, events, answers, installed, writes}
+  pure Terminal {handle, refs, nextRef, events, answers, installed, liveRefs, writes}
 
 -- | Count a call that changed the terminal (§4.3: a frame's hyperlinks are
 -- read from the terminal only while it has not changed since).
@@ -205,25 +209,17 @@ wrote t = modifyIORef' t.writes (+ 1)
 -- | The same terminal, its region forgotten, for a handle scoped inside the
 -- region that keeps it (a render state).
 forgetRegion :: Terminal s -> Terminal ()
-forgetRegion t =
-  Terminal
-    { handle = t.handle,
-      refs = t.refs,
-      nextRef = t.nextRef,
-      events = t.events,
-      answers = t.answers,
-      installed = t.installed,
-      writes = t.writes
-    }
+forgetRegion = coerce
 
 -- | Free every tracked reference still registered, taking their number off
--- the counter, then @ghostty_terminal_free@, then the callbacks, which the
+-- the count, then @ghostty_terminal_free@, then the callbacks, which the
 -- terminal can no longer call.
-closeTerminal :: IORef Int -> Terminal s -> IO ()
-closeTerminal open t = do
-  live <- atomicModifyIORef' t.refs (mempty,)
+closeTerminal :: Terminal s -> IO ()
+closeTerminal t = do
+  live <- readIORef t.refs
+  writeIORef t.refs mempty
   traverse_ ghosttyTrackedGridRefFree live
-  modifyIORef' open (subtract (IntMap.size live))
+  modifyIORef' t.liveRefs (subtract (IntMap.size live))
   ghosttyTerminalFree t.handle
   releaseCallbacks t.installed
 
@@ -248,22 +244,20 @@ pastHistory h p
 -- 'Nothing' if the point is outside its coordinate system, which is the
 -- header's @GHOSTTY_INVALID_VALUE@ for a valid terminal, or is past the
 -- scrollback ('pastHistory').
-trackPoint :: IORef Int -> Terminal s -> GhosttyPoint -> IO (Maybe (TrackedRef s))
-trackPoint open t p =
-  pastHistory t.handle p >>= \case
-    True -> pure Nothing
-    False -> trackValid open t p
+trackPoint :: Terminal s -> GhosttyPoint -> IO (Maybe (TrackedRef s))
+trackPoint t p = ifM (pastHistory t.handle p) (pure Nothing) (trackValid t p)
 
 -- | 'trackPoint' for a point known not to be past the scrollback.
-trackValid :: IORef Int -> Terminal s -> GhosttyPoint -> IO (Maybe (TrackedRef s))
-trackValid open t p = alloca $ \out -> do
+trackValid :: Terminal s -> GhosttyPoint -> IO (Maybe (TrackedRef s))
+trackValid t p = alloca $ \out -> do
   r <- with p $ \pp -> ghosttyTerminalGridRefTrack t.handle pp out
   case resultCode r of
     ResultSuccess -> do
       ref <- peek out
-      key <- atomicModifyIORef' t.nextRef (\n -> (n + 1, n))
+      key <- readIORef t.nextRef
+      writeIORef t.nextRef (key + 1)
       modifyIORef' t.refs (IntMap.insert key ref)
-      modifyIORef' open (+ 1)
+      modifyIORef' t.liveRefs (+ 1)
       pure (Just TrackedRef {terminal = t, key})
     ResultInvalidValue -> pure Nothing
     ResultOutOfMemory -> throwIO (OutOfMemory site)
@@ -273,13 +267,13 @@ trackValid open t p = alloca $ \out -> do
 
 -- | Free a reference and drop it from its terminal's registry. A reference
 -- already untracked, or whose terminal is closed, is left alone.
-untrackRef :: IORef Int -> TrackedRef s -> IO ()
-untrackRef open ref = do
-  found <- atomicModifyIORef' ref.terminal.refs $ \m ->
-    (IntMap.delete ref.key m, IntMap.lookup ref.key m)
+untrackRef :: TrackedRef s -> IO ()
+untrackRef ref = do
+  (found, rest) <- IntMap.updateLookupWithKey (\_ _ -> Nothing) ref.key <$> readIORef ref.terminal.refs
   for_ found $ \h -> do
+    writeIORef ref.terminal.refs rest
     ghosttyTrackedGridRefFree h
-    modifyIORef' open (subtract 1)
+    modifyIORef' ref.terminal.liveRefs (subtract 1)
 
 -- | The library's handle for a reference still registered.
 registered :: TrackedRef s -> IO (Maybe GhosttyTrackedGridRef)
@@ -335,7 +329,4 @@ moveTrackedRef ref p =
 -- | @ghostty_tracked_grid_ref_has_value@: whether the reference still names
 -- a cell; 'False' once untracked.
 refHasValue :: TrackedRef s -> IO Bool
-refHasValue ref =
-  registered ref >>= \case
-    Nothing -> pure False
-    Just h -> toBool <$> ghosttyTrackedGridRefHasValue h
+refHasValue ref = maybe (pure False) (fmap toBool . ghosttyTrackedGridRefHasValue) =<< registered ref

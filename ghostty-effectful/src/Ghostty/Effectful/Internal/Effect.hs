@@ -14,6 +14,9 @@ module Ghostty.Effectful.Internal.Effect
     Ghostty,
     Handles (..),
     owned,
+    ownedIO,
+    scoped,
+    countOf,
 
     -- * Interpreters
     runGhostty,
@@ -26,11 +29,11 @@ module Ghostty.Effectful.Internal.Effect
 where
 
 import Control.Concurrent (ThreadId, myThreadId)
-import Control.Exception (throwIO)
+import Control.Exception (bracket, throwIO)
 import Data.ByteString qualified as BS
 import Data.Text qualified as T
 import Effectful (Dispatch (..), DispatchOf, Eff, Effect, IOE, (:>))
-import Effectful.Dispatch.Static (SideEffects (..), StaticRep, evalStaticRep, getStaticRep, unsafeEff_)
+import Effectful.Dispatch.Static (SideEffects (..), StaticRep, evalStaticRep, getStaticRep, unsafeEff_, unsafeSeqUnliftIO)
 import Foreign.C.ConstPtr (ConstPtr (..))
 import Foreign.C.Types (CBool)
 import Foreign.Marshal.Alloc (alloca)
@@ -69,7 +72,7 @@ data Handles = Handles
   { -- | the thread that ran 'runGhostty', the only one allowed to call (§4.6)
     owner :: ThreadId,
     -- | how many terminals are open
-    openCount :: IORef Int,
+    terminalCount :: IORef Int,
     -- | how many tracked grid references are live
     refCount :: IORef Int,
     -- | how many render states are open
@@ -89,6 +92,26 @@ owned op = do
     when (me /= hs.owner) $ throwIO (WrongThread (CallSite op))
     pure hs
 
+-- | An operation that is one IO call: 'owned', then the call.
+ownedIO :: (Ghostty :> es) => Text -> IO a -> Eff es a
+ownedIO op io = owned op *> unsafeEff_ io
+{-# INLINE ownedIO #-}
+
+-- | An operation that reads one of the interpreter's counters.
+countOf :: (Ghostty :> es) => Text -> (Handles -> IORef Int) -> Eff es Int
+countOf op counter = owned op >>= unsafeEff_ . readIORef . counter
+
+-- | An operation that scopes a handle to an action: 'owned', then the
+-- handle opened (from the interpreter's state), counted in the given
+-- counter while it is open, and closed when the action ends, by return or
+-- by exception.
+scoped :: (Ghostty :> es) => Text -> (Handles -> IORef Int) -> (Handles -> IO h) -> (h -> IO ()) -> (h -> Eff es a) -> Eff es a
+scoped op counter open close k = do
+  hs <- owned op
+  let count = modifyIORef' (counter hs)
+  unsafeSeqUnliftIO $ \unlift ->
+    bracket (open hs <* count (+ 1)) (\h -> close h <* count (subtract 1)) (unlift . k)
+
 -- | Run the effect against the linked libghostty-vt, which must be the pinned
 -- release, built with every optional feature (§3.4, D-1, D-2): otherwise
 -- nothing runs, and the result is the mismatch. Every operation must then
@@ -105,11 +128,11 @@ runGhosttyPinnedTo pin act = do
     then pure (Left VersionMismatch {pinned = pin, linked})
     else do
       owner <- liftIO myThreadId
-      open <- newIORef 0
-      refs <- newIORef 0
-      renders <- newIORef 0
-      encoders <- newIORef 0
-      Right <$> evalStaticRep (GhosttyRep Handles {owner, openCount = open, refCount = refs, renderCount = renders, encoderCount = encoders}) act
+      terminalCount <- newIORef 0
+      refCount <- newIORef 0
+      renderCount <- newIORef 0
+      encoderCount <- newIORef 0
+      Right <$> evalStaticRep (GhosttyRep Handles {owner, terminalCount, refCount, renderCount, encoderCount}) act
 
 -- | The linked library's identity: its full version (@ghostty_version@, which
 -- a development build suffixes with @-dev+…@), then @without@ each optional

@@ -66,12 +66,10 @@ module Ghostty.Effectful.Encode
   )
 where
 
-import Control.Exception (bracket)
 import Effectful (Eff, (:>))
-import Effectful.Dispatch.Static (unsafeEff_, unsafeSeqUnliftIO)
 import Ghostty.Effectful.Event (TerminalEvent)
 import Ghostty.Effectful.Input
-import Ghostty.Effectful.Internal.Effect (Ghostty, Handles (..), owned)
+import Ghostty.Effectful.Internal.Effect (Ghostty, Handles (..), countOf, ownedIO, scoped)
 import Ghostty.Effectful.Internal.Encode
   ( Focus (..),
     KeyEncoder,
@@ -123,28 +121,21 @@ import Ghostty.Effectful.Terminal.Keys (ColorScheme)
 -- action, and free it when the action ends, by return or by exception. Its
 -- type variable is rank-2, so it cannot leave the action (§4.2).
 withKeyEncoder :: (Ghostty :> es) => KeyOptions -> (forall k. KeyEncoder k -> Eff es a) -> Eff es a
-withKeyEncoder o k = do
-  hs <- owned "withKeyEncoder"
-  unsafeSeqUnliftIO $ \unlift ->
-    bracket
-      (openKeyEncoder o <* modifyIORef' hs.encoderCount (+ 1))
-      (\e -> closeKeyEncoder e <* modifyIORef' hs.encoderCount (subtract 1))
-      (unlift . k)
+withKeyEncoder o k =
+  scoped "withKeyEncoder" (.encoderCount) (const (openKeyEncoder o)) closeKeyEncoder k
 
 -- | Replace every option.
 setKeyEncoder :: (Ghostty :> es) => KeyEncoder k -> KeyOptions -> Eff es ()
-setKeyEncoder enc o = do
-  _ <- owned "setKeyEncoder"
-  unsafeEff_ (setKeyOptions enc o)
+setKeyEncoder enc o =
+  ownedIO "setKeyEncoder" (setKeyOptions enc o)
 
 -- | Set the options from what the terminal's program asked for now: the
 -- cursor-key and keypad modes, Alt's ESC prefix, modifyOtherKeys and the
 -- Kitty flags. 'macosOptionAsAlt' is not the terminal's, and becomes
 -- 'OptionNotAlt'. A later change of the terminal's modes needs another call.
 keyOptionsFrom :: (Ghostty :> es) => KeyEncoder k -> Terminal s -> Eff es ()
-keyOptionsFrom enc t = do
-  _ <- owned "keyOptionsFrom"
-  unsafeEff_ (keyOptionsFromTerminal enc t)
+keyOptionsFrom enc t =
+  ownedIO "keyOptionsFrom" (keyOptionsFromTerminal enc t)
 
 -- | The bytes a key event sends; empty for one that sends none (a modifier
 -- pressed alone, or a release outside the Kitty protocol).
@@ -154,49 +145,39 @@ keyOptionsFrom enc t = do
 -- >>> runEff (runGhostty (withKeyEncoder defaultKeyOptions (\e -> encodeKey e (keyPress KeyArrowUp))))
 -- Right "\ESC[A"
 encodeKey :: (Ghostty :> es) => KeyEncoder k -> KeyEvent -> Eff es ByteString
-encodeKey enc e = do
-  _ <- owned "encodeKey"
-  unsafeEff_ (encodeKeyEvent enc e)
+encodeKey enc e =
+  ownedIO "encodeKey" (encodeKeyEvent enc e)
 
 -- * Mice
 
 -- | Open a mouse encoder with the given options for the duration of the
 -- action, and free it when the action ends, by return or by exception.
 withMouseEncoder :: (Ghostty :> es) => MouseOptions -> (forall m. MouseEncoder m -> Eff es a) -> Eff es a
-withMouseEncoder o k = do
-  hs <- owned "withMouseEncoder"
-  unsafeSeqUnliftIO $ \unlift ->
-    bracket
-      (openMouseEncoder o <* modifyIORef' hs.encoderCount (+ 1))
-      (\e -> closeMouseEncoder e <* modifyIORef' hs.encoderCount (subtract 1))
-      (unlift . k)
+withMouseEncoder o k =
+  scoped "withMouseEncoder" (.encoderCount) (const (openMouseEncoder o)) closeMouseEncoder k
 
 -- | Replace every option, forgetting the last cell reported.
 setMouseEncoder :: (Ghostty :> es) => MouseEncoder m -> MouseOptions -> Eff es ()
-setMouseEncoder enc o = do
-  _ <- owned "setMouseEncoder"
-  unsafeEff_ (setMouseOptions enc o)
+setMouseEncoder enc o =
+  ownedIO "setMouseEncoder" (setMouseOptions enc o)
 
 -- | Set the tracking and format from what the terminal's program asked for
 -- now, forgetting the last cell reported. The geometry and the held button
 -- stay as they were.
 mouseOptionsFrom :: (Ghostty :> es) => MouseEncoder m -> Terminal s -> Eff es ()
-mouseOptionsFrom enc t = do
-  _ <- owned "mouseOptionsFrom"
-  unsafeEff_ (mouseOptionsFromTerminal enc t)
+mouseOptionsFrom enc t =
+  ownedIO "mouseOptionsFrom" (mouseOptionsFromTerminal enc t)
 
 -- | Forget the last cell reported, so the next motion is reported wherever
 -- it is ('trackLastCell').
 forgetLastCell :: (Ghostty :> es) => MouseEncoder m -> Eff es ()
-forgetLastCell enc = do
-  _ <- owned "forgetLastCell"
-  unsafeEff_ (resetMouse enc)
+forgetLastCell enc =
+  ownedIO "forgetLastCell" (resetMouse enc)
 
 -- | The bytes a mouse event sends; empty for one the options do not report.
 encodeMouse :: (Ghostty :> es) => MouseEncoder m -> MouseEvent -> Eff es ByteString
-encodeMouse enc e = do
-  _ <- owned "encodeMouse"
-  unsafeEff_ (encodeMouseEvent enc e)
+encodeMouse enc e =
+  ownedIO "encodeMouse" (encodeMouseEvent enc e)
 
 -- * Reports
 
@@ -207,27 +188,23 @@ encodeMouse enc e = do
 -- >>> runEff (runGhostty (encodeFocus FocusGained))
 -- Right "\ESC[I"
 encodeFocus :: (Ghostty :> es) => Focus -> Eff es ByteString
-encodeFocus f = do
-  _ <- owned "encodeFocus"
-  unsafeEff_ (encodeFocusEvent f)
+encodeFocus f =
+  ownedIO "encodeFocus" (encodeFocusEvent f)
 
 -- | A size report of a grid and its cell size, in the given style.
 encodeSizeReport :: (Ghostty :> es) => SizeReportStyle -> GridSize -> CellPixels -> Eff es ByteString
-encodeSizeReport style g px = do
-  _ <- owned "encodeSizeReport"
-  unsafeEff_ (encodeSizeReportOf style g px)
+encodeSizeReport style g px =
+  ownedIO "encodeSizeReport" (encodeSizeReportOf style g px)
 
 -- | A DECRPM reply: what a mode is, as the answer to DECRQM.
 encodeModeReport :: (Ghostty :> es) => ModeNumber -> ModeReport -> Eff es ByteString
-encodeModeReport m s = do
-  _ <- owned "encodeModeReport"
-  unsafeEff_ (encodeModeReportOf m s)
+encodeModeReport m s =
+  ownedIO "encodeModeReport" (encodeModeReportOf m s)
 
 -- | A colour-scheme report (@CSI ? 997 ; 1 n@ for dark, @2@ for light).
 encodeColorSchemeReport :: (Ghostty :> es) => ColorScheme -> Eff es ByteString
-encodeColorSchemeReport s = do
-  _ <- owned "encodeColorSchemeReport"
-  unsafeEff_ (encodeColorSchemeReportOf s)
+encodeColorSchemeReport s =
+  ownedIO "encodeColorSchemeReport" (encodeColorSchemeReportOf s)
 
 -- * Paste
 
@@ -240,17 +217,15 @@ encodeColorSchemeReport s = do
 -- 'Rejected', and nothing is written: ask, then paste with 'AllowUnsafe'
 -- (§8.5).
 paste :: (Ghostty :> es) => Terminal s -> PasteSafety -> ByteString -> Eff es (Either Rejected [TerminalEvent])
-paste t safety text = do
-  _ <- owned "paste"
-  unsafeEff_ (pasteInto t safety text)
+paste t safety text =
+  ownedIO "paste" (pasteInto t safety text)
 
 -- | Whether text holds nothing that could inject commands in any mode: no
 -- line break, no bracketed paste terminator. Stricter than 'paste', which
 -- allows line breaks inside a bracketed paste.
 isPasteSafe :: (Ghostty :> es) => ByteString -> Eff es Bool
-isPasteSafe b = do
-  _ <- owned "isPasteSafe"
-  unsafeEff_ (pasteSafe b)
+isPasteSafe b =
+  ownedIO "isPasteSafe" (pasteSafe b)
 
 -- | Text as a paste writes it, without a terminal: bracketed ('True'), or
 -- with its line feeds made carriage returns, and with unsafe control bytes
@@ -261,15 +236,13 @@ isPasteSafe b = do
 -- >>> runEff (runGhostty (encodePaste False "a\nb"))
 -- Right "a\rb"
 encodePaste :: (Ghostty :> es) => Bool -> ByteString -> Eff es ByteString
-encodePaste bracketed b = do
-  _ <- owned "encodePaste"
-  unsafeEff_ (encodePasteBytes bracketed b)
+encodePaste bracketed b =
+  ownedIO "encodePaste" (encodePasteBytes bracketed b)
 
 -- * Handles
 
 -- | How many key and mouse encoders are open in this
 -- 'Ghostty.Effectful.runGhostty'.
 openEncoders :: (Ghostty :> es) => Eff es Int
-openEncoders = do
-  hs <- owned "openEncoders"
-  unsafeEff_ (readIORef hs.encoderCount)
+openEncoders =
+  countOf "openEncoders" (.encoderCount)

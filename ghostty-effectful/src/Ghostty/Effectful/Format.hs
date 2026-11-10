@@ -28,8 +28,7 @@ module Ghostty.Effectful.Format
 where
 
 import Effectful (Eff, (:>))
-import Effectful.Dispatch.Static (unsafeEff_)
-import Ghostty.Effectful.Internal.Effect (Ghostty, owned)
+import Ghostty.Effectful.Internal.Effect (Ghostty, ownedIO)
 import Ghostty.Effectful.Internal.Format
   ( Format (..),
     FormatOptions (..),
@@ -47,13 +46,11 @@ import Ghostty.Effectful.Point (KnownCoord)
 
 -- | The terminal's active screen, scrollback included.
 format :: (Ghostty :> es) => Terminal s -> FormatOptions -> Eff es ByteString
-format t o = do
-  _ <- owned "format"
-  unsafeEff_ (formatTerminal t o)
+format t o =
+  ownedIO "format" (formatTerminal t o)
 
 -- | A range of the terminal's active screen; 'Nothing' if either end is
 -- outside the range's coordinate system.
 formatRange :: (Ghostty :> es, KnownCoord c) => Terminal s -> FormatOptions -> Range c -> Eff es (Maybe ByteString)
-formatRange t o r = do
-  _ <- owned "formatRange"
-  unsafeEff_ (formatTerminalRange t o r)
+formatRange t o r =
+  ownedIO "formatRange" (formatTerminalRange t o r)

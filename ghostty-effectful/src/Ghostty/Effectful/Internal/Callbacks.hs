@@ -51,7 +51,7 @@ import Data.ByteString.Unsafe qualified as BSU
 import Foreign.C.Types (CBool (..), CInt (..), CSize)
 import Foreign.Marshal.Alloc (free, mallocBytes)
 import Foreign.Marshal.Array (peekArray)
-import Foreign.Marshal.Utils (copyBytes, toBool, with)
+import Foreign.Marshal.Utils (copyBytes, fromBool, toBool, with)
 import Foreign.Ptr (FunPtr, Ptr, castFunPtr, castFunPtrToPtr, castPtr, freeHaskellFunPtr, nullPtr)
 import Foreign.Storable (Storable (..))
 import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), ResultCode (..))
@@ -185,11 +185,12 @@ data GveffUserdata
 installCallbacks :: GhosttyTerminal -> IORef [Pending] -> IORef Answers -> ByteString -> ByteString -> IO Installed
 installCallbacks h buf answers enq xtv = do
   made <- newIORef []
-  let wrapped :: IO (FunPtr a) -> GhosttyTerminalOption -> IO ()
-      wrapped mk opt = mask_ $ do
+  let register :: IO (FunPtr a) -> IO (FunPtr a)
+      register mk = mask_ $ do
         fp <- mk
-        modifyIORef' made (castFunPtr fp :)
-        setPtr opt (castFunPtrToPtr fp)
+        fp <$ modifyIORef' made (castFunPtr fp :)
+      wrapped :: IO (FunPtr a) -> GhosttyTerminalOption -> IO ()
+      wrapped mk opt = setPtr opt . castFunPtrToPtr =<< register mk
       setPtr opt p = expectSuccess (CallSite "ghostty_terminal_set") =<< ghosttyTerminalSet h opt p
   ud <- gveffUserdataNew
   when (ud == nullPtr) $ throwIO (OutOfMemory (CallSite "gveff_userdata_new"))
@@ -212,15 +213,13 @@ installCallbacks h buf answers enq xtv = do
         wrapped (mkGhosttyTerminalProgramStatusFn (onProgramStatus buf)) GhosttyTerminalOptProgramStatus
         wrapped (mkGhosttyTerminalSemanticPromptFn (onSemanticPrompt buf)) GhosttyTerminalOptSemanticPrompt
         wrapped (mkGhosttyTerminalResetFn (\_ _ -> push buf (Ready Reset))) GhosttyTerminalOptReset
-        notify <- mkGhosttyTerminalRenderHoldFn (onRenderHold buf ud)
-        modifyIORef' made (castFunPtr notify :)
-        gveffSetHoldNotify ud notify
+        gveffSetHoldNotify ud =<< register (mkGhosttyTerminalRenderHoldFn (onRenderHold buf ud))
         setPtr GhosttyTerminalOptRenderHold (castFunPtrToPtr gveffRenderHold)
         wrapped (mkGhosttyTerminalUnknownSequenceFn (onUnknownSequence buf)) GhosttyTerminalOptUnknownSequence
         wrapped (mkGhosttyTerminalResizeWindowFn (onResizeWindow buf)) GhosttyTerminalOptResizeWindow
-  install `onException` (readIORef made >>= \fps -> releaseCallbacks Installed {funPtrs = fps, userdata = ud})
-  fps <- readIORef made
-  pure Installed {funPtrs = fps, userdata = ud}
+  let installed = (\funPtrs -> Installed {funPtrs, userdata = ud}) <$> readIORef made
+  install `onException` (releaseCallbacks =<< installed)
+  installed
 
 -- | Free the callbacks, the answer strings and the @USERDATA@. Only once the
 -- terminal that calls them is freed.
@@ -349,7 +348,7 @@ captureRelease i = gveffCaptureRelease i.userdata
 -- begins while one is open does not capture into it, since its rows are
 -- being read and an update would invalidate them.
 captureFraming :: Installed -> GhosttyRenderState -> Bool -> IO ()
-captureFraming i rs b = gveffCaptureFraming i.userdata rs (if b then 1 else 0)
+captureFraming i rs = gveffCaptureFraming i.userdata rs . fromBool
 
 -- * The callbacks
 
@@ -368,7 +367,7 @@ text s = decodeUtf8 <$> ghosttyStringBytes s
 
 -- | A percentage the header gives as -1 when absent.
 percentOf :: Int8 -> Maybe Word8
-percentOf n = if n < 0 then Nothing else Just (fromIntegral n)
+percentOf n = fromIntegral n <$ guard (n >= 0)
 
 -- | @RENDER_HOLD@'s Haskell half, called by the C callback after it
 -- captured: a capture that failed, then the event.
@@ -379,7 +378,7 @@ onRenderHold buf ud _ _ held = sheltered buf () $ do
     ResultSuccess -> pass
     ResultOutOfMemory -> push buf (Failed (toException (OutOfMemory captureSite)))
     other -> push buf (Failed (toException (Invariant captureSite other)))
-  push buf (Ready (RenderHold (held /= 0)))
+  push buf (Ready (RenderHold (toBool held)))
   where
     captureSite = CallSite "ghostty_render_state_update"
 
@@ -526,7 +525,7 @@ onSemanticPrompt buf _ _ ep = sheltered buf () $ do
     GhosttySemanticPromptOutputStart -> mark . OutputStart =<< text e.command
     GhosttySemanticPromptCommandEnd -> do
       err <- text e.error
-      mark (CommandEnd (if e.hasExitCode /= 0 then Just e.exitCode else Nothing) err)
+      mark (CommandEnd (e.exitCode <$ guard (toBool e.hasExitCode)) err)
     -- The header says INVALID is never reported, so it is no more named
     -- than an unknown value.
     GhosttySemanticPromptInvalid -> push buf (Unnamed site ghosttySemanticPromptKindEnum 0)
@@ -541,7 +540,7 @@ onUnknownSequence buf _ _ sp = sheltered buf () $ do
   peek sp >>= \case
     UnknownSequenceApc s -> do
       b <- ghosttyStringBytes s.content
-      ready Apc (s.truncated /= 0) b
+      ready Apc (toBool s.truncated) b
     UnknownSequenceOsc s -> case s.terminator of
       GhosttyOscTerminatorSt -> osc TerminatedBySt s
       GhosttyOscTerminatorBel -> osc TerminatedByBel s
@@ -550,7 +549,7 @@ onUnknownSequence buf _ _ sp = sheltered buf () $ do
   where
     site = CallSite "GhosttyTerminalUnknownSequenceFn"
     ready k t b = push buf (Ready (UnknownSequence UnsupportedSequence {kind = k, truncated = t, content = b}))
-    osc term s = ghosttyStringBytes s.content >>= ready (Osc term) (s.truncated /= 0)
+    osc term s = ghosttyStringBytes s.content >>= ready (Osc term) (toBool s.truncated)
 
 -- | @RESIZE_WINDOW@.
 onResizeWindow :: IORef [Pending] -> GhosttyTerminal -> Ptr () -> Ptr GhosttyTerminalResizeWindow -> IO ()

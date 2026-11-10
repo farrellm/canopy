@@ -4,9 +4,9 @@ The safe, `effectful` interface to libghostty-vt (`DESIGN.md` §4): scoped handl
 events instead of callbacks. No export may expose a pointer.
 
 - **`Ghostty` is one statically dispatched effect** (§4.2), in `Ghostty.Effectful.Internal.Effect`.
-  An operation is a plain function in the module of what it acts on, and its first line is
-  `owned "<name>"`, the owner-thread check (§4.6); then `unsafeEff_` around the IO call. Handles are
-  scoped by a rank-2 type variable and released with `bracket` (`unsafeSeqUnliftIO`).
+  An operation is a plain function in the module of what it acts on, built on `owned "<name>"`, the
+  owner-thread check (§4.6): `ownedIO "<name>" io` for one IO call, `countOf` for a counter, and
+  `scoped` for a handle scoped by a rank-2 type variable, counted, and released with `bracket`.
 - **`Internal` modules hold representations** (constructors over raw handles) and the IO calls; the
   public modules re-export their types without constructors. Raw pointers appear only in `Internal`
   (§10.6).
@@ -41,7 +41,7 @@ events instead of callbacks. No export may expose a pointer.
   references, formats and frees, so the references cannot go stale. Goldens are in
   `test/golden/format/`, control bytes written visibly (`\e`, `\r`); read each before accepting it
   (`--accept`). A call taking a point checks a `History` row with
-  `Internal.Keys.pastHistory` first, since the library does not refuse one past the scrollback.
+  `Internal.Terminal.pastHistory` first, since the library does not refuse one past the scrollback.
 - **Encoders, parsers, widths** (§4.8, M1.9). Key and mouse encoders are handles (`withKeyEncoder`,
   `withMouseEncoder`, `Internal.Encode`), each owning the event handle it fills in per encode; their
   inputs are plain values in `Input`. Reports, `encodePaste` and the parsers have no handle: a

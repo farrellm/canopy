@@ -608,7 +608,8 @@ withTerminal
 
 `Ghostty` is statically dispatched (`Static WithSideEffects`). Its operations are plain functions in
 the module of what they act on (`Ghostty.Effectful.Terminal`, `.Render`, `.Format`, …), each starting
-with the owner check, so no one module has to know every operation's types. The representations
+with the owner check (`owned`, through `ownedIO` for one IO call and `scoped` for a handle), so no one
+module has to know every operation's types. The representations
 live in `Ghostty.Effectful.Internal.*`; the public modules export the types without constructors.
 Unlike §2.7's subsystems it has **one interpreter**: libghostty-vt is headless and deterministic, so
 the library itself is what tests run against, and a fake would test only the fake. That leaves
