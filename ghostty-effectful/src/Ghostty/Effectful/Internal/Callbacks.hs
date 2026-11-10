@@ -111,8 +111,7 @@ data Pending
   | -- | an exception inside a callback, which C must not see
     Failed SomeException
 
--- | Take what the buffer holds, newest first as it was appended, leaving it
--- empty. 'resolveOnto' takes it in that order, so it is never reversed.
+-- | Take what the buffer holds, oldest first, leaving it empty.
 drain :: IORef [Pending] -> IO [Pending]
 drain buf = do
   -- A read then a write, not atomicModifyIORef': only the owner thread
@@ -120,23 +119,14 @@ drain buf = do
   -- it run on that thread inside a C call, never between the two.
   ps <- readIORef buf
   writeIORef buf []
-  pure ps
+  pure (reverse ps)
 
--- | Turn drained entries, newest first, into events, newest first onto the
--- given ones, reading what they need from the terminal (through the given
--- read), which is between writes now. They are resolved oldest first, so
--- the first exception a callback recorded is the one thrown.
+-- | Turn drained entries into events, newest first onto the given ones,
+-- reading what they need from the terminal (through the given read), which
+-- is between writes now. Throws what a callback recorded.
 resolveOnto :: (forall a. TerminalData a -> IO a) -> [TerminalEvent] -> [Pending] -> IO [TerminalEvent]
-resolveOnto getData onto = go
+resolveOnto getData = foldlM (\acc p -> (: acc) <$> event p)
   where
-    -- The older entries first, then this one onto them: the recursion
-    -- reverses the order, so the list is not reversed first.
-    go = \case
-      [] -> pure onto
-      p : older -> do
-        acc <- go older
-        e <- event p
-        pure (e : acc)
     event = \case
       Ready e -> pure e
       TitlePending -> TitleChanged <$> getData Title
