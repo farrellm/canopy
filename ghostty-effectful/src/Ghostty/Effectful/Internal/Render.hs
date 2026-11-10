@@ -1,5 +1,6 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE RoleAnnotations #-}
 
 -- | Render states and frames: representations and calls (DESIGN.md §4.3).
 -- The public API is "Ghostty.Effectful.Render".
@@ -76,7 +77,10 @@ import Ghostty.FFI.Terminal (ghosttyTerminalGridRef)
 import Ghostty.FFI.Types (GhosttyBuffer (..), GhosttyResult, pattern GhosttyCursorStyleBar)
 
 -- | A render state of one terminal, alive in the region @s@ that
--- 'Ghostty.Effectful.Render.withRenderState' opens.
+-- 'Ghostty.Effectful.Render.withRenderState' opens. Its role is nominal, as
+-- 'Terminal''s is, so 'coerce' cannot take it out of its region.
+type role RenderState nominal
+
 data RenderState s = RenderState
   { -- | the library's handle
     handle :: GhosttyRenderState,
@@ -104,7 +108,10 @@ data FrameInfo = FrameInfo
   }
 
 -- | A frame of a render state: its data as of one update, valid in the
--- region @f@ that 'Ghostty.Effectful.Render.withFrame' opens.
+-- region @f@ that 'Ghostty.Effectful.Render.withFrame' opens. Both roles
+-- are nominal, so 'coerce' cannot take it out of either region.
+type role Frame nominal nominal
+
 data Frame s f = Frame
   { -- | the render state
     state :: RenderState s,
@@ -120,7 +127,9 @@ data Opened
   | -- | a frame inside another of the same render state: that frame
     Nested FrameInfo
 
--- | A row of a frame.
+-- | A row of a frame. Its roles are nominal, as 'Frame''s are.
+type role Row nominal nominal
+
 data Row s f = Row
   { -- | the frame
     frame :: Frame s f,

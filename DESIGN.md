@@ -622,7 +622,10 @@ zero (`extent :: Word16 -> Maybe Extent`), because `terminal_new` and `terminal_
 so that refusal cannot be expressed and the remaining failure of each is out of memory.
 
 The rank-2 `s` makes a `Terminal s` unusable outside `withTerminal`, so the handle cannot outlive
-its `free`. `bracket`-style release runs on exceptions. The same pattern scopes encoders and search
+its `free`. Every region parameter (`Terminal`'s, `TrackedRef`'s, `RenderState`'s, `Frame`'s and
+`Row`'s two, the encoders') has a nominal role, declared with `type role`, as `ST`'s is: GHC infers
+a phantom one, which lets `coerce` take a handle out of its region without its constructor
+(regression 14). `bracket`-style release runs on exceptions. The same pattern scopes encoders and search
 sessions. A key or mouse encoder (M1.9) owns the one event handle it encodes from, so an encode
 fills that in rather than making an event per keystroke; a mouse encoder keeps state between events
 (the last cell it reported), which is what makes it a handle. A formatter is not a handle at this

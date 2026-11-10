@@ -277,6 +277,12 @@ Written as changes land, not at release (DESIGN.md §2.9).
   render-hold callback's function pointer is also registered masked, like the others, so an
   asynchronous exception can no longer leak it. A key or mouse encoder whose options cannot be set is freed
   rather than leaked; no option value the types allow is refused, so neither has a test case.
+- Fixed: every region parameter was phantom, so `coerce` took a handle out of its region
+  without its constructor, and `withTerminal cfg (pure . coerce)` returned a terminal the region
+  then freed (#15; on master before this branch). `Terminal`, `TrackedRef`, `RenderState`,
+  `Frame`, `Row`, `KeyEncoder` and `MouseEncoder` declare their region roles nominal, as `ST`
+  does, and `forgetRegion` rebuilds the record rather than coercing it. Regression 14 checks, with
+  deferred type errors, that each coercion no longer type-checks.
 - `ghostty-effectful-bench` has a `Render` group (DESIGN.md §12.3): full frames of every cell on
   three screens, cursor and colours, and 24 frames of one new line each, gated like the feed.
   Measuring it found the refactor's per-cell readers 20% slower than before. The cause was local

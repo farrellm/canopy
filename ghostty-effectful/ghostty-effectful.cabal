@@ -107,6 +107,7 @@ test-suite ghostty-effectful-test
     Test.Ghostty.Effectful.Format
     Test.Ghostty.Effectful.Keys
     Test.Ghostty.Effectful.Parse
+    Test.Ghostty.Effectful.Region
     Test.Ghostty.Effectful.Render
     Test.Ghostty.Effectful.Support
     Test.Ghostty.Effectful.Terminal

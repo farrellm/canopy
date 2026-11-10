@@ -1,4 +1,5 @@
 {-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE RoleAnnotations #-}
 
 -- | A terminal's representation and its raw calls (DESIGN.md §4.2). The
 -- public API is "Ghostty.Effectful.Terminal", which exports these types
@@ -82,8 +83,12 @@ import Ghostty.FFI.Terminal
 -- | A terminal, alive in the region @s@ that
 -- 'Ghostty.Effectful.Terminal.withTerminal' opens. The type variable is
 -- rank-2 there, as in @ST@, so a 'Terminal' cannot be used after its region
--- has freed it.
+-- has freed it. As @ST@'s, its role is nominal: were it phantom, 'coerce'
+-- could take a terminal out of its region (regression 14).
 type Terminal :: Type -> Type
+
+type role Terminal nominal
+
 data Terminal s = Terminal
   { -- | the library's handle
     handle :: GhosttyTerminal,
@@ -109,7 +114,10 @@ data Terminal s = Terminal
 
 -- | A tracked reference to a cell of a terminal in the region @s@: it
 -- follows its cell as the terminal scrolls, prunes and reflows, and is
--- freed with the terminal if not before.
+-- freed with the terminal if not before. Its role is nominal, as
+-- 'Terminal''s is.
+type role TrackedRef nominal
+
 data TrackedRef s = TrackedRef
   { -- | the terminal it was made from
     terminal :: Terminal s,
@@ -197,9 +205,20 @@ wrote :: Terminal s -> IO ()
 wrote t = modifyIORef' t.writes (+ 1)
 
 -- | The same terminal, its region forgotten, for a handle scoped inside the
--- region that keeps it (a render state).
+-- region that keeps it (a render state). The record is rebuilt, since the
+-- region's role is nominal and 'coerce' cannot change it.
 forgetRegion :: Terminal s -> Terminal ()
-forgetRegion = coerce
+forgetRegion t =
+  Terminal
+    { handle = t.handle,
+      refs = t.refs,
+      nextRef = t.nextRef,
+      events = t.events,
+      answers = t.answers,
+      installed = t.installed,
+      liveRefs = t.liveRefs,
+      writes = t.writes
+    }
 
 -- | Free every tracked reference still registered, taking their number off
 -- the count, then @ghostty_terminal_free@, then the callbacks, which the

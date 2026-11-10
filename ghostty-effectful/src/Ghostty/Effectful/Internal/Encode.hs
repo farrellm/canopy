@@ -1,6 +1,7 @@
 {-# LANGUAGE CApiFFI #-}
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE RoleAnnotations #-}
 
 -- | The encoders' representations and their raw calls (DESIGN.md §4.8). The
 -- public API is "Ghostty.Effectful.Encode", which exports these types
@@ -120,7 +121,10 @@ encodeVia site call = alloca $ \written -> bytesVia site $ \buf cap -> do
 
 -- | A key encoder, alive in the region @k@ that
 -- 'Ghostty.Effectful.Encode.withKeyEncoder' opens, with the event handle it
--- encodes from.
+-- encodes from. Its role is nominal, so 'coerce' cannot take it out of its
+-- region.
+type role KeyEncoder nominal
+
 data KeyEncoder k = KeyEncoder
   { -- | the library's encoder
     encoder :: GhosttyKeyEncoder,
@@ -452,7 +456,9 @@ optionAsAlt = \case
 
 -- | A mouse encoder, alive in the region @m@ that
 -- 'Ghostty.Effectful.Encode.withMouseEncoder' opens, with the event handle
--- it encodes from.
+-- it encodes from. Its role is nominal, as 'KeyEncoder''s is.
+type role MouseEncoder nominal
+
 data MouseEncoder m = MouseEncoder
   { -- | the library's encoder
     encoder :: GhosttyMouseEncoder,

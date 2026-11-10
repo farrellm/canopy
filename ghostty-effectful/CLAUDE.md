@@ -7,6 +7,8 @@ events instead of callbacks. No export may expose a pointer.
   An operation is a plain function in the module of what it acts on, built on `owned "<name>"`, the
   owner-thread check (§4.6): `ownedIO "<name>" io` for one IO call, `countOf` for a counter, and
   `scoped` for a handle scoped by a rank-2 type variable, counted, and released with `bracket`.
+  That variable's role is declared nominal (`type role`, §4.2), or `coerce` lets the handle out of
+  its region; `Test.Ghostty.Effectful.Region` checks each (regression 14).
 - **`Internal` modules hold representations** (constructors over raw handles) and the IO calls; the
   public modules re-export their types without constructors. Raw pointers appear only in `Internal`
   (§10.6).
