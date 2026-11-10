@@ -125,17 +125,15 @@ sizeOf' l = fromIntegral l.size
 
 -- | A new formatter, every option at the library's default.
 newFormatter :: GhosttyTerminal -> IO GhosttyFormatter
-newFormatter t = alloca $ \fp -> do
-  ghosttyFormatterTerminalNew nullPtr fp t >>= (@?= GhosttySuccess)
-  peek fp
+newFormatter t = newHandle $ \a fp -> ghosttyFormatterTerminalNew a fp t
 
 -- | Set an option from a value of its type.
 setOpt :: (Storable a) => GhosttyFormatter -> GhosttyFormatterOption -> a -> IO ()
-setOpt f o v = with v $ \vp -> ghosttyFormatterSet f o (castPtr vp) >>= (@?= GhosttySuccess)
+setOpt f o v = withValue v (ghosttyFormatterSet f o . castPtr)
 
 -- | Read an option into a value of its type.
 getOpt :: (Storable a) => GhosttyFormatter -> GhosttyFormatterOption -> IO a
-getOpt f o = alloca $ \vp -> ghosttyFormatterGet f o (castPtr vp) >>= (@?= GhosttySuccess) >> peek vp
+getOpt f o = outValue (ghosttyFormatterGet f o . castPtr)
 
 -- | A formatter with the format and trim given, no unwrapping and no extras,
 -- over a selection (null for the whole screen). The caller frees it.

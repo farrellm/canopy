@@ -8,7 +8,6 @@ module Canopy
   )
 where
 
-import Data.Text qualified as T
 import Data.Version (showVersion)
 import Effectful (Eff, IOE, (:>))
 import Ghostty.Effectful (buildMetadata)
@@ -29,6 +28,6 @@ components = do
   pure
     [ ("canopy", version),
       ("tendril", Tendril.version),
-      ("tree-sitter ABI", T.intercalate ".." [show lo, show hi]),
+      ("tree-sitter ABI", show lo <> ".." <> show hi),
       ("libghostty-vt", fromMaybe "unknown" ghostty)
     ]

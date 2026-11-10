@@ -150,15 +150,13 @@ boundaryBit :: GhosttyTerminalBoundary -> Word32
 boundaryBit (GhosttyTerminalBoundary b) = fromIntegral b
 
 setFn :: GhosttyTerminal -> GhosttyTerminalOption -> FunPtr a -> IO ()
-setFn t o fn = ghosttyTerminalSet t o (castFunPtrToPtr fn) >>= (@?= GhosttySuccess)
+setFn t o fn = succeeds (ghosttyTerminalSet t o (castFunPtrToPtr fn))
 
 setValue :: GhosttyTerminal -> GhosttyTerminalOption -> Ptr a -> IO ()
-setValue t o p = ghosttyTerminalSet t o (castPtr p) >>= (@?= GhosttySuccess)
+setValue t o p = succeeds (ghosttyTerminalSet t o (castPtr p))
 
 getValue :: (Storable a) => GhosttyTerminal -> GhosttyTerminalData -> IO a
-getValue t d = alloca $ \p -> do
-  ghosttyTerminalGet t d (castPtr p) >>= (@?= GhosttySuccess)
-  peek p
+getValue t d = outValue (ghosttyTerminalGet t d . castPtr)
 
 getU16 :: GhosttyTerminal -> GhosttyTerminalData -> IO Word16
 getU16 = getValue

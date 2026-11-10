@@ -3,7 +3,7 @@
 module Test.TreeSitter.FFI (tests) where
 
 import Foreign.Marshal.Alloc (allocaBytes)
-import Foreign.Marshal.Utils (fillBytes)
+import Foreign.Marshal.Utils (fillBytes, toBool)
 import Foreign.Ptr (nullPtr)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, testCase, (@?=))
@@ -24,6 +24,6 @@ tests =
       testCase "a zeroed TSNode is null, through its shim" $ do
         isNull <- allocaBytes sizeOfTSNode $ \n -> do
           fillBytes n 0 sizeOfTSNode
-          tsffiNodeIsNull n
-        isNull @?= 1
+          toBool <$> tsffiNodeIsNull n
+        assertBool "a zeroed node is not null" isNull
     ]

@@ -12,8 +12,8 @@ import Data.ByteString qualified as BS
 import Foreign.C.Types (CBool)
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Marshal.Array (allocaArray, peekArray)
-import Foreign.Marshal.Utils (with)
-import Foreign.Ptr (Ptr, castPtr, nullPtr)
+import Foreign.Marshal.Utils (toBool, with)
+import Foreign.Ptr (castPtr)
 import Foreign.Storable (Storable (..))
 import Ghostty.FFI.Color
 import Ghostty.FFI.Render
@@ -85,7 +85,7 @@ tests =
           rowValue next GhosttyRowDataWrapContinuation >>= (@?= (1 :: CBool)),
       testCase "an image iterator over a screen with no images is empty" $
         withRendered 10 3 "text" $ \_ rs ->
-          bracket (new ghosttyRenderStateImageIteratorNew) ghosttyRenderStateImageIteratorFree $ \it -> do
+          bracket (newHandle ghosttyRenderStateImageIteratorNew) ghosttyRenderStateImageIteratorFree $ \it -> do
             with it $ \p -> ghosttyRenderStateGet rs GhosttyRenderStateDataImageIterator (castPtr p) >>= (@?= GhosttySuccess)
             ghosttyRenderStateImageIteratorNext it >>= (@?= 0)
     ]
@@ -96,53 +96,36 @@ tests =
 withRendered :: Word16 -> Word16 -> ByteString -> (GhosttyTerminal -> GhosttyRenderState -> Assertion) -> Assertion
 withRendered cols rows bytes act =
   withTerminal cols rows $ \t ->
-    bracket (new ghosttyRenderStateNew) ghosttyRenderStateFree $ \rs -> do
+    bracket (newHandle ghosttyRenderStateNew) ghosttyRenderStateFree $ \rs -> do
       feed t bytes
       ghosttyRenderStateUpdate rs t >>= (@?= GhosttySuccess)
       act t rs
 
--- | A handle from a @…_new(allocator, &out)@ constructor.
-new :: (Storable h) => (Ptr a -> Ptr h -> IO GhosttyResult) -> IO h
-new mk = alloca $ \p -> do
-  mk nullPtr p >>= (@?= GhosttySuccess)
-  peek p
-
 -- | A row iterator filled from the render state.
 withRows :: GhosttyRenderState -> (GhosttyRenderStateRowIterator -> IO a) -> IO a
 withRows rs act =
-  bracket (new ghosttyRenderStateRowIteratorNew) ghosttyRenderStateRowIteratorFree $ \it -> do
-    with it $ \p -> ghosttyRenderStateGet rs GhosttyRenderStateDataRowIterator (castPtr p) >>= (@?= GhosttySuccess)
+  bracket (newHandle ghosttyRenderStateRowIteratorNew) ghosttyRenderStateRowIteratorFree $ \it -> do
+    withValue it (ghosttyRenderStateGet rs GhosttyRenderStateDataRowIterator . castPtr)
     act it
 
 -- | A cell iterator filled from the iterator's current row.
 withCells :: GhosttyRenderStateRowIterator -> (GhosttyRenderStateRowCells -> IO a) -> IO a
 withCells it act =
-  bracket (new ghosttyRenderStateRowCellsNew) ghosttyRenderStateRowCellsFree $ \cs -> do
-    with cs $ \p -> ghosttyRenderStateRowGet it GhosttyRenderStateRowDataCells (castPtr p) >>= (@?= GhosttySuccess)
+  bracket (newHandle ghosttyRenderStateRowCellsNew) ghosttyRenderStateRowCellsFree $ \cs -> do
+    withValue cs (ghosttyRenderStateRowGet it GhosttyRenderStateRowDataCells . castPtr)
     act cs
 
 -- | The rows' text, through each cell's UTF-8 grapheme, trailing blanks
 -- dropped.
 rowTexts :: GhosttyRenderState -> IO [ByteString]
 rowTexts rs = withRows rs $ \it ->
-  let go acc =
-        ghosttyRenderStateRowIteratorNext it >>= \case
-          0 -> pure (reverse acc)
-          _ -> withCells it (cellsOf []) >>= \row -> go (mconcat row : acc)
-      cellsOf acc cs =
-        ghosttyRenderStateRowCellsNext cs >>= \case
-          0 -> pure (reverse acc)
-          _ -> cellUtf8 cs >>= \b -> cellsOf (b : acc) cs
-   in go []
+  unfoldWhileM (toBool <$> ghosttyRenderStateRowIteratorNext it) $
+    withCells it $ \cs ->
+      mconcat <$> unfoldWhileM (toBool <$> ghosttyRenderStateRowCellsNext cs) (cellUtf8 cs)
 
 -- | The positions of the rows that need a redraw.
 dirtyRows :: GhosttyRenderStateRowIterator -> IO [Word16]
-dirtyRows it = alloca $ \yp ->
-  let go acc =
-        ghosttyRenderStateRowIteratorNextDirty it yp >>= \case
-          0 -> pure (reverse acc)
-          _ -> peek yp >>= \y -> go (y : acc)
-   in go []
+dirtyRows it = alloca $ \yp -> unfoldWhileM (toBool <$> ghosttyRenderStateRowIteratorNextDirty it yp) (peek yp)
 
 -- | The current cell's grapheme as UTF-8, through a 'GhosttyBuffer'.
 cellUtf8 :: GhosttyRenderStateRowCells -> IO ByteString
@@ -153,16 +136,16 @@ cellUtf8 cs = allocaArray 16 $ \buf ->
     BS.packCStringLen (castPtr buf, fromIntegral n)
 
 getState :: (Storable a) => GhosttyRenderState -> GhosttyRenderStateData -> IO a
-getState rs k = alloca $ \p -> ghosttyRenderStateGet rs k (castPtr p) >>= (@?= GhosttySuccess) >> peek p
+getState rs k = outValue (ghosttyRenderStateGet rs k . castPtr)
 
 getRow :: (Storable a) => GhosttyRenderStateRowIterator -> GhosttyRenderStateRowData -> IO a
-getRow it k = alloca $ \p -> ghosttyRenderStateRowGet it k (castPtr p) >>= (@?= GhosttySuccess) >> peek p
+getRow it k = outValue (ghosttyRenderStateRowGet it k . castPtr)
 
 getCell :: (Storable a) => GhosttyRenderStateRowCells -> GhosttyRenderStateRowCellsData -> IO a
-getCell cs k = alloca $ \p -> ghosttyRenderStateRowCellsGet cs k (castPtr p) >>= (@?= GhosttySuccess) >> peek p
+getCell cs k = outValue (ghosttyRenderStateRowCellsGet cs k . castPtr)
 
 cellValue :: (Storable a) => GhosttyCell -> GhosttyCellData -> IO a
-cellValue c k = alloca $ \p -> ghosttyCellGet c k (castPtr p) >>= (@?= GhosttySuccess) >> peek p
+cellValue c k = outValue (ghosttyCellGet c k . castPtr)
 
 rowValue :: (Storable a) => GhosttyRow -> GhosttyRowData -> IO a
-rowValue r k = alloca $ \p -> ghosttyRowGet r k (castPtr p) >>= (@?= GhosttySuccess) >> peek p
+rowValue r k = outValue (ghosttyRowGet r k . castPtr)

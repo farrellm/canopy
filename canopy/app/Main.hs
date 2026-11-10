@@ -5,4 +5,6 @@ import Canopy (components)
 import Effectful (runEff)
 
 main :: IO ()
-main = runEff components >>= mapM_ (\(name, v) -> putTextLn (name <> " " <> v))
+main = do
+  cs <- runEff components
+  for_ cs $ \(name, v) -> putTextLn (name <> " " <> v)
