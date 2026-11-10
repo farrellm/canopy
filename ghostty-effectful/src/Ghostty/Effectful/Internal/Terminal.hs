@@ -34,6 +34,7 @@ module Ghostty.Effectful.Internal.Terminal
 
     -- * Tracked references
     trackPoint,
+    registerRef,
     untrackRef,
     refCoordinate,
     moveTrackedRef,
@@ -41,7 +42,7 @@ module Ghostty.Effectful.Internal.Terminal
   )
 where
 
-import Control.Exception (onException)
+import Control.Exception (mask_, onException)
 import Data.IntMap.Strict qualified as IntMap
 import Foreign.C.Types (CSize)
 import Foreign.Marshal.Utils (toBool, with)
@@ -264,11 +265,18 @@ unlessPastHistory h p past = ifM (pastHistory h p) (pure past)
 -- header's @GHOSTTY_INVALID_VALUE@ for a valid terminal, or is past the
 -- scrollback ('pastHistory').
 trackPoint :: Terminal s -> GhosttyPoint -> IO (Maybe (TrackedRef s))
-trackPoint t p = unlessPastHistory t.handle p Nothing $ do
-  made <-
+trackPoint t p =
+  unlessPastHistory t.handle p Nothing . registerRef t $
     with p $ \pp ->
       optionalVia ResultInvalidValue (CallSite "ghostty_terminal_grid_ref_track") $
         ghosttyTerminalGridRefTrack t.handle pp
+
+-- | Make a tracked reference, if the action makes one, and register it with
+-- the terminal and count it. Both happen masked, so no asynchronous
+-- exception falls between them and leaks the reference (regression 17).
+registerRef :: Terminal s -> IO (Maybe GhosttyTrackedGridRef) -> IO (Maybe (TrackedRef s))
+registerRef t mk = mask_ $ do
+  made <- mk
   forM made $ \ref -> do
     -- Owner thread only (§4.6, as in 'closeTerminal'), so the key is not
     -- taken twice.

@@ -3,9 +3,11 @@
 -- terminal, never twice.
 module Test.Ghostty.Effectful.TrackedRef (tests) where
 
+import Control.Exception (MaskingState (..), getMaskingState)
 import Data.ByteString qualified as BS
 import Effectful (Eff, IOE)
 import Ghostty.Effectful (Ghostty)
+import Ghostty.Effectful.Internal.Terminal (registerRef)
 import Ghostty.Effectful.Point (Coord (..), Point (..))
 import Ghostty.Effectful.Terminal
 import Test.Ghostty.Effectful.Support (config, expectJust, ghostty, withFresh)
@@ -16,7 +18,17 @@ tests :: TestTree
 tests =
   testGroup
     "TrackedRef"
-    [ testCase "a reference reads back its point" $ do
+    [ -- Regression 17 (DESIGN.md §4.2): a tracked reference was made, then
+      -- registered, unmasked, so an asynchronous exception between the two
+      -- leaked it. 'trackPoint' now does both through the helper checked
+      -- here.
+      testCase "regression 17: a reference is made and registered masked" $ do
+        r <- withFresh $ \t -> liftIO $ do
+          state <- newIORef Unmasked
+          made <- registerRef t (Nothing <$ (writeIORef state =<< getMaskingState))
+          (isJust made,) <$> readIORef state
+        r @?= (False, MaskedInterruptible),
+      testCase "a reference reads back its point" $ do
         r <- withFresh $ \t -> do
           ref <- tracked t (Point 5 3 :: Point 'Active)
           (,,) <$> refPoint @'Active ref <*> refPoint @'Grid ref <*> refAlive ref

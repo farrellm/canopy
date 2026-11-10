@@ -286,6 +286,9 @@ Written as changes land, not at release (DESIGN.md §2.9).
   `Frame`, `Row`, `KeyEncoder` and `MouseEncoder` declare their region roles nominal, as `ST`
   does, and `forgetRegion` rebuilds the record rather than coercing it. Regression 14 checks, with
   deferred type errors, that each coercion no longer type-checks.
+- Fixed: `track` made the tracked reference and registered it with its terminal unmasked, so an
+  asynchronous exception between the two leaked the reference (on master before this branch).
+  Both now happen masked, in `Internal.Terminal.registerRef`, which regression 17 checks.
 - `ghostty-effectful-bench` has a `Render` group (DESIGN.md §12.3): full frames of every cell on
   three screens, cursor and colours, and 24 frames of one new line each, gated like the feed.
   Measuring it found the refactor's per-cell readers 20% slower than before. The cause was local
