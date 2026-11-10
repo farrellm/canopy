@@ -48,7 +48,7 @@ data Separator
     Semicolon
   | -- | @:@
     Colon
-  deriving stock (Eq, Show, Enum, Bounded)
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
 
 -- | One attribute an SGR sequence sets. The constructors are the header's
 -- @GHOSTTY_SGR_ATTR_*@ names.

@@ -84,7 +84,7 @@ data Dirty
     PartlyDirty
   | -- | the whole frame, every row
     FullyDirty
-  deriving stock (Eq, Show, Enum, Bounded)
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
 
 -- | The cursor.
 data Cursor = Cursor
@@ -170,7 +170,7 @@ data RowPrompt
     PromptLine
   | -- | a continuation line of a prompt
     PromptContinuation
-  deriving stock (Eq, Show, Enum, Bounded)
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
 
 -- | A row's identity: the same row, moved, has the same one in a later
 -- frame; one changed in place, pruned or scrolled out of the frame gets a

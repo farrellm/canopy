@@ -8,7 +8,7 @@ where
 
 import Effectful (Eff, IOE, runEff)
 import Ghostty.Effectful (Ghostty, runGhostty)
-import Ghostty.Effectful.Internal.Terminal (Extent (..))
+import Ghostty.Effectful.Internal.Size (Extent (..))
 import Ghostty.Effectful.Terminal (GridSize (..), TerminalConfig, terminalConfig)
 import Test.Tasty.HUnit (assertFailure)
 

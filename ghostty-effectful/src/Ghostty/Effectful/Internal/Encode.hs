@@ -176,7 +176,7 @@ data OptionAsAlt
     OptionLeftAlt
   | -- | the right one
     OptionRightAlt
-  deriving stock (Eq, Show, Enum, Bounded)
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
 
 -- | @ghostty_key_encoder_new@ and @ghostty_key_event_new@, with the options
 -- set. Either handle is freed if the other cannot be made.
@@ -185,7 +185,7 @@ openKeyEncoder o = do
   encoder <- newHandle (CallSite "ghostty_key_encoder_new") ghosttyKeyEncoderNew
   event <- newHandle (CallSite "ghostty_key_event_new") ghosttyKeyEventNew `onException` ghosttyKeyEncoderFree encoder
   let enc = KeyEncoder {encoder, event}
-  enc <$ setKeyOptions enc o
+  enc <$ setKeyOptions enc o `onException` closeKeyEncoder enc
 
 -- | Free the event and the encoder.
 closeKeyEncoder :: KeyEncoder k -> IO ()
@@ -500,7 +500,7 @@ data MouseTracking
     ButtonTracking
   | -- | and every motion (mode 1003)
     AnyTracking
-  deriving stock (Eq, Show, Enum, Bounded)
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
 
 -- | How mouse events are written.
 data MouseFormat
@@ -514,7 +514,7 @@ data MouseFormat
     UrxvtFormat
   | -- | SGR in pixels (mode 1016)
     SgrPixelsFormat
-  deriving stock (Eq, Show, Enum, Bounded)
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
 
 -- | The surface a mouse moves over, in pixels. A cell is never zero
 -- pixels along either axis, which the library would ignore.
@@ -568,7 +568,7 @@ openMouseEncoder o = do
   encoder <- newHandle (CallSite "ghostty_mouse_encoder_new") ghosttyMouseEncoderNew
   event <- newHandle (CallSite "ghostty_mouse_event_new") ghosttyMouseEventNew `onException` ghosttyMouseEncoderFree encoder
   let enc = MouseEncoder {encoder, event}
-  enc <$ setMouseOptions enc o
+  enc <$ setMouseOptions enc o `onException` closeMouseEncoder enc
 
 -- | Free the event and the encoder.
 closeMouseEncoder :: MouseEncoder m -> IO ()
@@ -682,7 +682,7 @@ data Focus
     FocusGained
   | -- | it lost focus (@CSI O@)
     FocusLost
-  deriving stock (Eq, Show, Enum, Bounded)
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
 
 -- | @ghostty_focus_encode@.
 encodeFocusEvent :: Focus -> IO ByteString
@@ -703,7 +703,7 @@ data SizeReportStyle
   | -- | the screen in cells, the answer to @CSI 19 t@: @CSI 9 ; rows ; cols t@.
     -- The physical screen is not known, so this is the text area too.
     ReportScreenCells
-  deriving stock (Eq, Show, Enum, Bounded)
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
 
 -- | @ghostty_size_report_encode@, through its by-value shim (§3.3).
 encodeSizeReportOf :: SizeReportStyle -> GridSize -> CellPixels -> IO ByteString
@@ -729,7 +729,7 @@ data ModeFamily
     AnsiMode
   | -- | set with @CSI ? n h@
     DecPrivateMode
-  deriving stock (Eq, Show, Enum, Bounded)
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
 
 -- | The mode of the given number, if it fits the header's 15 bits.
 modeNumber :: ModeFamily -> Word16 -> Maybe ModeNumber
@@ -752,7 +752,7 @@ data ModeReport
     ModePermanentlySet
   | -- | it is reset and cannot be changed
     ModePermanentlyReset
-  deriving stock (Eq, Show, Enum, Bounded)
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
 
 -- | @ghostty_mode_report_encode@: @CSI ? n ; s $ y@ for a DEC private mode,
 -- @CSI n ; s $ y@ for an ANSI one.
@@ -789,7 +789,7 @@ data Bracketing
     Bracketed
   | -- | not framed: line feeds become carriage returns
     Unbracketed
-  deriving stock (Eq, Show, Enum, Bounded)
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
 
 -- | Whether to paste text that could inject commands.
 data PasteSafety
@@ -797,7 +797,7 @@ data PasteSafety
     RefuseUnsafe
   | -- | paste it
     AllowUnsafe
-  deriving stock (Eq, Show, Enum, Bounded)
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
 
 -- | @ghostty_paste_is_safe@: whether the text holds nothing that could
 -- inject commands in any mode: no line break, no bracketed paste

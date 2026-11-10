@@ -14,7 +14,8 @@ import Foreign.Ptr (castFunPtrToPtr, freeHaskellFunPtr)
 import Ghostty.Effectful (Ghostty)
 import Ghostty.Effectful.Event
 import Ghostty.Effectful.Internal.Callbacks (Pending (..))
-import Ghostty.Effectful.Internal.Terminal (Extent (..), Terminal (..))
+import Ghostty.Effectful.Internal.Size (Extent (..))
+import Ghostty.Effectful.Internal.Terminal (Terminal (..))
 import Ghostty.Effectful.Mode (ModeKey (..))
 import Ghostty.Effectful.Point (Point (..))
 import Ghostty.Effectful.Terminal

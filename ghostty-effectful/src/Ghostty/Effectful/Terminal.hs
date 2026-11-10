@@ -46,18 +46,13 @@ import Ghostty.Effectful.Internal.Convert (fromCoordinate, pointTag, toPoint)
 import Ghostty.Effectful.Internal.Effect (Ghostty, Handles (..), countOf, ownedIO, scoped)
 import Ghostty.Effectful.Internal.Feed (feedTerminal, resetTerminal, resizeTerminal)
 import Ghostty.Effectful.Internal.Keys (getData, setOption)
+import Ghostty.Effectful.Internal.Size (CellPixels (..), Extent, GridSize (..), extent, fromExtent, noCellPixels)
 import Ghostty.Effectful.Internal.Terminal
-  ( CellPixels (..),
-    Extent,
-    GridSize (..),
-    Terminal (..),
+  ( Terminal (..),
     TerminalConfig (..),
     TrackedRef (..),
     closeTerminal,
-    extent,
-    fromExtent,
     moveTrackedRef,
-    noCellPixels,
     openTerminal,
     refCoordinate,
     refHasValue,

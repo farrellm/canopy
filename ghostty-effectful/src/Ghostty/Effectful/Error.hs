@@ -1,5 +1,3 @@
-{-# LANGUAGE DeriveAnyClass #-}
-
 -- | What can go wrong in a call to libghostty-vt (DESIGN.md §4.7).
 --
 -- Errors a caller can act on are values in the result of the one operation
@@ -57,7 +55,8 @@ data GhosttyError
     -- binding names every value the pinned one has (DESIGN.md §3.3, §3.4).
     UnknownEnum CallSite Text Integer
   deriving stock (Eq, Show)
-  deriving anyclass (Exception)
+
+instance Exception GhosttyError
 
 -- | The linked libghostty-vt is not the build this binding was generated
 -- against (DESIGN.md §3.4).

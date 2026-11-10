@@ -17,14 +17,6 @@ module Ghostty.Effectful.Internal.Terminal
     Terminal (..),
     TrackedRef (..),
 
-    -- * Sizes
-    Extent (..),
-    extent,
-    fromExtent,
-    GridSize (..),
-    CellPixels (..),
-    noCellPixels,
-
     -- * Configuration
     TerminalConfig (..),
     terminalConfig,
@@ -62,7 +54,7 @@ import Ghostty.Effectful.Internal.Callbacks
     releaseCallbacks,
   )
 import Ghostty.Effectful.Internal.Error (newHandle, optionalVia, outVia, succeedsUnless)
-import Ghostty.Effectful.Internal.Size (CellPixels (..), Extent (..), GridSize (..), extent, fromExtent, noCellPixels)
+import Ghostty.Effectful.Internal.Size (CellPixels (..), GridSize (..), fromExtent, noCellPixels)
 import Ghostty.Effectful.Terminal.Keys (ColorScheme, DeviceAttributes, defaultDeviceAttributes)
 import Ghostty.FFI.GridRef
   ( GhosttyTrackedGridRef,

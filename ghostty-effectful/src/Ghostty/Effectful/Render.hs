@@ -51,6 +51,7 @@ import Ghostty.Effectful.Internal.Effect (Ghostty, Handles (..), countOf, owned,
 import Ghostty.Effectful.Internal.Render
   ( Frame (..),
     FrameInfo (..),
+    Opened (..),
     RenderState,
     Row (..),
     abandonFrame,
@@ -95,12 +96,11 @@ withFrame rs k = do
   -- Masked between opening the frame and arming its close, so an
   -- asynchronous exception cannot leave the frame marked open for good.
   unsafeSeqUnliftIO $ \unlift -> mask $ \restore -> do
-    (info, outer) <- beginFrame rs
-    let f = Frame {state = rs, info}
-    if not outer
-      then restore (unlift (k f))
-      else do
-        a <- restore (unlift (k f)) `onException` abandonFrame rs
+    let run info = restore (unlift (k Frame {state = rs, info}))
+    beginFrame rs >>= \case
+      Nested info -> run info
+      Outermost info -> do
+        a <- run info `onException` abandonFrame rs
         a <$ endFrame rs
 
 -- | Whether the frame is the one captured when a synchronized-output hold

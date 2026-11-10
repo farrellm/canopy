@@ -37,6 +37,7 @@ import Effectful.Dispatch.Static (SideEffects (..), StaticRep, evalStaticRep, ge
 import Foreign.C.ConstPtr (ConstPtr (..))
 import Foreign.C.Types (CBool)
 import Foreign.Marshal.Alloc (alloca)
+import Foreign.Marshal.Utils (toBool)
 import Foreign.Ptr (Ptr, castPtr)
 import Foreign.Storable (peek)
 import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), VersionMismatch (..))
@@ -145,18 +146,17 @@ linkedVersion :: IO (Maybe Text)
 linkedVersion = do
   ConstPtr p <- ghosttyVersion
   version <- decodeUtf8 <$> BS.packCString p
-  missing <- fmap concat . sequence <$> traverse absent optionalFeatures
-  pure $ (\ms -> T.unwords (version : concatMap (\m -> ["without", m]) ms)) <$> missing
+  missing <- traverse absent optionalFeatures
+  pure $ T.unwords . (version :) . concatMap (\m -> ["without", m]) . catMaybes <$> sequence missing
   where
-    -- The feature's name if the library was built without it.
-    absent :: (GhosttyBuildInfo, Text) -> IO (Maybe [Text])
+    -- Whether the library was built with the feature: 'Nothing' if it
+    -- would not say, else the feature's name if it was built without it.
+    absent :: (GhosttyBuildInfo, Text) -> IO (Maybe (Maybe Text))
     absent (key, name) = alloca $ \(b :: Ptr CBool) -> do
       r <- ghosttyBuildInfo key (castPtr b)
       if r /= GhosttySuccess
         then pure Nothing
-        else do
-          present <- peek b
-          pure (Just [name | present == 0])
+        else Just . (name <$) . guard . not . toBool <$> peek b
 
 -- | Every optional feature @-Dvt-features@ can leave out, with its build-info
 -- key and its name there: the nine @FEATURE_*@ keys, and @KITTY_GRAPHICS@,

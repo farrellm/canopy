@@ -24,6 +24,7 @@ module Ghostty.Effectful.Internal.Render
     RenderState (..),
     Frame (..),
     FrameInfo (..),
+    Opened (..),
     Row (..),
 
     -- * Render states
@@ -58,7 +59,7 @@ import Foreign.Ptr (Ptr, castPtr)
 import Foreign.Storable (Storable (..))
 import Ghostty.Effectful.Cell (Cell (..), CellWidth (..), Hyperlink (..), SemanticContent (..))
 import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), ResultCode (..))
-import Ghostty.Effectful.Internal.Callbacks (captureAttach, captureDetach, captureFraming, captureHeld)
+import Ghostty.Effectful.Internal.Callbacks (Framing (..), captureAttach, captureDetach, captureFraming, captureHeld)
 import Ghostty.Effectful.Internal.Convert (emptyRef, enumSite, fromCursorStyle, fromPalette, fromRgb, fromStyle, readPalette, toPoint, unfoldWhileM, unknownEnum, withSize)
 import Ghostty.Effectful.Internal.Error (bytesVia, expectSuccess, newHandle, optionalVia, outVia)
 import Ghostty.Effectful.Internal.Terminal (Terminal (..), forgetRegion)
@@ -111,6 +112,13 @@ data Frame s f = Frame
     info :: FrameInfo
   }
 
+-- | A frame just opened, and the moment it describes.
+data Opened
+  = -- | the outermost frame of its render state, which closes it
+    Outermost FrameInfo
+  | -- | a frame inside another of the same render state: that frame
+    Nested FrameInfo
+
 -- | A row of a frame.
 data Row s f = Row
   { -- | the frame
@@ -158,11 +166,11 @@ closeRenderState rs = do
 -- | Open a frame: update the render state from the terminal, unless it holds
 -- a captured frame whose hold is still on. A frame opened inside another of
 -- the same render state is that frame: it neither updates nor, at its end,
--- cleans. Returns the frame's moment, and whether it is the outermost.
-beginFrame :: RenderState s -> IO (FrameInfo, Bool)
+-- cleans.
+beginFrame :: RenderState s -> IO Opened
 beginFrame rs =
   readIORef rs.open >>= \case
-    Just info -> pure (info, False)
+    Just info -> pure (Nested info)
     Nothing -> do
       held <- captureHeld rs.terminal.installed rs.handle
       unless held $
@@ -171,8 +179,8 @@ beginFrame rs =
       w <- readIORef rs.terminal.writes
       let info = FrameInfo {held, writes = w}
       writeIORef rs.open (Just info)
-      captureFraming rs.terminal.installed rs.handle True
-      pure (info, True)
+      captureFraming rs.terminal.installed rs.handle FrameOpen
+      pure (Outermost info)
 
 -- | Close the outermost frame, which ran to its end: its changes are
 -- consumed (@ghostty_render_state_clean@), so the next frame reports only
@@ -187,7 +195,7 @@ endFrame rs = do
 abandonFrame :: RenderState s -> IO ()
 abandonFrame rs = do
   writeIORef rs.open Nothing
-  captureFraming rs.terminal.installed rs.handle False
+  captureFraming rs.terminal.installed rs.handle FrameClosed
 
 -- | Fill the row iterator from the render state.
 fill :: RenderState s -> IO ()

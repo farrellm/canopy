@@ -269,12 +269,14 @@ Written as changes land, not at release (DESIGN.md §2.9).
   `Ghostty.Effectful.Event`. Breaking, in the public API:
   - `encodePaste` takes `Bracketing` (`Bracketed` or `Unbracketed`) rather than a `Bool`.
   - `modeNumber` takes `ModeFamily` (`AnsiMode` or `DecPrivateMode`) rather than a `Bool`.
+  - The public enums derive `Ord`, and `GhosttyError`'s `Exception` instance is written out.
 - Fixed: six calls with a documented refusal switched on their result by hand. Four of them (a
   tracked reference's point, a grid reference for formatting, an OSC datum, and a cell's colour,
   grapheme or hyperlink URI) threw `Invariant` for running out of memory where every other call
   throws `OutOfMemory`. Each now goes through the shared helper, which regression 13 checks. The
   render-hold callback's function pointer is also registered masked, like the others, so an
-  asynchronous exception can no longer leak it.
+  asynchronous exception can no longer leak it. A key or mouse encoder whose options cannot be set is freed
+  rather than leaked; no option value the types allow is refused, so neither has a test case.
 
 ### M0: infrastructure
 

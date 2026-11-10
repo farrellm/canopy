@@ -94,7 +94,7 @@ data Format
     Vt
   | -- | HTML with inline styles.
     Html
-  deriving stock (Eq, Show, Enum, Bounded)
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
 
 -- | How to format.
 data FormatOptions = FormatOptions

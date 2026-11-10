@@ -117,7 +117,7 @@ data PromptKind
   | -- | another prompt for an extra line of input (bash's PS2); shells
     -- differ between this and 'ContinuationPrompt'
     SecondaryPrompt
-  deriving stock (Eq, Show, Enum, Bounded)
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
 
 -- | A clipboard.
 data ClipboardLocation
@@ -127,7 +127,7 @@ data ClipboardLocation
     SelectionClipboard
   | -- | the primary selection
     PrimaryClipboard
-  deriving stock (Eq, Show, Enum, Bounded)
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
 
 -- | One representation of a clipboard value.
 data ClipboardContent = ClipboardContent
@@ -159,7 +159,7 @@ data ProgressState
     ProgressIndeterminate
   | -- | paused progress
     ProgressPause
-  deriving stock (Eq, Show, Enum, Bounded)
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
 
 -- | A program status report (OSC 7501). The terminal keeps no record of
 -- these; a report replaces its record whole.
@@ -196,7 +196,7 @@ data ProgramState
     StatusError
   | -- | remove this record and those beneath it (all, for the root)
     StatusClear
-  deriving stock (Eq, Show, Enum, Bounded)
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
 
 -- | What a blocked program needs.
 data ProgramNeed
@@ -206,7 +206,7 @@ data ProgramNeed
     NeedQuestion
   | -- | a credential
     NeedAuth
-  deriving stock (Eq, Show, Enum, Bounded)
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
 
 -- | A sequence the library does not implement.
 data UnsupportedSequence = UnsupportedSequence
@@ -236,7 +236,7 @@ data OscTerminator
     TerminatedBySt
   | -- | BEL
     TerminatedByBel
-  deriving stock (Eq, Show, Enum, Bounded)
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
 
 -- | A requested window size, in cells; 'Nothing' keeps that axis.
 data WindowSize = WindowSize

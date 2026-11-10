@@ -29,8 +29,7 @@ module Ghostty.Effectful.Internal.Callbacks
 
     -- * Answers
     Answers (..),
-    Installed (..),
-    GveffUserdata,
+    Installed,
     installCallbacks,
     releaseCallbacks,
     setEnquiryAnswer,
@@ -42,6 +41,7 @@ module Ghostty.Effectful.Internal.Callbacks
     captureHeld,
     captureRelease,
     captureFraming,
+    Framing (..),
   )
 where
 
@@ -340,11 +340,15 @@ captureHeld i rs = toBool <$> gveffCaptureHeld i.userdata rs
 captureRelease :: Installed -> IO ()
 captureRelease i = gveffCaptureRelease i.userdata
 
--- | Mark a frame of a render state open ('True') or closed. A hold that
--- begins while one is open does not capture into it, since its rows are
--- being read and an update would invalidate them.
-captureFraming :: Installed -> GhosttyRenderState -> Bool -> IO ()
-captureFraming i rs = gveffCaptureFraming i.userdata rs . fromBool
+-- | Whether a render state has a frame open.
+data Framing = FrameOpen | FrameClosed
+  deriving stock (Eq, Show)
+
+-- | Mark a frame of a render state open or closed. A hold that begins
+-- while one is open does not capture into it, since its rows are being
+-- read and an update would invalidate them.
+captureFraming :: Installed -> GhosttyRenderState -> Framing -> IO ()
+captureFraming i rs = gveffCaptureFraming i.userdata rs . fromBool . (== FrameOpen)
 
 -- * The callbacks
 
