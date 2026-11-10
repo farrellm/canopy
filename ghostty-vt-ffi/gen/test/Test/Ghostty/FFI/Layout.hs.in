@@ -8,7 +8,7 @@
 -- @scripts/check-layout-rows.py@ fails if a bound type has no row.
 module Test.Ghostty.FFI.Layout (tests) where
 
-import Data.Aeson (FromJSON (..), withObject, (.:), (.:?))
+import Data.Aeson (FromJSON (..), withObject, (.!=), (.:), (.:?))
 import Data.Aeson qualified as Aeson
 import Data.ByteString qualified as BS
 import Data.Map.Strict qualified as Map
@@ -45,8 +45,9 @@ import Ghostty.FFI.Style
 import Ghostty.FFI.Terminal
 import Ghostty.FFI.Terminal.Callbacks
 import Ghostty.FFI.Types
+import Numeric (showHex)
 import Test.Tasty (TestTree, testGroup, withResource)
-import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
+import Test.Tasty.HUnit (assertEqual, assertFailure, testCase, (@?=))
 
 -- | A struct: its descriptor, and a sample value of its 'Storable' type with
 -- every field non-zero and not all ones, for the round trip.
@@ -269,8 +270,7 @@ structCase getManifest (StructRow s sample) =
         -- Every field of the library's struct, and no other, with its place.
         Map.keysSet entry.fields @?= Set.fromList (map (.name) s.fields)
         for_ s.fields $ \f ->
-          (f.name, (\jf -> (jf.offset, jf.size)) <$> Map.lookup f.name entry.fields)
-            @?= (f.name, Just (f.offset, f.size)),
+          assertEqual (toString f.name) (Just (f.offset, f.size)) ((\jf -> (jf.offset, jf.size)) <$> Map.lookup f.name entry.fields),
       testCase "Storable agrees with the descriptor" $ do
         (sizeOf sample, alignment sample) @?= (s.size, s.align)
         -- Over zeroed and over all-ones memory, so a field that poke skips
@@ -280,7 +280,7 @@ structCase getManifest (StructRow s sample) =
             fillBytes p fill s.size
             poke (castPtr p) sample
             back <- peek (castPtr p)
-            (fill, back) @?= (fill, sample)
+            assertEqual ("over 0x" <> showHex fill "") sample back
     ]
 
 enumCase :: IO Manifest -> EnumRow -> TestTree
@@ -293,22 +293,24 @@ enumCase getManifest (EnumRow e isNamed) =
         entry.size @?= Just e.size
         for_ e.values $ \(cName, v) -> do
           let key = T.stripPrefix (fromMaybe "" entry.prefix) cName
-          (cName, (`Map.lookup` entry.values) =<< key) @?= (cName, Just v),
+          assertEqual (toString cName) (Just v) ((`Map.lookup` entry.values) =<< key),
       -- Exhaustive at the pin: a value the header gains at a bump fails here
       -- until it has a pattern, rather than arriving as Unknown unnoticed.
       testCase "names every value the library has" $ do
         entry <- lookupType e.name =<< getManifest
-        let missing =
+        let named = Set.fromList (map snd e.values)
+            missing =
               [ key
               | (key, v) <- Map.toList entry.values,
                 not ("MAX_VALUE" `T.isSuffixOf` key),
-                v `notElem` map snd e.values
+                v `Set.notMember` named
               ]
         missing @?= [],
       testCase "the Unknown view excludes exactly the named values" $ do
         entry <- lookupType e.name =<< getManifest
+        let named = Set.fromList (map snd e.values)
         for_ (Map.toList entry.values) $ \(key, v) ->
-          (key, isNamed v) @?= (key, v `elem` map snd e.values)
+          assertEqual (toString key) (v `Set.member` named) (isNamed v)
     ]
 
 -- * The manifest
@@ -335,9 +337,9 @@ instance FromJSON Entry where
       <$> o .: "kind"
       <*> o .:? "size"
       <*> o .:? "align"
-      <*> (fromMaybe mempty <$> o .:? "fields")
+      <*> o .:? "fields" .!= mempty
       <*> o .:? "prefix"
-      <*> (fromMaybe mempty <$> o .:? "values")
+      <*> o .:? "values" .!= mempty
 
 data Field = Field {offset :: Int, size :: Int}
 
