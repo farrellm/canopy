@@ -238,10 +238,11 @@ encodeKeyEvent enc e = do
       encode = encodeVia (CallSite "ghostty_key_encoder_encode") (ghosttyKeyEncoderEncode enc.encoder enc.event)
       setText = setEvent "ghostty_key_event_set_utf8" . ghosttyKeyEventSetUtf8 enc.event
   withString utf8 $ \p -> do
+    -- An empty string clears the text.
     setText p
     -- The event keeps the pointer; leave none behind that outlives it,
-    -- even when the encode throws. An empty string clears the text.
-    encode `finally` with emptyString setText
+    -- even when the encode throws. Empty text left nothing to clear.
+    if BS.null utf8 then encode else encode `finally` with emptyString setText
 
 -- | The binding's key.
 keyCode :: Key -> GhosttyKey

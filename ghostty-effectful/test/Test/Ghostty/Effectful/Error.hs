@@ -16,8 +16,8 @@ tests :: TestTree
 tests =
   testGroup
     "Error"
-    [ -- Regression 13 (DESIGN.md §4.7): six calls with a documented refusal
-      -- switched on their result by hand, and four of them threw
+    [ -- Regression 13 (DESIGN.md §4.7): seven calls with a documented refusal
+      -- switched on their result by hand, and five of them threw
       -- 'Invariant' for running out of memory. Each now goes through the
       -- helper checked here.
       testCase "regression 13: running out of memory is OutOfMemory, whatever else a call may refuse" $ do

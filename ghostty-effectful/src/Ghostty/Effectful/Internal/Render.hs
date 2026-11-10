@@ -284,24 +284,24 @@ rowKey = \case
 -- failure is 'Invariant', since a constructor is a key the header names.
 getFrameData :: RenderState s -> FrameData a -> IO a
 getFrameData rs key = case key of
-  RenderCols -> fetch
-  RenderRows -> fetch
-  RenderDirty -> fetch >>= dirty
-  RenderColorBackground -> fromRgb <$> fetch
-  RenderColorForeground -> fromRgb <$> fetch
-  RenderColorCursor -> whenHas RenderColorCursorHasValue (fromRgb <$> fetch)
-  RenderColorCursorHasValue -> flag
-  RenderColorPalette -> readPalette site (ghosttyRenderStateGet rs.handle k . castPtr)
-  RenderCursorVisualStyle -> fetch >>= fromCursorStyle site
-  RenderCursorVisible -> flag
-  RenderCursorBlinking -> flag
-  RenderCursorPasswordInput -> flag
-  RenderCursorViewportHasValue -> flag
-  RenderCursorViewportX -> whenHas RenderCursorViewportHasValue fetch
-  RenderCursorViewportY -> whenHas RenderCursorViewportHasValue fetch
-  RenderCursorViewportWideTail -> whenHas RenderCursorViewportHasValue flag
+  RenderCols -> frameValue r
+  RenderRows -> frameValue r
+  RenderDirty -> frameValue r >>= dirty
+  RenderColorBackground -> fromRgb <$> frameValue r
+  RenderColorForeground -> fromRgb <$> frameValue r
+  RenderColorCursor -> whenHas rs RenderColorCursorHasValue (fromRgb <$> frameValue r)
+  RenderColorCursorHasValue -> frameFlag r
+  RenderColorPalette -> readPalette site (frameGet r)
+  RenderCursorVisualStyle -> frameValue r >>= fromCursorStyle site
+  RenderCursorVisible -> frameFlag r
+  RenderCursorBlinking -> frameFlag r
+  RenderCursorPasswordInput -> frameFlag r
+  RenderCursorViewportHasValue -> frameFlag r
+  RenderCursorViewportX -> whenHas rs RenderCursorViewportHasValue (frameValue r)
+  RenderCursorViewportY -> whenHas rs RenderCursorViewportHasValue (frameValue r)
+  RenderCursorViewportWideTail -> whenHas rs RenderCursorViewportHasValue (frameFlag r)
   RenderCursor -> do
-    c <- fetchInto (withSize cursorTemplate)
+    c <- frameStruct r (withSize cursorTemplate)
     shape <- fromCursorStyle site c.visualStyle
     pure
       Cursor
@@ -317,7 +317,7 @@ getFrameData rs key = case key of
           shape
         }
   RenderColors -> do
-    c <- fetchInto (withSize colorsTemplate)
+    c <- frameStruct r (withSize colorsTemplate)
     p <- fromPalette site c.palette
     pure
       Colors
@@ -329,30 +329,42 @@ getFrameData rs key = case key of
   where
     k = frameKey key
     site = enumSite "ghostty_render_state_get" ghosttyRenderStateDataEnum (coerce k)
-
-    get :: Ptr b -> IO GhosttyResult
-    get = ghosttyRenderStateGet rs.handle k . castPtr
-
-    -- A sized struct, its size written first.
-    fetchInto :: (Storable b) => b -> IO b
-    fetchInto v = with v $ \p -> do
-      expectSuccess site =<< get p
-      peek p
-
-    fetch :: (Storable b) => IO b
-    fetch = outVia site get
-
-    flag :: IO Bool
-    flag = toBool @CBool <$> fetch
-
-    whenHas :: FrameData Bool -> IO b -> IO (Maybe b)
-    whenHas has act = ifM (getFrameData rs has) (Just <$> act) (pure Nothing)
+    r = FrameRead rs.handle k site
 
     dirty = \case
       GhosttyRenderStateDirtyFalse -> pure NotDirty
       GhosttyRenderStateDirtyPartial -> pure PartlyDirty
       GhosttyRenderStateDirtyFull -> pure FullyDirty
       GhosttyRenderStateDirtyUnknown n -> unknownEnum site ghosttyRenderStateDirtyEnum n
+
+-- | One @ghostty_render_state_get@ read: the render state, the key, and
+-- where its errors come from. Its readers are top level, as
+-- 'Ghostty.Effectful.Internal.Keys.KeyRead''s are: local to
+-- 'getFrameData', each 'Storable' specialisation would be a closure
+-- allocated on every read.
+data FrameRead = FrameRead GhosttyRenderState GhosttyRenderStateData CallSite
+
+-- | The read's call, into the given memory.
+frameGet :: FrameRead -> Ptr b -> IO GhosttyResult
+frameGet (FrameRead h k _) = ghosttyRenderStateGet h k . castPtr
+
+-- | The read's value.
+frameValue :: (Storable b) => FrameRead -> IO b
+frameValue r@(FrameRead _ _ site) = outVia site (frameGet r)
+
+-- | A @bool@ read.
+frameFlag :: FrameRead -> IO Bool
+frameFlag r = toBool @CBool <$> frameValue r
+
+-- | A sized struct's read, its size written first.
+frameStruct :: (Storable b) => FrameRead -> b -> IO b
+frameStruct r@(FrameRead _ _ site) v = with v $ \p -> do
+  expectSuccess site =<< frameGet r p
+  peek p
+
+-- | The read, if the flag key says there is a value.
+whenHas :: RenderState s -> FrameData Bool -> IO b -> IO (Maybe b)
+whenHas rs has act = ifM (getFrameData rs has) (Just <$> act) (pure Nothing)
 
 -- | An empty cursor of the given size.
 cursorTemplate :: CSize -> GhosttyRenderStateCursor
@@ -389,15 +401,15 @@ getRowData :: Row s f -> RowData a -> IO a
 getRowData row key = do
   seek row
   case key of
-    RowDirty -> toBool @CBool <$> fetch
-    RowViewportY -> fetch
+    RowDirty -> toBool @CBool <$> rowFetch rs k site
+    RowViewportY -> rowFetch rs k site
     RowId -> do
-      GhosttyRenderStateRowId bits <- fetch
+      GhosttyRenderStateRowId bits <- rowFetch rs k site
       case bits of
         [a, b] -> pure (RowIdentity a b)
         _ -> throwIO (Invariant site ResultInvalidValue)
     RowRaw -> do
-      raw :: GhosttyRow <- fetch
+      raw :: GhosttyRow <- rowFetch rs k site
       let rowFlag d = toBool @CBool <$> rowValue raw d
       wrap <- rowFlag GhosttyRowDataWrap
       wrapContinuation <- rowFlag GhosttyRowDataWrapContinuation
@@ -417,13 +429,21 @@ getRowData row key = do
     rs = row.frame.state
     k = rowKey key
     site = enumSite "ghostty_render_state_row_get" ghosttyRenderStateRowDataEnum (coerce k)
-    rowSite = CallSite "ghostty_row_get"
 
-    fetch :: (Storable b) => IO b
-    fetch = outVia site (ghosttyRenderStateRowGet rs.rowIterator k . castPtr)
+-- The readers of a row are top level, not local to 'getRowData', for the
+-- reason 'FrameRead' gives.
 
-    rowValue :: (Storable b) => GhosttyRow -> GhosttyRowData -> IO b
-    rowValue raw d = outVia rowSite (ghosttyRowGet raw d . castPtr)
+-- | @ghostty_render_state_row_get@ on the row iterator's current row.
+rowFetch :: (Storable b) => RenderState s -> GhosttyRenderStateRowData -> CallSite -> IO b
+rowFetch rs k site = outVia site (ghosttyRenderStateRowGet rs.rowIterator k . castPtr)
+
+-- | A value of a raw row.
+rowValue :: (Storable b) => GhosttyRow -> GhosttyRowData -> IO b
+rowValue raw d = outVia rowSite (ghosttyRowGet raw d . castPtr)
+
+-- | Where a raw row read's errors come from.
+rowSite :: CallSite
+rowSite = CallSite "ghostty_row_get"
 
 -- * Cells
 

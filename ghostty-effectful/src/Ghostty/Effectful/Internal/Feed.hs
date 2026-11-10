@@ -20,11 +20,11 @@ import Data.ByteString.Unsafe qualified as BSU
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (Ptr, castPtr, plusPtr)
 import Foreign.Storable (peek, poke)
-import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), ResultCode (..))
+import Ghostty.Effectful.Error (CallSite (..), ResultCode (..))
 import Ghostty.Effectful.Event (TerminalEvent)
 import Ghostty.Effectful.Internal.Callbacks (Answers (..), drain, joinWrites, resolveOnto)
 import Ghostty.Effectful.Internal.Convert (withSize)
-import Ghostty.Effectful.Internal.Error (expectSuccess, resultCode)
+import Ghostty.Effectful.Internal.Error (expectSuccess, succeedsUnless)
 import Ghostty.Effectful.Internal.Keys (getData)
 import Ghostty.Effectful.Internal.Size (CellPixels (..), GridSize (..), fromExtent)
 import Ghostty.Effectful.Internal.Terminal (Terminal (..), wrote)
@@ -96,12 +96,13 @@ feedTerminal t bytes = do
           poke stop emptyStop
           r <- ghosttyTerminalVtWriteUntil t.handle p (fromIntegral n) boundary stop
           acc' <- resolved acc
-          case resultCode r of
-            ResultNoValue -> pure acc'
-            ResultSuccess -> do
+          -- NO_VALUE: the input ended before a boundary.
+          stopped <- succeedsUnless ResultNoValue (CallSite "ghostty_terminal_vt_write_until") r
+          if stopped
+            then do
               used <- fromIntegral . (.consumed) <$> peek stop
               go stop (p `plusPtr` used) (n - used) acc'
-            other -> throwIO (Invariant (CallSite "ghostty_terminal_vt_write_until") other)
+            else pure acc'
 
     -- Resolve what the callbacks buffered onto the events so far; if that
     -- throws, the first exception is kept and the drained entries dropped.
