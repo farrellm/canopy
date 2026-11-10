@@ -88,6 +88,10 @@ outVia :: (Storable b) => CallSite -> (Ptr b -> IO GhosttyResult) -> IO b
 outVia site call = alloca $ \out -> do
   expectSuccess site =<< call out
   peek out
+-- Inlined, as 'optionalVia' is: a read is a few loads around a C call, and
+-- out of line it would take the 'Storable' dictionary and a closure for the
+-- call on every read.
+{-# INLINE outVia #-}
 
 -- | 'outVia' for a call with one documented refusal besides running out of
 -- memory ('succeedsUnless'): 'Nothing' on that refusal.
@@ -99,6 +103,7 @@ optionalVia refusal site call = alloca $ \out -> do
     c
       | c == refusal -> pure Nothing
       | otherwise -> throwIO (resultError site c)
+{-# INLINE optionalVia #-}
 
 -- | The bytes a call writes into a buffer: given the buffer and its
 -- capacity, the call returns its result and the length it wrote, or, with
