@@ -28,12 +28,14 @@ events instead of callbacks. No export may expose a pointer.
   out goes in the test's `deferredData`/`deferredOptions` with its PLAN.md step.
 - **Callbacks only append** (§4.5, `Internal.Callbacks`): each body is `sheltered`, so an
   exception is recorded and thrown by the drain, never let into C. Anything needing the terminal
-  (title, cursor) is a `Pending` entry resolved between writes. A query's answer is configuration
+  (a title, a working directory) is a `Pending` entry resolved between writes. A query's answer is configuration
   (`TerminalConfig`, and a `Set…` option named for the callback's row); ENQ and XTVERSION answer in
   C (`cbits/gveff_terminal.c`, with the terminal's `USERDATA` struct), since they return a struct by
-  value. `SEMANTIC_PROMPT` is C too (D18): it copies each mark into the `USERDATA`, and a drain
-  takes them after the Haskell buffer (`takeMarks`), which is the stream's order only because the
-  feed stops after every OSC. Any operation whose C call can run a callback returns the events it caused, as `feed`,
+  value. `SEMANTIC_PROMPT` is C too (D18): it copies each mark into the `USERDATA`. The write loop is C
+  as well (`gveff_write`, D19): it reads each mark's cursor and returns only when a Haskell callback
+  appended (`push` sets the `USERDATA`'s flag, so every append must go through `push`), 256 marks
+  wait, or the input ends; `takeMarks` puts the earlier stops' marks before the Haskell buffer and
+  the last stop's mark after it. Any operation whose C call can run a callback returns the events it caused, as `feed`,
   `resize` and `reset` do (`Internal.Feed`, which can read the terminal's keys); `setT`'s cannot,
   and a test holds that. Every struct a callback receives is frozen (no `size`), so it is read whole.
 - **Render states and frames** (§4.3, `Internal.Render`, public `Render`): a render state is its

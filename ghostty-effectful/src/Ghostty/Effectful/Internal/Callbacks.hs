@@ -8,10 +8,13 @@
 -- terminal's buffer, or answer a query from the terminal's 'Answers'. Each is
 -- 'sheltered': an exception inside one is recorded, not let into C, and thrown
 -- by whoever drains the buffer. What needs the terminal (the title after a
--- title change, the cursor after a prompt mark) is a 'Pending' entry,
--- resolved between writes (in "Ghostty.Effectful.Internal.Feed"), because a
--- callback must not call back into its terminal. A C enum value the binding does not name is recorded the same
--- way, and becomes 'UnknownEnum' then.
+-- title change, the working directory after its change) is a 'Pending'
+-- entry, resolved between writes (in "Ghostty.Effectful.Internal.Feed"),
+-- because a callback must not call back into its terminal; a prompt mark's
+-- cursor is read by the C write loop between its stops ('writeVt', D19). A C
+-- enum value the binding does not name is recorded the same way, and
+-- becomes 'UnknownEnum' then. Every append goes through 'push', which also
+-- tells the C write loop to return at this stop.
 --
 -- @ENQUIRY@ and @XTVERSION@ return a struct by value, which no Haskell
 -- function can, so they are C (@cbits/gveff_terminal.c@), answering from the
@@ -27,6 +30,7 @@ module Ghostty.Effectful.Internal.Callbacks
     Pending (..),
     drain,
     takeMarks,
+    writeVt,
     joinWrites,
 
     -- * Answers
@@ -49,6 +53,7 @@ module Ghostty.Effectful.Internal.Callbacks
 where
 
 import Control.Exception (catch, handle, mask_, onException, throwIO)
+import Data.Bits (shiftR)
 import Data.ByteString qualified as BS
 import Data.ByteString.Unsafe qualified as BSU
 import Foreign.C.Types (CBool (..), CInt (..), CSize (..))
@@ -59,9 +64,10 @@ import Foreign.Ptr (FunPtr, Ptr, castFunPtr, castFunPtrToPtr, castPtr, freeHaske
 import Foreign.Storable (Storable (..))
 import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), ResultCode (..))
 import Ghostty.Effectful.Event
-import Ghostty.Effectful.Internal.Convert (colorSchemeCode, emptyString, oscTerminator, stringText)
+import Ghostty.Effectful.Internal.Convert (colorSchemeCode, emptyString, enumSite, oscTerminator, stringText)
 import Ghostty.Effectful.Internal.Error (expectSuccess, resultCode, resultError)
 import Ghostty.Effectful.Internal.Size (CellPixels (..), GridSize (..), extent, fromExtent)
+import Ghostty.Effectful.Point (Point (..))
 import Ghostty.Effectful.Terminal.Keys (ColorScheme (..), DeviceAttributes (..))
 import Ghostty.FFI.Device
 import Ghostty.FFI.Layout (CEnum)
@@ -69,8 +75,10 @@ import Ghostty.FFI.Osc (ghosttyOscTerminatorEnum)
 import Ghostty.FFI.Render (GhosttyRenderState (..))
 import Ghostty.FFI.SizeReport (GhosttySizeReportSize (..))
 import Ghostty.FFI.Terminal
-  ( GhosttyTerminal,
+  ( GhosttyTerminal (..),
+    GhosttyTerminalData (..),
     GhosttyTerminalOption,
+    ghosttyTerminalDataEnum,
     ghosttyTerminalSet,
     pattern GhosttyTerminalOptBell,
     pattern GhosttyTerminalOptClipboardWrite,
@@ -104,8 +112,6 @@ data Pending
     TitlePending
   | -- | the working directory changed; read it after the write
     PwdPending
-  | -- | a prompt mark; read the cursor after the write
-    PromptPending PromptStep
   | -- | a value of the described enum that the binding does not name, from
     -- the named callback
     Unnamed CallSite CEnum CInt
@@ -120,7 +126,8 @@ drain buf = do
   -- it run on that thread inside a C call, never between the two.
   ps <- readIORef buf
   writeIORef buf []
-  pure (reverse ps)
+  -- Reversed now, not left as a thunk: usually it is empty.
+  pure $! reverse ps
 
 -- | Join each run of adjacent 'WritePty's into one, so a reply goes to the
 -- PTY in one write.
@@ -171,7 +178,7 @@ data GveffUserdata
 -- answering the given bytes. If one cannot be installed, what was made is
 -- freed and the error thrown.
 installCallbacks :: GhosttyTerminal -> IORef [Pending] -> IORef Answers -> ByteString -> ByteString -> IO Installed
-installCallbacks h buf answers enq xtv = do
+installCallbacks h events answers enq xtv = do
   made <- newIORef []
   let register :: IO (FunPtr a) -> IO (FunPtr a)
       register = registerFunPtr made
@@ -180,6 +187,7 @@ installCallbacks h buf answers enq xtv = do
       setPtr opt p = expectSuccess (CallSite "ghostty_terminal_set") =<< ghosttyTerminalSet h opt p
   ud <- gveffUserdataNew
   when (ud == nullPtr) $ throwIO (OutOfMemory (CallSite "gveff_userdata_new"))
+  buf <- Sink events <$> gveffAppended ud
   let install = do
         replaceAnswer ud enquiryIndex enq
         replaceAnswer ud xtversionIndex xtv
@@ -291,6 +299,34 @@ foreign import capi unsafe "gveff_terminal.h gveff_marks"
 foreign import capi unsafe "gveff_terminal.h gveff_mark_count"
   gveffMarkCount :: Ptr GveffUserdata -> IO CSize
 
+-- | Each mark's cursor, parallel to the marks.
+foreign import capi unsafe "gveff_terminal.h gveff_mark_cursors"
+  gveffMarkCursors :: Ptr GveffUserdata -> IO (Ptr Word32)
+
+-- | How many marks came before what Haskell appended in the last write.
+foreign import capi unsafe "gveff_terminal.h gveff_marks_before"
+  gveffMarksBefore :: Ptr GveffUserdata -> IO CSize
+
+-- | The @USERDATA@'s flag that 'push' sets.
+foreign import capi unsafe "gveff_terminal.h gveff_appended"
+  gveffAppended :: Ptr GveffUserdata -> IO (Ptr CBool)
+
+-- | The first cursor read that failed since the last call, or success; and
+-- reset it.
+foreign import capi unsafe "gveff_terminal.h gveff_cursor_failure"
+  gveffCursorFailure :: Ptr GveffUserdata -> IO GhosttyResult
+
+-- | The key of the last cursor read that failed.
+foreign import capi unsafe "gveff_terminal.h gveff_cursor_failure_key"
+  gveffCursorFailureKey :: Ptr GveffUserdata -> IO GhosttyTerminalData
+
+-- | Write VT, stopping after each OSC and reading the cursor after each
+-- mark, until a Haskell callback appends, the marks fill a batch, or the
+-- input ends (D19). @safe@, unlike every other call here: it runs the
+-- Haskell callbacks.
+foreign import capi safe "gveff_terminal.h gveff_write"
+  gveffWrite :: GhosttyTerminal -> Ptr GveffUserdata -> Ptr Word8 -> CSize -> Ptr CSize -> IO GhosttyResult
+
 -- | Free the marks' strings and empty the list.
 foreign import capi unsafe "gveff_terminal.h gveff_marks_clear"
   gveffMarksClear :: Ptr GveffUserdata -> IO ()
@@ -373,12 +409,23 @@ captureFraming i rs = gveffCaptureFraming i.userdata rs . fromBool . (== FrameOp
 -- * The callbacks
 
 -- | Append to the buffer.
-push :: IORef [Pending] -> Pending -> IO ()
-push buf p = modifyIORef' buf (p :)
+push :: Sink -> Pending -> IO ()
+push sink p = do
+  modifyIORef' sink.entries (p :)
+  poke sink.flag (CBool 1)
+
+-- | Where the callbacks append: the terminal's buffer, and the @USERDATA@'s
+-- flag that tells 'gveffWrite' to return at this stop (DESIGN.md §4.5, D19).
+data Sink = Sink
+  { -- | the buffer 'drain' takes
+    entries :: IORef [Pending],
+    -- | the @USERDATA@'s @appended@
+    flag :: Ptr CBool
+  }
 
 -- | Run a callback's body, recording any exception rather than letting it
 -- into C, and returning the given value then.
-sheltered :: IORef [Pending] -> a -> IO a -> IO a
+sheltered :: Sink -> a -> IO a -> IO a
 sheltered buf dflt act = act `catch` \e -> dflt <$ push buf (Failed e)
 
 -- | A percentage the header gives as -1 when absent.
@@ -387,7 +434,7 @@ percentOf n = fromIntegral n <$ guard (n >= 0)
 
 -- | @RENDER_HOLD@'s Haskell half, called by the C callback after it
 -- captured: a capture that failed, then the event.
-onRenderHold :: IORef [Pending] -> Ptr GveffUserdata -> GhosttyTerminal -> Ptr () -> CBool -> IO ()
+onRenderHold :: Sink -> Ptr GveffUserdata -> GhosttyTerminal -> Ptr () -> CBool -> IO ()
 onRenderHold buf ud _ _ held = sheltered buf () $ do
   failure <- gveffCaptureFailure ud
   case resultCode failure of
@@ -396,13 +443,13 @@ onRenderHold buf ud _ _ held = sheltered buf () $ do
   push buf (Ready (RenderHold (toBool held)))
 
 -- | @WRITE_PTY@: copy the reply out.
-onWritePty :: IORef [Pending] -> GhosttyTerminal -> Ptr () -> Ptr Word8 -> CSize -> IO ()
+onWritePty :: Sink -> GhosttyTerminal -> Ptr () -> Ptr Word8 -> CSize -> IO ()
 onWritePty buf _ _ p n = sheltered buf () $ do
   b <- BS.packCStringLen (castPtr p, fromIntegral n)
   push buf (Ready (WritePty b))
 
 -- | @SIZE@: the grid and cell size, if size queries are answered.
-onSizeAnswer :: IORef [Pending] -> IORef Answers -> GhosttyTerminal -> Ptr () -> Ptr GhosttySizeReportSize -> IO CBool
+onSizeAnswer :: Sink -> IORef Answers -> GhosttyTerminal -> Ptr () -> Ptr GhosttySizeReportSize -> IO CBool
 onSizeAnswer buf answers _ _ out = sheltered buf 0 $ do
   a <- readIORef answers
   if not a.sizeQueries
@@ -419,7 +466,7 @@ onSizeAnswer buf answers _ _ out = sheltered buf 0 $ do
       pure 1
 
 -- | @COLOR_SCHEME@: the configured scheme, if any.
-onSchemeAnswer :: IORef [Pending] -> IORef Answers -> GhosttyTerminal -> Ptr () -> Ptr GhosttyColorScheme -> IO CBool
+onSchemeAnswer :: Sink -> IORef Answers -> GhosttyTerminal -> Ptr () -> Ptr GhosttyColorScheme -> IO CBool
 onSchemeAnswer buf answers _ _ out = sheltered buf 0 $ do
   a <- readIORef answers
   case a.scheme of
@@ -427,7 +474,7 @@ onSchemeAnswer buf answers _ _ out = sheltered buf 0 $ do
     Just scheme -> 1 <$ poke out (colorSchemeCode scheme)
 
 -- | @DEVICE_ATTRIBUTES@: the configured attributes, always.
-onAttributesAnswer :: IORef [Pending] -> IORef Answers -> GhosttyTerminal -> Ptr () -> Ptr GhosttyDeviceAttributes -> IO CBool
+onAttributesAnswer :: Sink -> IORef Answers -> GhosttyTerminal -> Ptr () -> Ptr GhosttyDeviceAttributes -> IO CBool
 onAttributesAnswer buf answers _ _ out = sheltered buf 0 $ do
   a <- readIORef answers
   let d = a.attributes
@@ -446,7 +493,7 @@ onAttributesAnswer buf answers _ _ out = sheltered buf 0 $ do
 -- makes, because the header requires it before the callback returns. The
 -- request is a frozen struct (it has no @size@, and never grows), so it is
 -- read whole; the reply is sized.
-onClipboardWrite :: IORef [Pending] -> IORef Answers -> GhosttyTerminal -> Ptr () -> Ptr GhosttyClipboardWrite -> IO ()
+onClipboardWrite :: Sink -> IORef Answers -> GhosttyTerminal -> Ptr () -> Ptr GhosttyClipboardWrite -> IO ()
 onClipboardWrite buf answers _ _ wp = sheltered buf () $ do
   a <- readIORef answers
   w <- peek wp
@@ -474,14 +521,14 @@ clipboardSite :: CallSite
 clipboardSite = CallSite "GhosttyTerminalClipboardWriteFn"
 
 -- | @DESKTOP_NOTIFICATION@.
-onNotification :: IORef [Pending] -> GhosttyTerminal -> Ptr () -> Ptr GhosttyTerminalDesktopNotification -> IO ()
+onNotification :: Sink -> GhosttyTerminal -> Ptr () -> Ptr GhosttyTerminalDesktopNotification -> IO ()
 onNotification buf _ _ np = sheltered buf () $ do
   n <- peek np
   e <- Notification <$> stringText n.title <*> stringText n.body
   push buf (Ready e)
 
 -- | @PROGRESS_REPORT@.
-onProgress :: IORef [Pending] -> GhosttyTerminal -> Ptr () -> Ptr GhosttyTerminalProgressReport -> IO ()
+onProgress :: Sink -> GhosttyTerminal -> Ptr () -> Ptr GhosttyTerminalProgressReport -> IO ()
 onProgress buf _ _ rp = sheltered buf () $ do
   r <- peek rp
   let ready st = push buf (Ready (Progress ProgressReport {state = st, percent = percentOf r.progress}))
@@ -494,7 +541,7 @@ onProgress buf _ _ rp = sheltered buf () $ do
     GhosttyTerminalProgressStateUnknown n -> push buf (Unnamed (CallSite "GhosttyTerminalProgressReportFn") ghosttyTerminalProgressStateEnum n)
 
 -- | @PROGRAM_STATUS@.
-onProgramStatus :: IORef [Pending] -> GhosttyTerminal -> Ptr () -> Ptr GhosttyTerminalProgramStatus -> IO ()
+onProgramStatus :: Sink -> GhosttyTerminal -> Ptr () -> Ptr GhosttyTerminalProgramStatus -> IO ()
 onProgramStatus buf _ _ rp = sheltered buf () $ do
   r <- peek rp
   let state = case r.state of
@@ -522,47 +569,77 @@ onProgramStatus buf _ _ rp = sheltered buf () $ do
           <*> stringText r.message
       push buf (Ready (ProgramStatus report))
 
--- | The prompt marks the C callback copied since the last call, oldest
--- first, as entries to resolve (the mark now, the cursor after the write),
--- and empty the list. A mark that could not be copied is a 'Failed' entry,
--- after the rest; so is an exception converting one. The feed stops after
--- every OSC, so these follow what the Haskell callbacks appended in the
--- same stop ('drain').
-takeMarks :: Installed -> IO [Pending]
-takeMarks i = do
+-- | What a write's callbacks appended, in the stream's order, emptying the
+-- marks: the prompt marks the C callback copied in the stops before the
+-- last, then the given entries (what the Haskell callbacks appended, which
+-- ended the write's run of stops), then the last stop's mark, if it had one
+-- (DESIGN.md §4.5, D19). Each mark carries the cursor C read right after it.
+-- A mark that could not be copied, or a cursor that could not be read, is a
+-- 'Failed' entry after the rest; so is an exception converting a mark.
+takeMarks :: Installed -> [Pending] -> IO [Pending]
+takeMarks i hs = do
   -- One call, allocating nothing, when there is nothing: every drain asks.
   pending <- toBool <$> gveffMarksPending i.userdata
   if not pending
-    then pure []
+    then pure hs
     else do
-      n <- gveffMarkCount i.userdata
+      n <- fromIntegral <$> gveffMarkCount i.userdata
+      k <- fromIntegral <$> gveffMarksBefore i.userdata
       p <- gveffMarks i.userdata
+      cs <- gveffMarkCursors i.userdata
       -- No 'finally' (a 'catch#' and its closures on every take): converting
       -- throws nothing synchronously, since 'markPending' catches what its
       -- string reads throw. An asynchronous exception before the clear
       -- leaves the marks for the next take, and freeing the USERDATA frees
       -- what is never taken.
-      ms <- marksFrom p (fromIntegral n - 1) []
+      late <- marksFrom p cs k (n - 1) []
+      -- Usually nothing in between: a run of marks alone.
+      let !middle = case late of
+            [] -> hs
+            _ -> hs <> late
+      ms <- marksFrom p cs 0 (k - 1) middle
       gveffMarksClear i.userdata
-      r <- gveffMarksFailure i.userdata
+      copied <- gveffMarksFailure i.userdata
+      cursor <- gveffCursorFailure i.userdata
       -- Built now, not left as a thunk; nothing to append, as usual, when
-      -- every mark was copied.
-      pure $! case resultCode r of
-        ResultSuccess -> ms
-        other -> ms <> [Failed (toException (resultError (CallSite "gveff_semantic_prompt") other))]
+      -- every mark was copied and every cursor read.
+      case (resultCode copied, resultCode cursor) of
+        (ResultSuccess, ResultSuccess) -> pure ms
+        (c, r) -> do
+          key <- gveffCursorFailureKey i.userdata
+          pure $! ms <> failures c r key
   where
-    -- Newest first onto the list, each struct read and converted in place:
-    -- no list of copied structs, as 'peekArray' would build.
-    marksFrom :: Ptr GhosttyTerminalSemanticPrompt -> Int -> [Pending] -> IO [Pending]
-    marksFrom p k acc
-      | k < 0 = pure acc
+    -- Marks @from@ to @k@, newest first onto the list, each struct read and
+    -- converted in place: no list of copied structs, as 'peekArray' would
+    -- build.
+    marksFrom :: Ptr GhosttyTerminalSemanticPrompt -> Ptr Word32 -> Int -> Int -> [Pending] -> IO [Pending]
+    marksFrom p cs from k acc
+      | k < from = pure acc
       | otherwise = do
-          m <- markPending =<< peekElemOff p k
-          marksFrom p (k - 1) (m : acc)
+          c <- peekElemOff cs k
+          m <- markPending c =<< peekElemOff p k
+          marksFrom p cs from (k - 1) (m : acc)
+    failures c r key =
+      [Failed (toException (resultError (CallSite "gveff_semantic_prompt") c)) | c /= ResultSuccess]
+        <> [ Failed (toException (readError (enumSite "ghostty_terminal_get" ghosttyTerminalDataEnum (coerce key)) r))
+           | r /= ResultSuccess
+           ]
+    -- As a key read that must have a value: NO_VALUE is the library's
+    -- broken promise, anything else its own error.
+    readError site c
+      | c == ResultNoValue = Invariant site c
+      | otherwise = resultError site c
 
--- | @SEMANTIC_PROMPT@'s event, copied by the C callback, as an entry.
-markPending :: GhosttyTerminalSemanticPrompt -> IO Pending
-markPending e = case e.kind of
+-- | Write VT into the terminal (@gveff_write@): the result, and in the
+-- given memory the bytes written.
+writeVt :: GhosttyTerminal -> Installed -> Ptr Word8 -> Int -> Ptr CSize -> IO GhosttyResult
+writeVt h i p n = gveffWrite h i.userdata p (fromIntegral n)
+
+-- | @SEMANTIC_PROMPT@'s event, copied by the C callback, with the cursor C
+-- read right after it (the column in the low 16 bits, the row in the high),
+-- as an entry.
+markPending :: Word32 -> GhosttyTerminalSemanticPrompt -> IO Pending
+markPending cursor e = case e.kind of
   GhosttySemanticPromptPromptStart -> case e.promptKind of
     GhosttySemanticPromptPromptPrimary -> mark (PromptStart PrimaryPrompt)
     GhosttySemanticPromptPromptRight -> mark (PromptStart RightPrompt)
@@ -582,11 +659,12 @@ markPending e = case e.kind of
   GhosttySemanticPromptKindUnknown n -> pure (Unnamed site ghosttySemanticPromptKindEnum n)
   where
     site = CallSite "GhosttyTerminalSemanticPromptFn"
-    mark = pure . PromptPending
+    mark step = pure (Ready (SemanticPrompt PromptMark {step, cursor = at}))
+    !at = Point {col = fromIntegral cursor, row = cursor `shiftR` 16}
     caught = handle (pure . Failed)
 
 -- | @UNKNOWN_SEQUENCE@.
-onUnknownSequence :: IORef [Pending] -> GhosttyTerminal -> Ptr () -> Ptr GhosttyTerminalUnknownSequence -> IO ()
+onUnknownSequence :: Sink -> GhosttyTerminal -> Ptr () -> Ptr GhosttyTerminalUnknownSequence -> IO ()
 onUnknownSequence buf _ _ sp = sheltered buf () $ do
   peek sp >>= \case
     UnknownSequenceApc s -> do
@@ -602,7 +680,7 @@ onUnknownSequence buf _ _ sp = sheltered buf () $ do
     osc term s = ghosttyStringBytes s.content >>= ready (Osc term) (toBool s.truncated)
 
 -- | @RESIZE_WINDOW@.
-onResizeWindow :: IORef [Pending] -> GhosttyTerminal -> Ptr () -> Ptr GhosttyTerminalResizeWindow -> IO ()
+onResizeWindow :: Sink -> GhosttyTerminal -> Ptr () -> Ptr GhosttyTerminalResizeWindow -> IO ()
 onResizeWindow buf _ _ rp = sheltered buf () $ do
   peek rp >>= \case
     ResizeWindowGrid g -> push buf (Ready (ResizeRequest WindowSize {cols = extent g.columns, rows = extent g.rows}))

@@ -72,8 +72,8 @@ unicode = toMiB (cycle [encodeUtf8 l <> "\r\n" | l <- samples])
       ]
 
 -- | A REPL session: each input and its output between OSC 133 marks, so
--- that 'feed' stops after every mark and resolves its cursor. The OSC path,
--- and the binding's cost per stop and per event.
+-- that the write stops after every mark and reads its cursor (in C, D19).
+-- The OSC path, and the binding's cost per stop and per event.
 prompts :: ByteString
 prompts = toMiB [block i | i <- [0 :: Int ..]]
   where

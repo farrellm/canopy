@@ -60,7 +60,34 @@ tests =
                   ],
           testCase "a title is the title after the write that set it" $ do
             evs <- withFresh (`feed` "\ESC]2;one\a\ESC]0;two\ESC\\")
-            evs @?= [TitleChanged "one", TitleChanged "two"]
+            evs @?= [TitleChanged "one", TitleChanged "two"],
+          -- C writes run after run of marks between returns (D19): marks
+          -- before, in, and after the stops where Haskell callbacks append.
+          testCase "marks around bells and titles in one write keep the stream's order" $ do
+            evs <-
+              withFresh
+                ( `feed`
+                    ( "\ESC]133;A\a$ "
+                        <> "\a\ESC]133;B\a"
+                        <> "ls\r\n\ESC]2;one\a"
+                        <> "\ESC]133;C\a"
+                        <> "\ESC]2;two\a"
+                        <> "out\r\n\ESC]133;D;0\a"
+                    )
+                )
+            evs
+              @?= [ mark (PromptStart PrimaryPrompt) 0 0,
+                    Bell,
+                    mark InputStart 2 0,
+                    TitleChanged "one",
+                    mark (OutputStart "") 0 1,
+                    TitleChanged "two",
+                    mark (CommandEnd (Just 0) "") 0 2
+                  ],
+          testCase "a bell between two batches of marks stays between them" $ do
+            let marks = mconcat (replicate 300 "\ESC]133;A\a")
+            evs <- withFresh (`feed` (marks <> "\a" <> marks))
+            evs @?= replicate 300 (mark (PromptStart PrimaryPrompt) 0 0) <> [Bell] <> replicate 300 (mark (PromptStart PrimaryPrompt) 0 0)
         ],
       testGroup
         "queries"

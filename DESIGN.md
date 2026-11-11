@@ -500,7 +500,8 @@ from it:
   this sentence first read "with an explicit unknown case". `ResultCode` keeps its unknown case,
   because it is what `Invariant` carries, not what an operation returns.)
 - **`unsafe` FFI calls by default**, `safe` only for calls that can call back into Haskell
-  (`vt_write`, `vt_write_until`, `paste`, `render_state_update` if it ever gains callbacks). This is
+  (`vt_write`, `vt_write_until`, `paste`, `render_state_update` if it ever gains callbacks, and
+  `ghostty-effectful`'s own `gveff_write`, which calls `vt_write_until`, D19). This is
   a per-import decision recorded in the import's comment, because an `unsafe` call that re-enters
   Haskell is a crash, and that cannot be checked by the compiler. What is checked is that each
   decision was made against the header as it is: `ghostty-vt-ffi/safety.txt` records every bound
@@ -812,10 +813,12 @@ data TerminalEvent                     -- Ghostty.Effectful.Event
 Events come back in the order the bytes produced them, which matters: a `SemanticPrompt C` must be
 seen at the right point in the stream so that the output range it opens starts at the right row. To
 get that, `feed` writes with `ghostty_terminal_vt_write_until(…, GHOSTTY_TERMINAL_BOUNDARY_OSC_END,
-…)`, which stops right after each OSC terminator and reports how much it consumed. After each stop,
-the buffer is drained and resolved: a `SemanticPrompt` gets `CURSOR_X`/`CURSOR_Y`, and a title or
-working-directory change gets the new value (their callbacks carry none). Then the write continues
-with the rest of the chunk. The header forbids calling `vt_write` from inside a callback, which this
+…)`, which stops right after each OSC terminator and reports how much it consumed. The loop over the
+stops is C (`gveff_write`, D19): after a stop that added a prompt mark, C reads
+`CURSOR_X`/`CURSOR_Y` beside the mark; after a stop where a Haskell callback appended, C returns,
+and the buffer is drained and resolved: a title or working-directory change gets the new value
+(their callbacks carry none). Then the write continues with the rest of the chunk. So a run of stops
+with only marks in them is one `safe` call, not one a stop. The header forbids calling `vt_write` from inside a callback, which this
 never does: the terminal is read between writes, not inside them. (Checked, M1.6: an OSC ended by
 `ESC \` is dispatched at the `ESC`, where `vt_write_until` stops, so its mark's cursor is right too;
 and the same stream split at every byte gives the same events.) Adjacent `WritePty`s are joined, so
@@ -823,8 +826,8 @@ one reply is one write: across stops, and with any events buffered before the wr
 
 A callback must not let an exception into C, so each body is guarded: an exception is recorded in
 the buffer and thrown by the drain, after the write. So is a C enum value the binding does not name
-(`UnknownEnum`, §4.7), which a callback cannot throw. A failure while resolving one stop's events does
-not stop the write: every byte is written, so the terminal never falls behind the program's output,
+(`UnknownEnum`, §4.7), which a callback cannot throw. A failure while resolving the events of one
+return from the C write loop (a run of stops, D19) does not stop the write: every byte is written, so the terminal never falls behind the program's output,
 and the first failure is thrown after. `resize` and `reset` call callbacks too (the end of a render
 hold, mode 2048's in-band size report), so they return `[TerminalEvent]` as `feed` does. `setT`
 returns `()`: the header says setting a mode never invokes a callback, not even the end of a render
@@ -857,10 +860,13 @@ render states a hold captures into, and the prompt marks.
 **A prompt mark is copied in C** (D18). A call from C into Haskell makes a Haskell thread, and in a
 stream of marks that was most of a mark's cost (§12.3). So `SEMANTIC_PROMPT` is C: it copies the
 event, its command and error strings too, onto a list in the `USERDATA`, and no Haskell runs. A drain
-takes the Haskell buffer, then the C list (`takeMarks`), and resolves both as before. That order is
-the stream's because the feed stops after every OSC: a mark ends its stop, so nothing the Haskell
-callbacks append comes after it. A write that did not stop at each OSC would need the marks
-sequenced against the buffer, and no other call produces marks: `resize`, `reset` and `paste` cannot.
+takes the Haskell buffer and the C list (`takeMarks`) and resolves both. **The C write loop
+sequences them** (D19): a mark ends its stop, and C returns at the end of the stop in which a
+Haskell callback appended, so the order is the marks of the stops before that one (C counts them,
+`gveff_marks_before`), then the Haskell buffer, then that stop's mark if it had one. C also returns
+once 256 marks wait (`GVEFF_MARK_BATCH`), bounding what one return holds, and the Haskell callbacks
+tell C they appended through a flag in the `USERDATA` that `push` sets. No other call produces
+marks: `resize`, `reset` and `paste` cannot.
 A mark C cannot copy for want of memory is dropped and recorded, and the drain throws `OutOfMemory`
 after the write, as it throws a Haskell callback's exception. A drain with no marks makes one
 `unsafe` call and allocates nothing. Taking the marks is not wrapped in `finally`: converting one
@@ -2110,7 +2116,13 @@ the reads directly rather than through closures passed in, catches into the `Res
 rather than `try` and a map, and converts the mark's row at once (2026-11-11): prompts 59 ms and
 44 MB, about 620 bytes a stop. Taking the marks builds its result and the drain's at once, not as
 thunks of `<>`, and has no `finally` (§4.5) (2026-11-11): prompts 48 ms and 30 MB, about 420 bytes a
-stop. What is left is mostly the `safe` call and the events kept.
+stop. Then `perf` put pausing the thread for each stop's `safe` call at 18.5% of the time
+(`threadPaused` walks the whole Haskell stack, so its cost grows with the caller's depth), and the
+loop over the stops moved into C (D19), one `safe` call for a run of marks, and C reads each mark's
+cursor, which retires the shared cursor slot and the constant call sites above (2026-11-11): prompts
+31–32 ms against 44–47 ms in alternating runs, and 19 MB, about 270 bytes a stop; the `safe` calls
+are 0.6% of the time. What is left is libghostty's parsing (44%) and the collector (37%), most of
+it the 71,000 events the benchmark keeps.
 
 **Rendering**, the same suite's `Render` group: the same terminal life with a screen fed and a
 render state opened, then one frame of every cell copied out (plain, SGR-coloured and wide/combining
@@ -2248,7 +2260,8 @@ input; a per-session toggle hides them.
 | D15 | The runtime check is exact: the linked library is the pinned release, with every optional feature (`==1.0.0` in `pkgconfig-depends` too), though 1.x makes a newer minor memory-safe (relaxation is D-deferred-11) | §3.1, §3.4 |
 | D16 | The public effectful API follows upstream's renames at a pin bump (`ModeKey` after the `GHOSTTY_MODE_*` names, `CursorSgrStyle`), as §4.4's naming rule already requires | §4.4 |
 | D17 | The release build of libghostty-vt targets the baseline CPU (`build-libghostty.sh --release`, `-Dcpu=baseline`), since releases link it statically | §3.1 |
-| D18 | `SEMANTIC_PROMPT` is a C callback that copies the mark into the `USERDATA`, taken after the Haskell buffer at each OSC stop, since a call into Haskell per mark was most of a mark's cost | §4.5, §12.3 |
+| D18 | `SEMANTIC_PROMPT` is a C callback that copies the mark into the `USERDATA`, since a call into Haskell per mark was most of a mark's cost; first taken after the Haskell buffer at each OSC stop, now sequenced around it by the C write loop (D19) | §4.5, §12.3 |
+| D19 | The loop over `vt_write_until`'s OSC stops is C (`gveff_write`): it reads each mark's cursor, and returns to Haskell only when a Haskell callback appended, 256 marks wait, or the input ends, sequencing the marks around the Haskell buffer; since pausing the thread for a `safe` call per stop was the largest cost left | §4.5, §12.3 |
 
 ### 15.2 Deferred
 
