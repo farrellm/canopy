@@ -1,13 +1,13 @@
 Name,Mean (ps),2*Stdev (ps),Allocated,Copied,Peak Memory
-All.ghostty-effectful.Feed.open and close,24409961,1595130,6112,1,6291456
-All.ghostty-effectful.Feed.plain,1421492865,135104680,6643,19,11534336
-All.ghostty-effectful.Feed.sgr,10085825912,880262482,6773,37,38797312
-All.ghostty-effectful.Feed.unicode,5911988300,182971740,7180,76,38797312
-All.ghostty-effectful.Feed.prompts,33960113800,2978399612,18949109,19453320,38797312
-"All.ghostty-effectful.Feed.plain, 4 KiB writes",1710895650,111952740,101034,119,38797312
-All.ghostty-effectful.Render.no frame,74953969,5311208,7566,3,38797312
-"All.ghostty-effectful.Render.plain, every cell",462280051,35094498,814293,2373,38797312
-"All.ghostty-effectful.Render.styled, every cell",675329271,15629244,1168661,5343,38797312
-"All.ghostty-effectful.Render.unicode, every cell",497265253,45925592,791311,2318,38797312
-All.ghostty-effectful.Render.cursor and colours,103907717,9492060,88214,482,38797312
-All.ghostty-effectful.Render.24 frames of one new line,12388171600,890814598,29161804,86067,38797312
+All.ghostty-effectful.Feed.open and close,25374363,2124082,6106,1,6291456
+All.ghostty-effectful.Feed.plain,1530251281,127175806,6776,38,11534336
+All.ghostty-effectful.Feed.sgr,10954587725,907853436,7673,151,37748736
+All.ghostty-effectful.Feed.unicode,5990089725,551730990,7944,151,37748736
+All.ghostty-effectful.Feed.prompts,24348005312,1901467516,11562944,8628321,40894464
+"All.ghostty-effectful.Feed.plain, 4 KiB writes",1734866653,130156456,94690,67,40894464
+All.ghostty-effectful.Render.no frame,80904964,3249492,7531,4,40894464
+"All.ghostty-effectful.Render.plain, every cell",494563170,33816366,814196,2265,40894464
+"All.ghostty-effectful.Render.styled, every cell",618572841,29414330,1168616,5020,40894464
+"All.ghostty-effectful.Render.unicode, every cell",538954806,47457412,791181,2205,40894464
+All.ghostty-effectful.Render.cursor and colours,112247701,7308910,88159,485,40894464
+All.ghostty-effectful.Render.24 frames of one new line,13239932950,953348462,29158628,81456,40894464
