@@ -1,13 +1,13 @@
 Name,Mean (ps),2*Stdev (ps),Allocated,Copied,Peak Memory
-All.ghostty-effectful.Feed.open and close,25866921,1528212,5981,1,6291456
-All.ghostty-effectful.Feed.plain,1430790043,127319642,7027,38,11534336
-All.ghostty-effectful.Feed.sgr,9966597550,824731858,9205,306,38797312
-All.ghostty-effectful.Feed.unicode,5858419925,555123328,7289,75,38797312
-All.ghostty-effectful.Feed.prompts,87678306000,2740659076,94128313,30633995,42991616
-"All.ghostty-effectful.Feed.plain, 4 KiB writes",1668999600,84399072,170826,241,42991616
-All.ghostty-effectful.Render.no frame,74709889,2082310,7693,2,42991616
-"All.ghostty-effectful.Render.plain, every cell",454085560,15862424,814394,2285,42991616
-"All.ghostty-effectful.Render.styled, every cell",571598470,50265082,1168807,5167,42991616
-"All.ghostty-effectful.Render.unicode, every cell",491351037,41480688,791352,2177,42991616
-All.ghostty-effectful.Render.cursor and colours,108718564,8707130,88361,483,42991616
-All.ghostty-effectful.Render.24 frames of one new line,12466161575,687182708,29166878,103576,42991616
+All.ghostty-effectful.Feed.open and close,27894472,2097924,6084,3,6291456
+All.ghostty-effectful.Feed.plain,1467910933,76484006,6537,4,11534336
+All.ghostty-effectful.Feed.sgr,9960275450,814610296,7672,151,37748736
+All.ghostty-effectful.Feed.unicode,5927392475,430632926,7731,151,37748736
+All.ghostty-effectful.Feed.prompts,70658871500,5469744266,79897632,31218464,46137344
+"All.ghostty-effectful.Feed.plain, 4 KiB writes",1619147350,90315706,103102,140,46137344
+All.ghostty-effectful.Render.no frame,73494732,5693096,7570,3,46137344
+"All.ghostty-effectful.Render.plain, every cell",472999149,6913500,814234,2213,46137344
+"All.ghostty-effectful.Render.styled, every cell",568591818,53760362,1168709,5165,46137344
+"All.ghostty-effectful.Render.unicode, every cell",502522136,24602232,791151,2247,46137344
+All.ghostty-effectful.Render.cursor and colours,105874690,5379422,88210,480,46137344
+All.ghostty-effectful.Render.24 frames of one new line,12893482175,108246484,29159491,64448,46137344
