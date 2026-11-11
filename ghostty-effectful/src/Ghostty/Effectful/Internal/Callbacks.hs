@@ -9,7 +9,7 @@
 -- 'sheltered': an exception inside one is recorded, not let into C, and thrown
 -- by whoever drains the buffer. What needs the terminal (the title after a
 -- title change, the cursor after a prompt mark) is a 'Pending' entry,
--- 'resolve'd between writes, because a callback must not call back into its
+-- resolved ('resolveOnto') between writes, because a callback must not call back into its
 -- terminal. A C enum value the binding does not name is recorded the same
 -- way, and becomes 'UnknownEnum' then.
 --
@@ -24,14 +24,14 @@ module Ghostty.Effectful.Internal.Callbacks
   ( -- * Pending events
     Pending (..),
     drain,
-    resolve,
+    resolveOnto,
     joinWrites,
 
     -- * Answers
     Answers (..),
-    Installed (..),
-    GveffUserdata,
+    Installed,
     installCallbacks,
+    registerFunPtr,
     releaseCallbacks,
     setEnquiryAnswer,
     setXtversionAnswer,
@@ -42,6 +42,7 @@ module Ghostty.Effectful.Internal.Callbacks
     captureHeld,
     captureRelease,
     captureFraming,
+    Framing (..),
   )
 where
 
@@ -51,19 +52,19 @@ import Data.ByteString.Unsafe qualified as BSU
 import Foreign.C.Types (CBool (..), CInt (..), CSize)
 import Foreign.Marshal.Alloc (free, mallocBytes)
 import Foreign.Marshal.Array (peekArray)
-import Foreign.Marshal.Utils (copyBytes, toBool, with)
+import Foreign.Marshal.Utils (copyBytes, fromBool, toBool, with)
 import Foreign.Ptr (FunPtr, Ptr, castFunPtr, castFunPtrToPtr, castPtr, freeHaskellFunPtr, nullPtr)
 import Foreign.Storable (Storable (..))
 import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), ResultCode (..))
 import Ghostty.Effectful.Event
-import Ghostty.Effectful.Internal.Convert (unknownEnum)
-import Ghostty.Effectful.Internal.Error (expectSuccess, resultCode)
+import Ghostty.Effectful.Internal.Convert (colorSchemeCode, emptyString, oscTerminator, stringText, unknownEnum)
+import Ghostty.Effectful.Internal.Error (expectSuccess, resultCode, resultError)
 import Ghostty.Effectful.Internal.Size (CellPixels (..), GridSize (..), extent, fromExtent)
 import Ghostty.Effectful.Point (Point (..))
 import Ghostty.Effectful.Terminal.Keys (ColorScheme (..), DeviceAttributes (..), TerminalData (..))
 import Ghostty.FFI.Device
 import Ghostty.FFI.Layout (CEnum)
-import Ghostty.FFI.Osc (ghosttyOscTerminatorEnum, pattern GhosttyOscTerminatorBel, pattern GhosttyOscTerminatorSt, pattern GhosttyOscTerminatorUnknown)
+import Ghostty.FFI.Osc (ghosttyOscTerminatorEnum)
 import Ghostty.FFI.Render (GhosttyRenderState (..))
 import Ghostty.FFI.SizeReport (GhosttySizeReportSize (..))
 import Ghostty.FFI.Terminal
@@ -112,14 +113,19 @@ data Pending
 
 -- | Take what the buffer holds, oldest first, leaving it empty.
 drain :: IORef [Pending] -> IO [Pending]
-drain buf = reverse <$> atomicModifyIORef' buf ([],)
+drain buf = do
+  -- A read then a write, not atomicModifyIORef': only the owner thread
+  -- touches the buffer (DESIGN.md §4.6), and the callbacks that append to
+  -- it run on that thread inside a C call, never between the two.
+  ps <- readIORef buf
+  writeIORef buf []
+  pure (reverse ps)
 
--- | Turn drained entries into events, reading what they need from the
--- terminal (through the given read), which is between writes now. Adjacent
--- 'WritePty's are joined, so a reply goes to the PTY in one write. Throws
--- what a callback recorded.
-resolve :: (forall a. TerminalData a -> IO a) -> [Pending] -> IO [TerminalEvent]
-resolve getData ps = joinWrites <$> traverse event ps
+-- | Turn drained entries into events, newest first onto the given ones,
+-- reading what they need from the terminal (through the given read), which
+-- is between writes now. Throws what a callback recorded.
+resolveOnto :: (forall a. TerminalData a -> IO a) -> [TerminalEvent] -> [Pending] -> IO [TerminalEvent]
+resolveOnto getData = foldlM (\acc p -> (: acc) <$> event p)
   where
     event = \case
       Ready e -> pure e
@@ -132,12 +138,19 @@ resolve getData ps = joinWrites <$> traverse event ps
       Unnamed site e n -> unknownEnum site e n
       Failed e -> throwIO e
 
--- | Join adjacent 'WritePty's, so a reply goes to the PTY in one write.
+-- | Join each run of adjacent 'WritePty's into one, so a reply goes to the
+-- PTY in one write.
 joinWrites :: [TerminalEvent] -> [TerminalEvent]
 joinWrites = \case
-  WritePty a : WritePty b : rest -> joinWrites (WritePty (a <> b) : rest)
+  WritePty a : rest@(WritePty _ : _) ->
+    let (more, rest') = writes rest
+     in WritePty (BS.concat (a : more)) : joinWrites rest'
   e : rest -> e : joinWrites rest
   [] -> []
+  where
+    writes = \case
+      WritePty b : rest -> first (b :) (writes rest)
+      rest -> ([], rest)
 
 -- | What a terminal's query callbacks answer with, and the grid they report.
 data Answers = Answers
@@ -176,11 +189,10 @@ data GveffUserdata
 installCallbacks :: GhosttyTerminal -> IORef [Pending] -> IORef Answers -> ByteString -> ByteString -> IO Installed
 installCallbacks h buf answers enq xtv = do
   made <- newIORef []
-  let wrapped :: IO (FunPtr a) -> GhosttyTerminalOption -> IO ()
-      wrapped mk opt = mask_ $ do
-        fp <- mk
-        modifyIORef' made (castFunPtr fp :)
-        setPtr opt (castFunPtrToPtr fp)
+  let register :: IO (FunPtr a) -> IO (FunPtr a)
+      register = registerFunPtr made
+      wrapped :: IO (FunPtr a) -> GhosttyTerminalOption -> IO ()
+      wrapped mk opt = setPtr opt . castFunPtrToPtr =<< register mk
       setPtr opt p = expectSuccess (CallSite "ghostty_terminal_set") =<< ghosttyTerminalSet h opt p
   ud <- gveffUserdataNew
   when (ud == nullPtr) $ throwIO (OutOfMemory (CallSite "gveff_userdata_new"))
@@ -203,15 +215,21 @@ installCallbacks h buf answers enq xtv = do
         wrapped (mkGhosttyTerminalProgramStatusFn (onProgramStatus buf)) GhosttyTerminalOptProgramStatus
         wrapped (mkGhosttyTerminalSemanticPromptFn (onSemanticPrompt buf)) GhosttyTerminalOptSemanticPrompt
         wrapped (mkGhosttyTerminalResetFn (\_ _ -> push buf (Ready Reset))) GhosttyTerminalOptReset
-        notify <- mkGhosttyTerminalRenderHoldFn (onRenderHold buf ud)
-        modifyIORef' made (castFunPtr notify :)
-        gveffSetHoldNotify ud notify
+        gveffSetHoldNotify ud =<< register (mkGhosttyTerminalRenderHoldFn (onRenderHold buf ud))
         setPtr GhosttyTerminalOptRenderHold (castFunPtrToPtr gveffRenderHold)
         wrapped (mkGhosttyTerminalUnknownSequenceFn (onUnknownSequence buf)) GhosttyTerminalOptUnknownSequence
         wrapped (mkGhosttyTerminalResizeWindowFn (onResizeWindow buf)) GhosttyTerminalOptResizeWindow
-  install `onException` (readIORef made >>= \fps -> releaseCallbacks Installed {funPtrs = fps, userdata = ud})
-  fps <- readIORef made
-  pure Installed {funPtrs = fps, userdata = ud}
+  let installed = (\funPtrs -> Installed {funPtrs, userdata = ud}) <$> readIORef made
+  install `onException` (releaseCallbacks =<< installed)
+  installed
+
+-- | Make a callback's function pointer and record it to be freed, masked so
+-- that no asynchronous exception falls between the two and leaks it. Every
+-- pointer 'installCallbacks' makes goes through it (regression 15).
+registerFunPtr :: IORef [FunPtr ()] -> IO (FunPtr a) -> IO (FunPtr a)
+registerFunPtr made mk = mask_ $ do
+  fp <- mk
+  fp <$ modifyIORef' made (castFunPtr fp :)
 
 -- | Free the callbacks, the answer strings and the @USERDATA@. Only once the
 -- terminal that calls them is freed.
@@ -255,10 +273,6 @@ enquiryIndex, xtversionIndex, answerCount :: Int
 enquiryIndex = 0
 xtversionIndex = 1
 answerCount = 2
-
--- | No bytes, at no address.
-emptyString :: GhosttyString
-emptyString = GhosttyString {ptr = nullPtr, len = 0}
 
 -- | Free a string 'replaceAnswer' made.
 freeString :: GhosttyString -> IO ()
@@ -336,11 +350,15 @@ captureHeld i rs = toBool <$> gveffCaptureHeld i.userdata rs
 captureRelease :: Installed -> IO ()
 captureRelease i = gveffCaptureRelease i.userdata
 
--- | Mark a frame of a render state open ('True') or closed. A hold that
--- begins while one is open does not capture into it, since its rows are
--- being read and an update would invalidate them.
-captureFraming :: Installed -> GhosttyRenderState -> Bool -> IO ()
-captureFraming i rs b = gveffCaptureFraming i.userdata rs (if b then 1 else 0)
+-- | Whether a render state has a frame open.
+data Framing = FrameOpen | FrameClosed
+  deriving stock (Eq, Show)
+
+-- | Mark a frame of a render state open or closed. A hold that begins
+-- while one is open does not capture into it, since its rows are being
+-- read and an update would invalidate them.
+captureFraming :: Installed -> GhosttyRenderState -> Framing -> IO ()
+captureFraming i rs = gveffCaptureFraming i.userdata rs . fromBool . (== FrameOpen)
 
 -- * The callbacks
 
@@ -353,13 +371,9 @@ push buf p = modifyIORef' buf (p :)
 sheltered :: IORef [Pending] -> a -> IO a -> IO a
 sheltered buf dflt act = act `catch` \e -> dflt <$ push buf (Failed e)
 
--- | A borrowed string, copied out and decoded leniently.
-text :: GhosttyString -> IO Text
-text s = decodeUtf8 <$> ghosttyStringBytes s
-
 -- | A percentage the header gives as -1 when absent.
 percentOf :: Int8 -> Maybe Word8
-percentOf n = if n < 0 then Nothing else Just (fromIntegral n)
+percentOf n = fromIntegral n <$ guard (n >= 0)
 
 -- | @RENDER_HOLD@'s Haskell half, called by the C callback after it
 -- captured: a capture that failed, then the event.
@@ -368,11 +382,8 @@ onRenderHold buf ud _ _ held = sheltered buf () $ do
   failure <- gveffCaptureFailure ud
   case resultCode failure of
     ResultSuccess -> pass
-    ResultOutOfMemory -> push buf (Failed (toException (OutOfMemory captureSite)))
-    other -> push buf (Failed (toException (Invariant captureSite other)))
-  push buf (Ready (RenderHold (held /= 0)))
-  where
-    captureSite = CallSite "ghostty_render_state_update"
+    other -> push buf (Failed (toException (resultError (CallSite "ghostty_render_state_update") other)))
+  push buf (Ready (RenderHold (toBool held)))
 
 -- | @WRITE_PTY@: copy the reply out.
 onWritePty :: IORef [Pending] -> GhosttyTerminal -> Ptr () -> Ptr Word8 -> CSize -> IO ()
@@ -403,8 +414,7 @@ onSchemeAnswer buf answers _ _ out = sheltered buf 0 $ do
   a <- readIORef answers
   case a.scheme of
     Nothing -> pure 0
-    Just Light -> 1 <$ poke out GhosttyColorSchemeLight
-    Just Dark -> 1 <$ poke out GhosttyColorSchemeDark
+    Just scheme -> 1 <$ poke out (colorSchemeCode scheme)
 
 -- | @DEVICE_ATTRIBUTES@: the configured attributes, always.
 onAttributesAnswer :: IORef [Pending] -> IORef Answers -> GhosttyTerminal -> Ptr () -> Ptr GhosttyDeviceAttributes -> IO CBool
@@ -438,7 +448,7 @@ onClipboardWrite buf answers _ _ wp = sheltered buf () $ do
   ok <- case location of
     Just loc | a.clipboard -> do
       cs <- peekArray (fromIntegral w.contentsLen) w.contents
-      contents <- forM cs $ \c -> ClipboardContent <$> text c.mime <*> ghosttyStringBytes c.data_
+      contents <- forM cs $ \c -> ClipboardContent <$> stringText c.mime <*> ghosttyStringBytes c.data_
       True <$ push buf (Ready (ClipboardWrite loc contents))
     _ -> pure False
   let reply =
@@ -457,7 +467,7 @@ clipboardSite = CallSite "GhosttyTerminalClipboardWriteFn"
 onNotification :: IORef [Pending] -> GhosttyTerminal -> Ptr () -> Ptr GhosttyTerminalDesktopNotification -> IO ()
 onNotification buf _ _ np = sheltered buf () $ do
   n <- peek np
-  e <- Notification <$> text n.title <*> text n.body
+  e <- Notification <$> stringText n.title <*> stringText n.body
   push buf (Ready e)
 
 -- | @PROGRESS_REPORT@.
@@ -496,10 +506,10 @@ onProgramStatus buf _ _ rp = sheltered buf () $ do
     Right (st, nd) -> do
       report <-
         ProgramReport st nd (percentOf r.progress)
-          <$> text r.id
-          <*> text r.app
-          <*> text r.title
-          <*> text r.message
+          <$> stringText r.id
+          <*> stringText r.app
+          <*> stringText r.title
+          <*> stringText r.message
       push buf (Ready (ProgramStatus report))
 
 -- | @SEMANTIC_PROMPT@: the mark now, the cursor after the write.
@@ -514,10 +524,10 @@ onSemanticPrompt buf _ _ ep = sheltered buf () $ do
       GhosttySemanticPromptPromptSecondary -> mark (PromptStart SecondaryPrompt)
       GhosttySemanticPromptPromptKindUnknown n -> push buf (Unnamed site ghosttySemanticPromptPromptKindEnum n)
     GhosttySemanticPromptInputStart -> mark InputStart
-    GhosttySemanticPromptOutputStart -> mark . OutputStart =<< text e.command
+    GhosttySemanticPromptOutputStart -> mark . OutputStart =<< stringText e.command
     GhosttySemanticPromptCommandEnd -> do
-      err <- text e.error
-      mark (CommandEnd (if e.hasExitCode /= 0 then Just e.exitCode else Nothing) err)
+      err <- stringText e.error
+      mark (CommandEnd (e.exitCode <$ guard (toBool e.hasExitCode)) err)
     -- The header says INVALID is never reported, so it is no more named
     -- than an unknown value.
     GhosttySemanticPromptInvalid -> push buf (Unnamed site ghosttySemanticPromptKindEnum 0)
@@ -532,16 +542,15 @@ onUnknownSequence buf _ _ sp = sheltered buf () $ do
   peek sp >>= \case
     UnknownSequenceApc s -> do
       b <- ghosttyStringBytes s.content
-      ready Apc (s.truncated /= 0) b
-    UnknownSequenceOsc s -> case s.terminator of
-      GhosttyOscTerminatorSt -> osc TerminatedBySt s
-      GhosttyOscTerminatorBel -> osc TerminatedByBel s
-      GhosttyOscTerminatorUnknown n -> push buf (Unnamed site ghosttyOscTerminatorEnum n)
+      ready Apc (toBool s.truncated) b
+    UnknownSequenceOsc s -> case oscTerminator s.terminator of
+      Right term -> osc term s
+      Left n -> push buf (Unnamed site ghosttyOscTerminatorEnum n)
     UnknownSequenceOther (GhosttyTerminalUnknownSequenceTag n) -> push buf (Unnamed site ghosttyTerminalUnknownSequenceTagEnum n)
   where
     site = CallSite "GhosttyTerminalUnknownSequenceFn"
     ready k t b = push buf (Ready (UnknownSequence UnsupportedSequence {kind = k, truncated = t, content = b}))
-    osc term s = ghosttyStringBytes s.content >>= ready (Osc term) (s.truncated /= 0)
+    osc term s = ghosttyStringBytes s.content >>= ready (Osc term) (toBool s.truncated)
 
 -- | @RESIZE_WINDOW@.
 onResizeWindow :: IORef [Pending] -> GhosttyTerminal -> Ptr () -> Ptr GhosttyTerminalResizeWindow -> IO ()

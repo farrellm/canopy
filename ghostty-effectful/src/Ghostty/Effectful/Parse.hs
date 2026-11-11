@@ -17,8 +17,7 @@ module Ghostty.Effectful.Parse
 where
 
 import Effectful (Eff, (:>))
-import Effectful.Dispatch.Static (unsafeEff_)
-import Ghostty.Effectful.Internal.Effect (Ghostty, owned)
+import Ghostty.Effectful.Internal.Effect (Ghostty, ownedIO)
 import Ghostty.Effectful.Internal.Parse
   ( OscCommand (..),
     OscTerminator (..),
@@ -40,9 +39,8 @@ import Ghostty.Effectful.Internal.Parse
 -- >>> runEff (runGhostty (parseSgr [(1, Semicolon), (31, Semicolon)]))
 -- Right [SgrBold,SgrFg8 1]
 parseSgr :: (Ghostty :> es) => [(Word16, Separator)] -> Eff es [SgrAttribute]
-parseSgr ps = do
-  _ <- owned "parseSgr"
-  unsafeEff_ (parseSgrParams ps)
+parseSgr ps =
+  ownedIO "parseSgr" (parseSgrParams ps)
 
 -- | The command an OSC sequence holds, given its body (the bytes between
 -- @ESC ]@ and the terminator) and how it was ended; 'Nothing' for an
@@ -56,6 +54,5 @@ parseSgr ps = do
 -- >>> runEff (runGhostty (parseOsc 0 TerminatedByBel "2;hello"))
 -- Right (Just (OscChangeWindowTitle "hello"))
 parseOsc :: (Ghostty :> es) => Word -> OscTerminator -> ByteString -> Eff es (Maybe OscCommand)
-parseOsc limit end body = do
-  _ <- owned "parseOsc"
-  unsafeEff_ (parseOscBytes (fromIntegral limit) end body)
+parseOsc limit end body =
+  ownedIO "parseOsc" (parseOscBytes (fromIntegral limit) end body)

@@ -243,7 +243,7 @@ data ColorScheme
     Light
   | -- | light text on a dark background
     Dark
-  deriving stock (Eq, Show, Enum, Bounded)
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
 
 -- | What a terminal reports itself to be (DA1, DA2, DA3).
 data DeviceAttributes = DeviceAttributes
@@ -282,7 +282,7 @@ data Screen
     Primary
   | -- | the alternate screen, which full-screen programs use
     Alternate
-  deriving stock (Eq, Show, Enum, Bounded)
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
 
 -- | A cursor's shape.
 data CursorShape
@@ -294,7 +294,7 @@ data CursorShape
     UnderlineCursor
   | -- | a hollow block
     HollowBlockCursor
-  deriving stock (Eq, Show, Enum, Bounded)
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
 
 -- | The kitty keyboard protocol's progressive enhancement flags.
 data KittyFlags = KittyFlags
@@ -425,7 +425,7 @@ data MouseShape
     MouseZoomIn
   | -- | @zoom-out@
     MouseZoomOut
-  deriving stock (Eq, Show, Enum, Bounded)
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
 
 -- | How a DECRQCRA checksum is computed: XTCHECKSUM's bits, as xterm's
 -- @checksumExtension@ names them.

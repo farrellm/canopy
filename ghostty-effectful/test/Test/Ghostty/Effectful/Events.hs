@@ -6,21 +6,20 @@
 -- 'setT' changes, and the other callbacks' events.
 module Test.Ghostty.Effectful.Events (tests) where
 
-import Control.Exception (ErrorCall (..))
+import Control.Exception (ErrorCall (..), MaskingState (..), getMaskingState)
 import Data.ByteString qualified as BS
-import Effectful (Eff, IOE)
 import Effectful.Exception (try)
-import Foreign.Ptr (castFunPtrToPtr, freeHaskellFunPtr)
-import Ghostty.Effectful (Ghostty)
+import Foreign.Ptr (castFunPtrToPtr, freeHaskellFunPtr, nullFunPtr)
 import Ghostty.Effectful.Event
-import Ghostty.Effectful.Internal.Callbacks (Pending (..))
-import Ghostty.Effectful.Internal.Terminal (Extent (..), Terminal (..))
+import Ghostty.Effectful.Internal.Callbacks (Pending (..), registerFunPtr)
+import Ghostty.Effectful.Internal.Size (Extent (..))
+import Ghostty.Effectful.Internal.Terminal (Terminal (..))
 import Ghostty.Effectful.Mode (ModeKey (..))
 import Ghostty.Effectful.Point (Point (..))
 import Ghostty.Effectful.Terminal
 import Ghostty.FFI.Terminal (ghosttyTerminalSet, pattern GhosttyTerminalOptBell)
 import Ghostty.FFI.Terminal.Callbacks (mkGhosttyTerminalBellFn)
-import Test.Ghostty.Effectful.Support (config, ghostty, grid)
+import Test.Ghostty.Effectful.Support (config, grid, withConfig, withFresh)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=))
 
@@ -28,7 +27,18 @@ tests :: TestTree
 tests =
   testGroup
     "Events"
-    [ testGroup
+    [ -- Regression 15 (DESIGN.md §4.5): the render-hold callback's function
+      -- pointer was made and recorded unmasked, so an asynchronous exception
+      -- between the two leaked it. Every pointer is now registered through
+      -- the helper checked here.
+      testCase "regression 15: a callback's function pointer is made masked, and recorded" $ do
+        made <- newIORef []
+        state <- newIORef Unmasked
+        _ <- registerFunPtr made (nullFunPtr <$ (writeIORef state =<< getMaskingState))
+        masking <- readIORef state
+        recorded <- readIORef made
+        (masking, recorded) @?= (MaskedInterruptible, [nullFunPtr]),
+      testGroup
         "order"
         [ testCase "OSC 133 marks, bells and titles come in stream order" $ do
             evs <- withFresh (`feed` session)
@@ -239,14 +249,6 @@ sessionEvents =
 -- | A prompt mark with the cursor at a column and row.
 mark :: PromptStep -> Word16 -> Word32 -> TerminalEvent
 mark step c r = SemanticPrompt PromptMark {step, cursor = Point {col = c, row = r}}
-
--- | Run with a fresh terminal of 'config'.
-withFresh :: (forall s. Terminal s -> Eff '[Ghostty, IOE] a) -> IO a
-withFresh = withConfig config
-
--- | Run with a fresh terminal, failing the test on a version mismatch.
-withConfig :: TerminalConfig -> (forall s. Terminal s -> Eff '[Ghostty, IOE] a) -> IO a
-withConfig cfg k = ghostty (withTerminal cfg k)
 
 -- | What a test's injected failure throws.
 boom :: ErrorCall

@@ -14,7 +14,7 @@ import Ghostty.Effectful.Internal.Effect (linkedVersion, optionalFeatures, runGh
 import Ghostty.Effectful.Terminal
 import Ghostty.FFI.BuildInfo (GhosttyBuildInfo (..), ghosttyBuildInfoEnum)
 import Ghostty.FFI.Layout (CEnum (..))
-import Test.Ghostty.Effectful.Support (config, ghostty, grid)
+import Test.Ghostty.Effectful.Support (config, ghostty, grid, withFresh)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=))
 
@@ -63,7 +63,7 @@ tests =
           openTerminals
         r @?= 1,
       testCase "an operation from a forked thread throws WrongThread" $ do
-        r <- ghostty $ withTerminal config $ \t -> fromForkedThread (void (reset t))
+        r <- withFresh $ \t -> fromForkedThread (void (reset t))
         r @?= Left (WrongThread (CallSite "reset")),
       testCase "opening a terminal from a forked thread throws WrongThread" $ do
         r <- ghostty $ fromForkedThread (withTerminal config (const pass))

@@ -260,6 +260,41 @@ Written as changes land, not at release (DESIGN.md §2.9).
   and every kitty-image key then threw `Invariant` on its `UNSUPPORTED` (regression 12).
 - The format goldens are unchanged. The feed benchmark's allocation is within the gate, each
   iteration about 2 KB more, from the version check's feature queries in every `runGhostty`.
+- Refactored for idiom, with no change of behaviour beyond the fixes below. `feed` folds every OSC
+  stop's events onto one strict accumulator and joins `WritePty` runs once. That is about 10% less
+  allocation on the feed benchmark's prompts, and 30% less on its 4 KiB writes. Operations are
+  built on `ownedIO`, `countOf` and `scoped`. Result switches, out-parameter reads, buffer retries,
+  string marshalling, bit flags and palettes each have one helper, in
+  `Ghostty.Effectful.Internal.Error` or `.Convert`. `OscTerminator` is defined once, in
+  `Ghostty.Effectful.Event`. Breaking, in the public API:
+  - `encodePaste` takes `Bracketing` (`Bracketed` or `Unbracketed`) rather than a `Bool`.
+  - `modeNumber` takes `ModeFamily` (`AnsiMode` or `DecPrivateMode`) rather than a `Bool`.
+  - The public enums derive `Ord`, and `GhosttyError`'s `Exception` instance is written out.
+- Fixed: seven calls with a documented refusal switched on their result by hand. Five of them (a
+  tracked reference's point, a grid reference for formatting, an OSC datum, a cell's colour,
+  grapheme or hyperlink URI, and `feed`'s `vt_write_until`) threw `Invariant` for running out of
+  memory where every other call throws `OutOfMemory`. Each now goes through the shared helper, which regression 13 checks. The
+  render-hold callback's function pointer is also registered masked, like the others, so an
+  asynchronous exception can no longer leak it: every pointer goes through
+  `Internal.Callbacks.registerFunPtr`, which regression 15 checks makes it masked and records it. A
+  key or mouse encoder whose options cannot be set is freed rather than leaked: both open through
+  `Internal.Error.configured`, which regression 16 checks frees a handle whose configuration throws.
+  Neither failure can be produced through the public API, so each case checks the helper.
+- Fixed: every region parameter was phantom, so `coerce` took a handle out of its region
+  without its constructor, and `withTerminal cfg (pure . coerce)` returned a terminal the region
+  then freed (#15; on master before this branch). `Terminal`, `TrackedRef`, `RenderState`,
+  `Frame`, `Row`, `KeyEncoder` and `MouseEncoder` declare their region roles nominal, as `ST`
+  does, and `forgetRegion` rebuilds the record rather than coercing it. Regression 14 checks, with
+  deferred type errors, that each coercion no longer type-checks.
+- Fixed: `track` made the tracked reference and registered it with its terminal unmasked, so an
+  asynchronous exception between the two leaked the reference (on master before this branch).
+  Both now happen masked, in `Internal.Terminal.registerRef`, which regression 17 checks.
+- `ghostty-effectful-bench` has a `Render` group (DESIGN.md §12.3): full frames of every cell on
+  three screens, cursor and colours, and 24 frames of one new line each, gated like the feed.
+  Measuring it found the refactor's per-cell readers 20% slower than before. The cause was local
+  `Storable` helpers that GHC allocated as closures on every call, an `fmap` over the colour
+  reads, and an unfold into a vector. All three are fixed: the render path is at parity in time
+  and 2–4% under in allocation. The same fix in `getData` takes the feed's prompts to 161 MB.
 
 ### M0: infrastructure
 

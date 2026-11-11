@@ -55,3 +55,7 @@
     # 7. The house uses optics (§2.7).
     - name: Control.Lens.**
       within: []
+
+# A scoped handle's continuation is rank-2, so its argument cannot be
+# eta-reduced away (GHC does not deeply skolemise).
+- ignore: {name: Eta reduce, within: [Ghostty.Effectful.Encode, Ghostty.Effectful.Render]}

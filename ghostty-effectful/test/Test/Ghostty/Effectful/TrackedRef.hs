@@ -3,33 +3,45 @@
 -- terminal, never twice.
 module Test.Ghostty.Effectful.TrackedRef (tests) where
 
+import Control.Exception (MaskingState (..), getMaskingState)
 import Data.ByteString qualified as BS
 import Effectful (Eff, IOE)
 import Ghostty.Effectful (Ghostty)
+import Ghostty.Effectful.Internal.Terminal (registerRef)
 import Ghostty.Effectful.Point (Coord (..), Point (..))
 import Ghostty.Effectful.Terminal
-import Test.Ghostty.Effectful.Support (config, ghostty)
+import Test.Ghostty.Effectful.Support (config, expectJust, ghostty, withFresh)
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
+import Test.Tasty.HUnit (testCase, (@?=))
 
 tests :: TestTree
 tests =
   testGroup
     "TrackedRef"
-    [ testCase "a reference reads back its point" $ do
-        r <- ghostty $ withTerminal config $ \t -> do
+    [ -- Regression 17 (DESIGN.md §4.2): a tracked reference was made, then
+      -- registered, unmasked, so an asynchronous exception between the two
+      -- leaked it. 'trackPoint' now does both through the helper checked
+      -- here.
+      testCase "regression 17: a reference is made and registered masked" $ do
+        r <- withFresh $ \t -> liftIO $ do
+          state <- newIORef Unmasked
+          made <- registerRef t (Nothing <$ (writeIORef state =<< getMaskingState))
+          (isJust made,) <$> readIORef state
+        r @?= (False, MaskedInterruptible),
+      testCase "a reference reads back its point" $ do
+        r <- withFresh $ \t -> do
           ref <- tracked t (Point 5 3 :: Point 'Active)
           (,,) <$> refPoint @'Active ref <*> refPoint @'Grid ref <*> refAlive ref
         r @?= (Just (Point 5 3), Just (Point 5 3), True),
       testCase "a point outside the grid is refused" $ do
-        r <- ghostty $ withTerminal config $ \t -> do
+        r <- withFresh $ \t -> do
           a <- track t (Point 80 0 :: Point 'Active)
           b <- track t (Point 0 24 :: Point 'Active)
           n <- openTrackedRefs
           pure (isJust a, isJust b, n)
         r @?= (False, False, 0),
       testCase "a reference follows its cell into the scrollback" $ do
-        r <- ghostty $ withTerminal config $ \t -> do
+        r <- withFresh $ \t -> do
           ref <- tracked t (Point 0 0 :: Point 'Active)
           write t (BS.replicate 30 10)
           (,,) <$> refPoint @'Active ref <*> refPoint @'Grid ref <*> refPoint @'History ref
@@ -38,7 +50,7 @@ tests =
       -- scrollback to the active row that many rows down. With 5 rows of
       -- scrollback, History row 5 was tracked as Active row 0.
       testCase "a scrollback row past the scrollback is refused" $ do
-        r <- ghostty $ withTerminal config $ \t -> do
+        r <- withFresh $ \t -> do
           write t (BS.replicate 28 10)
           past <- track t (Point 0 5 :: Point 'History)
           lastRow <- track t (Point 0 4 :: Point 'History)
@@ -51,13 +63,13 @@ tests =
       -- cell read back as a scrollback row past the scrollback (its screen
       -- row) rather than Nothing.
       testCase "an active-area reference has no scrollback point" $ do
-        r <- ghostty $ withTerminal config $ \t -> do
+        r <- withFresh $ \t -> do
           write t (BS.replicate 28 10)
           ref <- tracked t (Point 0 1 :: Point 'Active)
           (,,) <$> refPoint @'Active ref <*> refPoint @'Grid ref <*> refPoint @'History ref
         r @?= (Just (Point 0 1), Just (Point 0 6), Nothing),
       testCase "a reference moves, and stays when the point is outside" $ do
-        r <- ghostty $ withTerminal config $ \t -> do
+        r <- withFresh $ \t -> do
           ref <- tracked t (Point 0 0 :: Point 'Active)
           a <- moveRef ref (Point 7 9 :: Point 'Active)
           b <- moveRef ref (Point 0 99 :: Point 'Active)
@@ -65,7 +77,7 @@ tests =
           pure (a, b, p)
         r @?= (True, False, Just (Point 7 9)),
       testCase "untrack frees once, and the reference is then inert" $ do
-        r <- ghostty $ withTerminal config $ \t -> do
+        r <- withFresh $ \t -> do
           ref <- tracked t (Point 1 1 :: Point 'Active)
           before <- openTrackedRefs
           untrack ref
@@ -90,7 +102,7 @@ tests =
 
 -- | Track a point that must be inside the grid.
 tracked :: Terminal s -> Point 'Active -> Eff '[Ghostty, IOE] (TrackedRef s)
-tracked t p = track t p >>= maybe (liftIO (assertFailure ("not tracked: " <> show p))) pure
+tracked t p = track t p >>= expectJust ("not tracked: " <> show p)
 
 -- | Feed bytes, dropping the events.
 write :: Terminal s -> ByteString -> Eff '[Ghostty, IOE] ()

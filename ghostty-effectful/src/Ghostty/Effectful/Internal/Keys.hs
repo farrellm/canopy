@@ -1,5 +1,3 @@
-{-# LANGUAGE PatternSynonyms #-}
-
 -- | The marshalling behind the typed keys (DESIGN.md §4.4): for each
 -- 'TerminalData' constructor, the @ghostty_terminal_get@ key and a @peek@
 -- at its output type; for each 'TerminalOption', the
@@ -19,27 +17,22 @@ module Ghostty.Effectful.Internal.Keys
   )
 where
 
-import Control.Exception (throwIO)
-import Data.Bits (shiftL, testBit, (.|.))
-import Data.ByteString qualified as BS
+import Data.Bits (bit)
 import Foreign.C.Types (CBool, CSize)
-import Foreign.Marshal.Alloc (alloca)
-import Foreign.Marshal.Array (allocaArray, peekArray, withArray)
-import Foreign.Marshal.Utils (fromBool, toBool, with)
-import Foreign.Ptr (Ptr, castPtr, nullPtr)
+import Foreign.Marshal.Array (withArray)
+import Foreign.Marshal.Utils (fromBool, maybeWith, toBool, with)
+import Foreign.Ptr (Ptr, castPtr)
 import Foreign.Storable (Storable (..))
-import Ghostty.Effectful.Color (Palette, paletteColors, paletteFromList)
-import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), ResultCode (..))
+import Ghostty.Effectful.Color (Palette, paletteColors)
+import Ghostty.Effectful.Error (CallSite, ResultCode (..))
 import Ghostty.Effectful.Internal.Callbacks (Answers (..), captureRelease, setEnquiryAnswer, setXtversionAnswer)
-import Ghostty.Effectful.Internal.Convert (enumName, fromRgb, fromStyle, modeCode, toRgb, unknownEnum)
-import Ghostty.Effectful.Internal.Error (expectSuccess, resultCode)
+import Ghostty.Effectful.Internal.Convert (enumSite, flagBits, fromKittyFlagBits, fromRgb, fromStyle, modeCode, readPalette, stringText, toCursorStyle, toRgb, unknownEnum, withSize, withString)
+import Ghostty.Effectful.Internal.Error (expectSuccess, optionalVia, orInvariant)
 import Ghostty.Effectful.Internal.Terminal (Terminal (..), wrote)
 import Ghostty.Effectful.Mode (ModeKey (..))
 import Ghostty.Effectful.Style (Style)
 import Ghostty.Effectful.Terminal.Keys
   ( ChecksumExtension (..),
-    CursorShape (..),
-    KittyFlags (..),
     Memory (..),
     MouseShape (..),
     Screen (..),
@@ -52,7 +45,7 @@ import Ghostty.Effectful.Terminal.Keys
 import Ghostty.FFI.Mouse
 import Ghostty.FFI.Style (ghosttyStyleDefault)
 import Ghostty.FFI.Terminal
-import Ghostty.FFI.Types (GhosttyCursorStyle, GhosttyString (..), ghosttyStringBytes, pattern GhosttyCursorStyleBar, pattern GhosttyCursorStyleBlock, pattern GhosttyCursorStyleBlockHollow, pattern GhosttyCursorStyleUnderline)
+import Ghostty.FFI.Types (GhosttyString)
 
 -- | The header's key for a read.
 dataKey :: TerminalData a -> GhosttyTerminalData
@@ -139,152 +132,146 @@ optionKey = \case
 -- | @ghostty_terminal_get@ at the key's output type, copied out.
 getData :: GhosttyTerminal -> TerminalData a -> IO a
 getData h key = case key of
-  Cols -> required
-  Rows -> required
-  CursorX -> required
-  CursorY -> required
-  CursorPendingWrap -> flag
+  Cols -> required r
+  Rows -> required r
+  CursorX -> required r
+  CursorY -> required r
+  CursorPendingWrap -> flag r
   ActiveScreen ->
-    required >>= \case
+    required r >>= \case
       GhosttyTerminalScreenPrimary -> pure Primary
       GhosttyTerminalScreenAlternate -> pure Alternate
       GhosttyTerminalScreenUnknown n -> unknownEnum site ghosttyTerminalScreenEnum n
-  CursorVisible -> flag
-  KittyKeyboardFlags -> required >>= kittyFlags
-  Scrollbar -> (\(s :: GhosttyTerminalScrollbar) -> ScrollState s.total s.offset s.len) <$> required
-  CursorSgrStyle -> style
-  MouseTracking -> flag
-  Title -> string
-  Pwd -> string
-  TotalRows -> word
-  ScrollbackRows -> word
-  WidthPx -> required
-  HeightPx -> required
-  ColorForeground -> fmap fromRgb <$> maybeValue
-  ColorBackground -> fmap fromRgb <$> maybeValue
-  ColorCursor -> fmap fromRgb <$> maybeValue
-  ColorPalette -> palette
-  ColorForegroundDefault -> fmap fromRgb <$> maybeValue
-  ColorBackgroundDefault -> fmap fromRgb <$> maybeValue
-  ColorCursorDefault -> fmap fromRgb <$> maybeValue
-  ColorPaletteDefault -> palette
-  KittyImageStorageLimit -> maybeValue
-  KittyImageMediumFile -> fmap toBool <$> (maybeValue :: IO (Maybe CBool))
-  KittyImageMediumTempFile -> traverse decode =<< maybeValue
-  KittyImageMediumSharedMem -> fmap toBool <$> (maybeValue :: IO (Maybe CBool))
-  ViewportActive -> flag
-  VtProcessingError -> flag
-  ScrollbackMaxBytes -> fmap toWord <$> maybeValue
-  ScrollbackMaxLines -> fmap toWord <$> maybeValue
-  ContinuationMaxBytes -> word
+  CursorVisible -> flag r
+  KittyKeyboardFlags -> required r >>= fromKittyFlagBits site
+  Scrollbar -> (\(s :: GhosttyTerminalScrollbar) -> ScrollState s.total s.offset s.len) <$> required r
+  CursorSgrStyle -> style r
+  MouseTracking -> flag r
+  Title -> string r
+  Pwd -> string r
+  TotalRows -> word r
+  ScrollbackRows -> word r
+  WidthPx -> required r
+  HeightPx -> required r
+  ColorForeground -> fmap fromRgb <$> maybeValue r
+  ColorBackground -> fmap fromRgb <$> maybeValue r
+  ColorCursor -> fmap fromRgb <$> maybeValue r
+  ColorPalette -> palette r
+  ColorForegroundDefault -> fmap fromRgb <$> maybeValue r
+  ColorBackgroundDefault -> fmap fromRgb <$> maybeValue r
+  ColorCursorDefault -> fmap fromRgb <$> maybeValue r
+  ColorPaletteDefault -> palette r
+  KittyImageStorageLimit -> maybeValue r
+  KittyImageMediumFile -> fmap (toBool @CBool) <$> maybeValue r
+  KittyImageMediumTempFile -> traverse stringText =<< maybeValue r
+  KittyImageMediumSharedMem -> fmap (toBool @CBool) <$> maybeValue r
+  ViewportActive -> flag r
+  VtProcessingError -> flag r
+  ScrollbackMaxBytes -> fmap toWord <$> maybeValue r
+  ScrollbackMaxLines -> fmap toWord <$> maybeValue r
+  ContinuationMaxBytes -> word r
   Mode m -> do
-    c <- fetchInto (GhosttyTerminalModeConfig {mode = modeCode m, value = 0})
-    maybe (throwIO (Invariant site ResultNoValue)) (pure . toBool . (.value)) c
-  VtGround -> flag
-  CursorAtPrompt -> flag
-  ClipboardWriteMaxBytes -> word
-  MouseShape -> required >>= mouseShape
+    c <- orInvariant site ResultNoValue =<< fetchInto r (GhosttyTerminalModeConfig {mode = modeCode m, value = 0})
+    pure (toBool c.value)
+  VtGround -> flag r
+  CursorAtPrompt -> flag r
+  ClipboardWriteMaxBytes -> word r
+  MouseShape -> required r >>= mouseShape site
   MemoryUsage -> do
-    u <- fetchInto (memoryUsage (fromIntegral (sizeOf (memoryUsage 0))))
-    maybe (throwIO (Invariant site ResultNoValue)) (pure . fromMemoryUsage) u
+    fromMemoryUsage <$> (orInvariant site ResultNoValue =<< fetchInto r (withSize memoryUsage))
   where
     k = dataKey key
-    site = CallSite ("ghostty_terminal_get " <> enumName ghosttyTerminalDataEnum (let GhosttyTerminalData n = k in n))
+    site = enumSite "ghostty_terminal_get" ghosttyTerminalDataEnum (coerce k)
+    r = KeyRead h k site
 
-    -- The read into memory set up by the caller; 'Nothing' on NO_VALUE.
-    fetchWith :: (Storable b) => (Ptr b -> IO ()) -> IO (Maybe b)
-    fetchWith prepare = alloca $ \p -> do
-      prepare p
-      r <- ghosttyTerminalGet h k (castPtr p)
-      case resultCode r of
-        ResultSuccess -> Just <$> peek p
-        ResultNoValue -> pure Nothing
-        ResultOutOfMemory -> throwIO (OutOfMemory site)
-        other -> throwIO (Invariant site other)
+-- | One @ghostty_terminal_get@ read: the terminal, the key, and where its
+-- errors come from (built only on failure). The readers below are top
+-- level and take it, rather than local to 'getData': local, each of their
+-- specialisations would be a closure 'getData' allocated on every call,
+-- whichever key it read (about 400 bytes a read, which the cursor reads
+-- after every prompt mark would pay).
+data KeyRead = KeyRead GhosttyTerminal GhosttyTerminalData CallSite
 
-    fetchInto :: (Storable b) => b -> IO (Maybe b)
-    fetchInto v = fetchWith (`poke` v)
+-- | The read into memory set up by the caller; 'Nothing' on NO_VALUE.
+fetchWith :: (Storable b) => KeyRead -> (Ptr b -> IO ()) -> IO (Maybe b)
+fetchWith (KeyRead h k site) prepare = optionalVia ResultNoValue site $ \p -> do
+  prepare p
+  ghosttyTerminalGet h k (castPtr p)
 
-    maybeValue :: (Storable b) => IO (Maybe b)
-    maybeValue = fetchWith (const pass)
+-- | The read into a value of the key's struct, set up first.
+fetchInto :: (Storable b) => KeyRead -> b -> IO (Maybe b)
+fetchInto r v = fetchWith r (`poke` v)
 
-    required :: (Storable b) => IO b
-    required = maybeValue >>= maybe (throwIO (Invariant site ResultNoValue)) pure
+-- | The read; 'Nothing' on NO_VALUE.
+maybeValue :: (Storable b) => KeyRead -> IO (Maybe b)
+maybeValue r = fetchWith r (const pass)
 
-    flag :: IO Bool
-    flag = (/= (0 :: CBool)) <$> required
+-- | The read, which the header says always has a value.
+required :: (Storable b) => KeyRead -> IO b
+required r@(KeyRead _ _ site) = orInvariant site ResultNoValue =<< maybeValue r
 
-    word :: IO Word
-    word = toWord <$> required
+-- | A @bool@ read.
+flag :: KeyRead -> IO Bool
+flag r = toBool @CBool <$> required r
 
-    toWord :: CSize -> Word
-    toWord = fromIntegral
+-- | A @size_t@ read.
+word :: KeyRead -> IO Word
+word r = toWord <$> required r
 
-    decode :: GhosttyString -> IO Text
-    decode s = decodeUtf8 <$> ghosttyStringBytes s
+-- | A @size_t@ as a 'Word'.
+toWord :: CSize -> Word
+toWord = fromIntegral
 
-    string :: IO Text
-    string = required >>= decode
+-- | A string read, copied out.
+string :: KeyRead -> IO Text
+string r = stringText =<< required r
 
-    style :: IO Style
-    style = fetchWith ghosttyStyleDefault >>= maybe (throwIO (Invariant site ResultNoValue)) (fromStyle site)
+-- | A style read, into a style set to the default first.
+style :: KeyRead -> IO Style
+style r@(KeyRead _ _ site) = fromStyle site =<< orInvariant site ResultNoValue =<< fetchWith r ghosttyStyleDefault
 
-    palette :: IO Palette
-    palette = allocaArray 256 $ \p -> do
-      expectSuccess site =<< ghosttyTerminalGet h k (castPtr p)
-      cs <- peekArray 256 p
-      maybe (throwIO (Invariant site ResultInvalidValue)) pure (paletteFromList (map fromRgb cs))
+-- | A palette read.
+palette :: KeyRead -> IO Palette
+palette (KeyRead h k site) = readPalette site (ghosttyTerminalGet h k . castPtr)
 
-    kittyFlags :: Word8 -> IO KittyFlags
-    kittyFlags w
-      | w > 31 = throwIO (UnknownEnum site "GhosttyKittyKeyFlags" (toInteger w))
-      | otherwise =
-          pure
-            KittyFlags
-              { disambiguate = testBit w 0,
-                reportEvents = testBit w 1,
-                reportAlternates = testBit w 2,
-                reportAll = testBit w 3,
-                reportAssociated = testBit w 4
-              }
-
-    mouseShape :: GhosttyMouseShape -> IO MouseShape
-    mouseShape = \case
-      GhosttyMouseShapeDefault -> pure MouseDefault
-      GhosttyMouseShapeContextMenu -> pure MouseContextMenu
-      GhosttyMouseShapeHelp -> pure MouseHelp
-      GhosttyMouseShapePointer -> pure MousePointer
-      GhosttyMouseShapeProgress -> pure MouseProgress
-      GhosttyMouseShapeWait -> pure MouseWait
-      GhosttyMouseShapeCell -> pure MouseCell
-      GhosttyMouseShapeCrosshair -> pure MouseCrosshair
-      GhosttyMouseShapeText -> pure MouseText
-      GhosttyMouseShapeVerticalText -> pure MouseVerticalText
-      GhosttyMouseShapeAlias -> pure MouseAlias
-      GhosttyMouseShapeCopy -> pure MouseCopy
-      GhosttyMouseShapeMove -> pure MouseMove
-      GhosttyMouseShapeNoDrop -> pure MouseNoDrop
-      GhosttyMouseShapeNotAllowed -> pure MouseNotAllowed
-      GhosttyMouseShapeGrab -> pure MouseGrab
-      GhosttyMouseShapeGrabbing -> pure MouseGrabbing
-      GhosttyMouseShapeAllScroll -> pure MouseAllScroll
-      GhosttyMouseShapeColResize -> pure MouseColResize
-      GhosttyMouseShapeRowResize -> pure MouseRowResize
-      GhosttyMouseShapeNResize -> pure MouseNResize
-      GhosttyMouseShapeEResize -> pure MouseEResize
-      GhosttyMouseShapeSResize -> pure MouseSResize
-      GhosttyMouseShapeWResize -> pure MouseWResize
-      GhosttyMouseShapeNeResize -> pure MouseNeResize
-      GhosttyMouseShapeNwResize -> pure MouseNwResize
-      GhosttyMouseShapeSeResize -> pure MouseSeResize
-      GhosttyMouseShapeSwResize -> pure MouseSwResize
-      GhosttyMouseShapeEwResize -> pure MouseEwResize
-      GhosttyMouseShapeNsResize -> pure MouseNsResize
-      GhosttyMouseShapeNeswResize -> pure MouseNeswResize
-      GhosttyMouseShapeNwseResize -> pure MouseNwseResize
-      GhosttyMouseShapeZoomIn -> pure MouseZoomIn
-      GhosttyMouseShapeZoomOut -> pure MouseZoomOut
-      GhosttyMouseShapeUnknown n -> unknownEnum site ghosttyMouseShapeEnum n
+-- | A mouse shape from the binding's.
+mouseShape :: CallSite -> GhosttyMouseShape -> IO MouseShape
+mouseShape site = \case
+  GhosttyMouseShapeDefault -> pure MouseDefault
+  GhosttyMouseShapeContextMenu -> pure MouseContextMenu
+  GhosttyMouseShapeHelp -> pure MouseHelp
+  GhosttyMouseShapePointer -> pure MousePointer
+  GhosttyMouseShapeProgress -> pure MouseProgress
+  GhosttyMouseShapeWait -> pure MouseWait
+  GhosttyMouseShapeCell -> pure MouseCell
+  GhosttyMouseShapeCrosshair -> pure MouseCrosshair
+  GhosttyMouseShapeText -> pure MouseText
+  GhosttyMouseShapeVerticalText -> pure MouseVerticalText
+  GhosttyMouseShapeAlias -> pure MouseAlias
+  GhosttyMouseShapeCopy -> pure MouseCopy
+  GhosttyMouseShapeMove -> pure MouseMove
+  GhosttyMouseShapeNoDrop -> pure MouseNoDrop
+  GhosttyMouseShapeNotAllowed -> pure MouseNotAllowed
+  GhosttyMouseShapeGrab -> pure MouseGrab
+  GhosttyMouseShapeGrabbing -> pure MouseGrabbing
+  GhosttyMouseShapeAllScroll -> pure MouseAllScroll
+  GhosttyMouseShapeColResize -> pure MouseColResize
+  GhosttyMouseShapeRowResize -> pure MouseRowResize
+  GhosttyMouseShapeNResize -> pure MouseNResize
+  GhosttyMouseShapeEResize -> pure MouseEResize
+  GhosttyMouseShapeSResize -> pure MouseSResize
+  GhosttyMouseShapeWResize -> pure MouseWResize
+  GhosttyMouseShapeNeResize -> pure MouseNeResize
+  GhosttyMouseShapeNwResize -> pure MouseNwResize
+  GhosttyMouseShapeSeResize -> pure MouseSeResize
+  GhosttyMouseShapeSwResize -> pure MouseSwResize
+  GhosttyMouseShapeEwResize -> pure MouseEwResize
+  GhosttyMouseShapeNsResize -> pure MouseNsResize
+  GhosttyMouseShapeNeswResize -> pure MouseNeswResize
+  GhosttyMouseShapeNwseResize -> pure MouseNwseResize
+  GhosttyMouseShapeZoomIn -> pure MouseZoomIn
+  GhosttyMouseShapeZoomOut -> pure MouseZoomOut
+  GhosttyMouseShapeUnknown n -> unknownEnum site ghosttyMouseShapeEnum n
 
 -- | A memory report of the given struct size, every count zero.
 memoryUsage :: CSize -> GhosttyTerminalMemoryUsage
@@ -345,38 +332,36 @@ writeOption :: Terminal s -> TerminalOption a -> a -> IO ()
 writeOption t opt v = case opt of
   SetTitle -> text v put
   SetPwd -> text v put
-  SetColorForeground -> maybeWith (toRgb <$> v) put
-  SetColorBackground -> maybeWith (toRgb <$> v) put
-  SetColorCursor -> maybeWith (toRgb <$> v) put
-  SetColorPalette -> case v of
-    Nothing -> put nullPtr
-    Just p -> withArray (map toRgb (paletteColors p)) (put . castPtr)
-  SetKittyImageStorageLimit -> with v (put . castPtr)
-  SetKittyImageMediumFile -> flag v
-  SetKittyImageMediumTempFile -> maybe (put nullPtr) (`text` put) v
-  SetKittyImageMediumSharedMem -> flag v
-  SetApcMaxBytes -> maybeWith (toCSize <$> v) put
-  SetApcMaxBytesKitty -> maybeWith (toCSize <$> v) put
-  SetDefaultCursorStyle -> with (cursorStyle v) (put . castPtr)
-  SetDefaultCursorBlink -> flag v
-  SetGlyphProtocol -> flag v
+  SetColorForeground -> maybeWith with (toRgb <$> v) put
+  SetColorBackground -> maybeWith with (toRgb <$> v) put
+  SetColorCursor -> maybeWith with (toRgb <$> v) put
+  SetColorPalette -> maybeWith (withArray . map toRgb . paletteColors) v put
+  SetKittyImageStorageLimit -> with v put
+  SetKittyImageMediumFile -> putFlag v
+  SetKittyImageMediumTempFile -> maybeWith text v put
+  SetKittyImageMediumSharedMem -> putFlag v
+  SetApcMaxBytes -> maybeWith with (toCSize <$> v) put
+  SetApcMaxBytesKitty -> maybeWith with (toCSize <$> v) put
+  SetDefaultCursorStyle -> with (toCursorStyle v) put
+  SetDefaultCursorBlink -> putFlag v
+  SetGlyphProtocol -> putFlag v
   -- No byte limit is SIZE_MAX: since libghostty-vt 1.0 a null value
   -- restores the default of 10,000 bytes (regression 11).
-  SetScrollbackMaxBytes -> with (maybe maxBound toCSize v) (put . castPtr)
-  SetScrollbackMaxLines -> maybeWith (toCSize <$> v) put
-  SetContinuationMaxBytes -> with (toCSize v) (put . castPtr)
-  SetTitleReport -> flag v
+  SetScrollbackMaxBytes -> with (maybe maxBound toCSize v) put
+  SetScrollbackMaxLines -> maybeWith with (toCSize <$> v) put
+  SetContinuationMaxBytes -> with (toCSize v) put
+  SetTitleReport -> putFlag v
   SetModeDefault m -> modeValue m v
   SetMode ModeSynchronizedOutput -> do
     modeValue ModeSynchronizedOutput v
     unless v $ captureRelease t.installed
   SetMode m -> modeValue m v
-  SetUnknownMaxBytes -> with (toCSize v) (put . castPtr)
+  SetUnknownMaxBytes -> with (toCSize v) put
   SetTerminfoName -> text (fromTerminfoName v) put
-  SetClipboardWriteMaxBytes -> with (toCSize v) (put . castPtr)
-  SetResizePullScrollback -> flag v
-  SetXtChecksumReport -> flag v
-  SetXtChecksumExtension -> with (checksumBits v) (put . castPtr)
+  SetClipboardWriteMaxBytes -> with (toCSize v) put
+  SetResizePullScrollback -> putFlag v
+  SetXtChecksumReport -> putFlag v
+  SetXtChecksumExtension -> with (checksumBits v) put
   SetColorScheme -> answer (\a -> a {scheme = v})
   SetDeviceAttributes -> answer (\a -> a {attributes = v})
   SetSize -> answer (\a -> a {sizeQueries = v})
@@ -387,42 +372,26 @@ writeOption t opt v = case opt of
     h = t.handle
     k = optionKey opt
     answer = modifyIORef' t.answers
-    site = CallSite ("ghostty_terminal_set " <> enumName ghosttyTerminalOptionEnum (let GhosttyTerminalOption n = k in n))
+    site = enumSite "ghostty_terminal_set" ghosttyTerminalOptionEnum (coerce k)
 
-    put :: Ptr () -> IO ()
-    put p = expectSuccess site =<< ghosttyTerminalSet h k p
+    put :: Ptr b -> IO ()
+    put p = expectSuccess site =<< ghosttyTerminalSet h k (castPtr p)
 
-    flag :: Bool -> IO ()
-    flag b = with (fromBool b :: CBool) (put . castPtr)
+    putFlag :: Bool -> IO ()
+    putFlag b = with (fromBool @CBool b) put
 
     modeValue :: ModeKey r -> Bool -> IO ()
-    modeValue m b = with (GhosttyTerminalModeConfig {mode = modeCode m, value = fromBool b}) (put . castPtr)
+    modeValue m b = with (GhosttyTerminalModeConfig {mode = modeCode m, value = fromBool b}) put
 
     toCSize :: Word -> CSize
     toCSize = fromIntegral
 
--- | Run with a pointer to the value, or null.
-maybeWith :: (Storable b) => Maybe b -> (Ptr () -> IO ()) -> IO ()
-maybeWith Nothing f = f nullPtr
-maybeWith (Just b) f = with b (f . castPtr)
-
 -- | Run with a pointer to a borrowed 'GhosttyString' of the text's UTF-8,
 -- which the library copies.
-text :: Text -> (Ptr () -> IO ()) -> IO ()
-text t f = BS.useAsCStringLen (encodeUtf8 t) $ \(p, n) ->
-  with (GhosttyString {ptr = castPtr p, len = fromIntegral n}) (f . castPtr)
+text :: Text -> (Ptr GhosttyString -> IO a) -> IO a
+text = withString . encodeUtf8
 
--- | A cursor shape as the binding's.
-cursorStyle :: CursorShape -> GhosttyCursorStyle
-cursorStyle = \case
-  BarCursor -> GhosttyCursorStyleBar
-  BlockCursor -> GhosttyCursorStyleBlock
-  UnderlineCursor -> GhosttyCursorStyleUnderline
-  HollowBlockCursor -> GhosttyCursorStyleBlockHollow
-
--- | XTCHECKSUM's bits.
+-- | XTCHECKSUM's bits, in the order of 'ChecksumExtension''s fields.
 checksumBits :: ChecksumExtension -> Word8
 checksumBits c =
-  foldl' (.|.) 0 [if set then 1 `shiftL` i else 0 | (i, set) <- zip [0 ..] bits]
-  where
-    bits = [c.dontNegate, c.dontAddAttributes, c.dontOmitBlanks, c.unwrittenAsSpaces, c.fullCodepoints]
+  flagBits (zip [c.dontNegate, c.dontAddAttributes, c.dontOmitBlanks, c.unwrittenAsSpaces, c.fullCodepoints] (map bit [0 ..]))

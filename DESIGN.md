@@ -608,7 +608,8 @@ withTerminal
 
 `Ghostty` is statically dispatched (`Static WithSideEffects`). Its operations are plain functions in
 the module of what they act on (`Ghostty.Effectful.Terminal`, `.Render`, `.Format`, …), each starting
-with the owner check, so no one module has to know every operation's types. The representations
+with the owner check (`owned`, through `ownedIO` for one IO call and `scoped` for a handle), so no one
+module has to know every operation's types. The representations
 live in `Ghostty.Effectful.Internal.*`; the public modules export the types without constructors.
 Unlike §2.7's subsystems it has **one interpreter**: libghostty-vt is headless and deterministic, so
 the library itself is what tests run against, and a fake would test only the fake. That leaves
@@ -621,7 +622,10 @@ zero (`extent :: Word16 -> Maybe Extent`), because `terminal_new` and `terminal_
 so that refusal cannot be expressed and the remaining failure of each is out of memory.
 
 The rank-2 `s` makes a `Terminal s` unusable outside `withTerminal`, so the handle cannot outlive
-its `free`. `bracket`-style release runs on exceptions. The same pattern scopes encoders and search
+its `free`. Every region parameter (`Terminal`'s, `TrackedRef`'s, `RenderState`'s, `Frame`'s and
+`Row`'s two, the encoders') has a nominal role, declared with `type role`, as `ST`'s is: GHC infers
+a phantom one, which lets `coerce` take a handle out of its region without its constructor
+(regression 14). `bracket`-style release runs on exceptions. The same pattern scopes encoders and search
 sessions. A key or mouse encoder (M1.9) owns the one event handle it encodes from, so an encode
 fills that in rather than making an event per keystroke; a mouse encoder keeps state between events
 (the last cell it reported), which is what makes it a handle. A formatter is not a handle at this
@@ -2072,6 +2076,15 @@ takes 224 ms and allocates 200 MB: about 3.2 µs and 2.9 KB for each of its 71,0
 linear in the stops and the same in 4 KiB writes. A REPL block has four marks, so this is not the
 child-throughput budget's (§12.1) path, but the per-stop cost is the first place to look if a
 stream of marks ever is.
+
+**Rendering**, the same suite's `Render` group: the same terminal life with a screen fed and a
+render state opened, then one frame of every cell copied out (plain, SGR-coloured and wide/combining
+screens), one frame's cursor and colours, and 24 frames of one new line each, the steady state of a
+REPL. `no frame` is the life without the read. First figures (2026-11-10; GHC 9.12.4, one developer
+machine): a full 80×24 frame takes 1.5–1.9 ms and allocates 1.6–1.9 KB a cell. Local helpers
+inside a per-read or per-cell function are the cost to watch here. GHC binds each `Storable`
+specialisation of a local polymorphic helper as a closure, which the function allocates on every
+call. So the binding's readers are top level, and its small FFI read helpers are `INLINE`.
 
 ---
 

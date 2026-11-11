@@ -10,7 +10,6 @@ module Test.Ghostty.Effectful.Encode (tests) where
 
 import Control.Exception (ErrorCall (..), throwIO)
 import Data.ByteString qualified as BS
-import Data.Char (isAlphaNum, toLower)
 import Data.Text qualified as T
 import Effectful.Exception qualified as E
 import Ghostty.Effectful.Encode
@@ -18,10 +17,10 @@ import Ghostty.Effectful.Event (TerminalEvent (..))
 import Ghostty.Effectful.Internal.Encode (keyCode, modsBits)
 import Ghostty.Effectful.Internal.Size (CellPixels (..), Extent (..))
 import Ghostty.Effectful.Mode (ModeKey (..))
-import Ghostty.Effectful.Terminal (ColorScheme (..), KittyFlags (..), feed, noKittyFlags, withTerminal)
+import Ghostty.Effectful.Terminal (ColorScheme (..), KittyFlags (..), feed, noKittyFlags)
 import Ghostty.FFI.Key.Event (GhosttyKey (..), ghosttyKeyEnum, pattern GhosttyModsCtrl, pattern GhosttyModsCtrlSide, pattern GhosttyModsShift)
 import Ghostty.FFI.Layout (CEnum (..))
-import Test.Ghostty.Effectful.Support (config, ghostty, grid)
+import Test.Ghostty.Effectful.Support (ghostty, grid, rowName, squash, withFresh)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=))
 
@@ -58,7 +57,7 @@ tests =
               traverse (encodeKey enc) [keyPress KeyEnter `withText` "\r", keyPress KeyEnter]
             r @?= ["\r", "\r"],
           testCase "options from a terminal: cursor-key application mode (DECCKM)" $ do
-            r <- ghostty $ withTerminal config $ \t -> withKeyEncoder defaultKeyOptions $ \enc -> do
+            r <- withFresh $ \t -> withKeyEncoder defaultKeyOptions $ \enc -> do
               before <- encodeKey enc (keyPress KeyArrowUp)
               _ <- feed t "\ESC[?1h"
               keyOptionsFrom enc t
@@ -100,7 +99,7 @@ tests =
               encodeMouse enc MouseEvent {action = MouseRelease, button = Just MouseLeft, mods = noMods {ctrl = Just LeftSide}, position = MousePosition 25 45}
             r @?= "\ESC[<16;3;3m",
           testCase "options from a terminal: nothing until the program asks" $ do
-            r <- ghostty $ withTerminal config $ \t -> withMouseEncoder (mouseOptions surface) $ \enc -> do
+            r <- withFresh $ \t -> withMouseEncoder (mouseOptions surface) $ \enc -> do
               mouseOptionsFrom enc t
               before <- encodeMouse enc (press 5 5)
               _ <- feed t "\ESC[?1000h\ESC[?1006h"
@@ -133,12 +132,12 @@ tests =
           testCase "mode reports: DEC private, ANSI, and a mode the library does not know" $ do
             r <- ghostty $ do
               dec <- encodeModeReport (knownMode ModeCursorKeys) ModeIsSet
-              ansi <- traverse (`encodeModeReport` ModeIsReset) (modeNumber True 4)
-              other <- traverse (`encodeModeReport` ModeNotRecognized) (modeNumber False 9999)
+              ansi <- traverse (`encodeModeReport` ModeIsReset) (modeNumber AnsiMode 4)
+              other <- traverse (`encodeModeReport` ModeNotRecognized) (modeNumber DecPrivateMode 9999)
               pure (dec, ansi, other)
             r @?= ("\ESC[?1;1$y", Just "\ESC[4;2$y", Just "\ESC[?9999;0$y"),
           testCase "a mode number past 15 bits is refused" $
-            modeNumber False 0x8000 @?= Nothing,
+            modeNumber DecPrivateMode 0x8000 @?= Nothing,
           testCase "colour-scheme reports" $ do
             r <- ghostty (traverse encodeColorSchemeReport [Dark, Light])
             r @?= ["\ESC[?997;1n", "\ESC[?997;2n"]
@@ -149,29 +148,29 @@ tests =
             r <- ghostty (traverse isPasteSafe ["plain text", "two\nlines", "cr\r", "x\ESC[201~y"])
             r @?= [True, False, False, False],
           testCase "encoding without a terminal: newlines, brackets, control bytes" $ do
-            r <- ghostty (traverse (uncurry encodePaste) [(False, "a\nb"), (True, "a\nb"), (False, "a\ESCb")])
+            r <- ghostty (traverse (uncurry encodePaste) [(Unbracketed, "a\nb"), (Bracketed, "a\nb"), (Unbracketed, "a\ESCb")])
             r @?= ["a\rb", "\ESC[200~a\nb\ESC[201~", "a b"],
           testCase "an encoding longer than the first buffer is whole" $ do
             let long = BS.replicate 300 0x61
-            r <- ghostty (encodePaste True long)
+            r <- ghostty (encodePaste Bracketed long)
             r @?= "\ESC[200~" <> long <> "\ESC[201~",
           testCase "encoding leaves its input unchanged" $ do
             let input = "a\ESCb" :: ByteString
-            _ <- ghostty (encodePaste False input)
+            _ <- ghostty (encodePaste Unbracketed input)
             input @?= "a\ESCb",
           testCase "into a terminal: rejected, then allowed, as a WritePty" $ do
-            r <- ghostty $ withTerminal config $ \t -> do
+            r <- withFresh $ \t -> do
               refused <- paste t RefuseUnsafe "hi\nthere"
               allowed <- paste t AllowUnsafe "hi\nthere"
               pure (refused, allowed)
             r @?= (Left Rejected, Right [WritePty "hi\rthere"]),
           testCase "into a terminal in bracketed paste mode (2004): line breaks are safe" $ do
-            r <- ghostty $ withTerminal config $ \t -> do
+            r <- withFresh $ \t -> do
               _ <- feed t "\ESC[?2004h"
               paste t RefuseUnsafe "hi\nthere"
             r @?= Right [WritePty "\ESC[200~hi\nthere\ESC[201~"],
           testCase "an empty paste writes nothing" $ do
-            r <- ghostty $ withTerminal config $ \t -> paste t RefuseUnsafe ""
+            r <- withFresh $ \t -> paste t RefuseUnsafe ""
             r @?= Right []
         ],
       testGroup
@@ -219,12 +218,3 @@ withUnshifted e u = KeyEvent {action = e.action, key = e.key, mods = e.mods, con
 -- | The same event, with other text.
 withText :: KeyEvent -> Text -> KeyEvent
 withText e t = KeyEvent {action = e.action, key = e.key, mods = e.mods, consumedMods = e.consumedMods, composing = e.composing, text = t, unshifted = e.unshifted}
-
--- | The header's name for a value.
-rowName :: CEnum -> Integer -> Maybe Text
-rowName e n = fst <$> find ((== n) . snd) e.values
-
--- | A name without case or underscores, so that @KeyDigit0@ and
--- @GHOSTTY_KEY_DIGIT_0@, and @KeyF10@ and @GHOSTTY_KEY_F10@, compare equal.
-squash :: Text -> Text
-squash = T.filter isAlphaNum . T.map toLower

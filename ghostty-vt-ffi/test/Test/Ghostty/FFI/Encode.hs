@@ -13,7 +13,7 @@ import Foreign.C.String (CString, withCString)
 import Foreign.C.Types (CBool)
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Marshal.Utils (with)
-import Foreign.Ptr (Ptr, castFunPtrToPtr, castPtr, nullPtr)
+import Foreign.Ptr (castFunPtrToPtr, castPtr, nullPtr)
 import Foreign.Storable (Storable (..))
 import Ghostty.FFI.ColorScheme
 import Ghostty.FFI.Device
@@ -201,7 +201,7 @@ withMouseEncoder :: (GhosttyMouseEncoder -> IO a) -> IO a
 withMouseEncoder = bracket (newHandle ghosttyMouseEncoderNew) ghosttyMouseEncoderFree
 
 setMouseOpt :: (Storable a) => GhosttyMouseEncoder -> GhosttyMouseEncoderOption -> a -> IO ()
-setMouseOpt enc o v = with v $ \p -> ghosttyMouseEncoderSet enc o (castPtr p) >>= (@?= GhosttySuccess)
+setMouseOpt enc o v = withValue v (ghosttyMouseEncoderSet enc o . castPtr)
 
 -- * Paste
 
@@ -242,11 +242,3 @@ paste t text allowUnsafe =
                 allowUnsafe
         r <- with request $ \pp -> ghosttyTerminalPaste t pp wp
         (r,) <$> peek wp
-
--- * Handles
-
--- | A handle from a @…_new(allocator, &out)@ call, with the default allocator.
-newHandle :: (Storable h) => (Ptr allocator -> Ptr h -> IO GhosttyResult) -> IO h
-newHandle new = alloca $ \hp -> do
-  new nullPtr hp >>= (@?= GhosttySuccess)
-  peek hp

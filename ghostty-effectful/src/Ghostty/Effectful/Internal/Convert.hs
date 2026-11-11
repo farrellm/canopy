@@ -8,10 +8,26 @@ module Ghostty.Effectful.Internal.Convert
   ( -- * Enums
     unknownEnum,
     enumName,
+    enumSite,
+    oscTerminator,
+
+    -- * Strings and flags
+    stringText,
+    withString,
+    emptyString,
+    flagBits,
+    unfoldWhileM,
+    kittyFlagBits,
+    fromKittyFlagBits,
 
     -- * Colours and styles
     fromRgb,
     toRgb,
+    readPalette,
+    fromPalette,
+    colorSchemeCode,
+    toCursorStyle,
+    fromCursorStyle,
     fromStyle,
     fromUnderline,
 
@@ -24,26 +40,43 @@ module Ghostty.Effectful.Internal.Convert
     modeCode,
 
     -- * Sized and frozen structs
-    sized,
     withSize,
     emptyRef,
   )
 where
 
 import Control.Exception (throwIO)
-import Data.Bits ((.&.))
+import Data.Bits (Bits, complement, (.&.), (.|.))
+import Data.ByteString qualified as BS
+import Data.ByteString.Unsafe qualified as BSU
 import Foreign.C.Types (CInt, CSize)
-import Foreign.Ptr (nullPtr)
+import Foreign.Marshal.Array (allocaArray, peekArray)
+import Foreign.Marshal.Utils (with)
+import Foreign.Ptr (Ptr, castPtr, nullPtr)
 import Foreign.Storable (Storable (..))
-import Ghostty.Effectful.Color (Rgb (..))
-import Ghostty.Effectful.Error (CallSite, GhosttyError (..))
+import Ghostty.Effectful.Color (Palette, Rgb (..), paletteFromList)
+import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), ResultCode (..))
+import Ghostty.Effectful.Event (OscTerminator (..))
+import Ghostty.Effectful.Internal.Error (expectSuccess, orInvariant)
 import Ghostty.Effectful.Mode (ModeKey (..))
 import Ghostty.Effectful.Point (KnownCoord (..), Point (..), SCoord (..))
 import Ghostty.Effectful.Style (CellColor (..), Style (..), Underline (..))
+import Ghostty.Effectful.Terminal.Keys (ColorScheme (..), CursorShape (..), KittyFlags (..))
 import Ghostty.FFI.Color (GhosttyColorRgb (..))
+import Ghostty.FFI.Device (GhosttyColorScheme, pattern GhosttyColorSchemeDark, pattern GhosttyColorSchemeLight)
 import Ghostty.FFI.GridRef (GhosttyGridRef (..))
+import Ghostty.FFI.Key.Encoder
+  ( GhosttyKittyKeyFlags,
+    pattern GhosttyKittyKeyAll,
+    pattern GhosttyKittyKeyDisambiguate,
+    pattern GhosttyKittyKeyReportAll,
+    pattern GhosttyKittyKeyReportAlternates,
+    pattern GhosttyKittyKeyReportAssociated,
+    pattern GhosttyKittyKeyReportEvents,
+  )
 import Ghostty.FFI.Layout (CEnum (..))
 import Ghostty.FFI.Modes
+import Ghostty.FFI.Osc (GhosttyOscTerminator, pattern GhosttyOscTerminatorBel, pattern GhosttyOscTerminatorSt, pattern GhosttyOscTerminatorUnknown)
 import Ghostty.FFI.Point
   ( GhosttyPoint (..),
     GhosttyPointCoordinate (..),
@@ -80,6 +113,18 @@ import Ghostty.FFI.Style
     pattern GhosttyStyleFlagOverline,
     pattern GhosttyStyleFlagStrikethrough,
   )
+import Ghostty.FFI.Types
+  ( GhosttyCursorStyle,
+    GhosttyResult,
+    GhosttyString (..),
+    ghosttyCursorStyleEnum,
+    ghosttyStringBytes,
+    pattern GhosttyCursorStyleBar,
+    pattern GhosttyCursorStyleBlock,
+    pattern GhosttyCursorStyleBlockHollow,
+    pattern GhosttyCursorStyleUnderline,
+    pattern GhosttyCursorStyleUnknown,
+  )
 
 -- | Throw 'UnknownEnum' for a value of the described enum.
 unknownEnum :: CallSite -> CEnum -> CInt -> IO a
@@ -90,6 +135,75 @@ unknownEnum site e n = throwIO (UnknownEnum site e.name (toInteger n))
 enumName :: CEnum -> CInt -> Text
 enumName e n = maybe (show n) fst (find ((== toInteger n) . snd) e.values)
 
+-- | How an OSC ended, from the binding's; 'Left' with a value it does not
+-- name.
+oscTerminator :: GhosttyOscTerminator -> Either CInt OscTerminator
+oscTerminator = \case
+  GhosttyOscTerminatorSt -> Right TerminatedBySt
+  GhosttyOscTerminatorBel -> Right TerminatedByBel
+  GhosttyOscTerminatorUnknown n -> Left n
+
+-- | The call site of a call that takes an enum value, named with it:
+-- @ghostty_terminal_get GHOSTTY_TERMINAL_DATA_COLS@.
+enumSite :: Text -> CEnum -> CInt -> CallSite
+enumSite call e n = CallSite (call <> " " <> enumName e n)
+
+-- | A borrowed string, copied out and decoded leniently.
+stringText :: GhosttyString -> IO Text
+stringText s = decodeUtf8 <$> ghosttyStringBytes s
+
+-- | Run with a borrowed 'GhosttyString' of the bytes, alive until the
+-- action returns. Empty bytes are 'emptyString'.
+withString :: ByteString -> (Ptr GhosttyString -> IO a) -> IO a
+withString bs k
+  | BS.null bs = with emptyString k
+  | otherwise = BSU.unsafeUseAsCStringLen bs $ \(p, n) ->
+      with GhosttyString {ptr = castPtr p, len = fromIntegral n} k
+
+-- | No bytes, at no address: a string of length zero, whose pointer is
+-- not read.
+emptyString :: GhosttyString
+emptyString = GhosttyString {ptr = nullPtr, len = 0}
+
+-- | The flags whose condition holds, combined.
+flagBits :: (Bits b, Num b) => [(Bool, b)] -> b
+flagBits fs = foldl' (.|.) 0 [b | (True, b) <- fs]
+
+-- | Run the action while the test holds, collecting its results in order:
+-- an iterator's @next@ and its current value.
+unfoldWhileM :: (Monad m) => m Bool -> m a -> m [a]
+unfoldWhileM more act = go []
+  where
+    go acc = ifM more (act >>= \a -> go (a : acc)) (pure (reverse acc))
+
+-- | The Kitty keyboard flags as the header's bits.
+kittyFlagBits :: KittyFlags -> GhosttyKittyKeyFlags
+kittyFlagBits f =
+  flagBits
+    [ (f.disambiguate, GhosttyKittyKeyDisambiguate),
+      (f.reportEvents, GhosttyKittyKeyReportEvents),
+      (f.reportAlternates, GhosttyKittyKeyReportAlternates),
+      (f.reportAll, GhosttyKittyKeyReportAll),
+      (f.reportAssociated, GhosttyKittyKeyReportAssociated)
+    ]
+
+-- | The Kitty keyboard flags from the header's bits; 'UnknownEnum' for a
+-- bit the header does not name.
+fromKittyFlagBits :: CallSite -> GhosttyKittyKeyFlags -> IO KittyFlags
+fromKittyFlagBits site w
+  | w .&. complement GhosttyKittyKeyAll /= 0 = throwIO (UnknownEnum site "GhosttyKittyKeyFlags" (toInteger w))
+  | otherwise =
+      pure
+        KittyFlags
+          { disambiguate = has GhosttyKittyKeyDisambiguate,
+            reportEvents = has GhosttyKittyKeyReportEvents,
+            reportAlternates = has GhosttyKittyKeyReportAlternates,
+            reportAll = has GhosttyKittyKeyReportAll,
+            reportAssociated = has GhosttyKittyKeyReportAssociated
+          }
+  where
+    has b = w .&. b /= 0
+
 -- | A colour from the binding's.
 fromRgb :: GhosttyColorRgb -> Rgb
 fromRgb c = Rgb {red = c.r, green = c.g, blue = c.b}
@@ -97,6 +211,40 @@ fromRgb c = Rgb {red = c.r, green = c.g, blue = c.b}
 -- | A colour as the binding's.
 toRgb :: Rgb -> GhosttyColorRgb
 toRgb c = GhosttyColorRgb {r = c.red, g = c.green, b = c.blue}
+
+-- | The 256-colour palette a call writes to its out-parameter.
+readPalette :: CallSite -> (Ptr GhosttyColorRgb -> IO GhosttyResult) -> IO Palette
+readPalette site call = allocaArray 256 $ \p -> do
+  expectSuccess site =<< call p
+  fromPalette site =<< peekArray 256 p
+
+-- | A palette from the binding's 256 colours; 'Invariant' for any other
+-- count.
+fromPalette :: CallSite -> [GhosttyColorRgb] -> IO Palette
+fromPalette site = orInvariant site ResultInvalidValue . paletteFromList . map fromRgb
+
+-- | A colour scheme as the binding's.
+colorSchemeCode :: ColorScheme -> GhosttyColorScheme
+colorSchemeCode = \case
+  Light -> GhosttyColorSchemeLight
+  Dark -> GhosttyColorSchemeDark
+
+-- | A cursor shape as the binding's.
+toCursorStyle :: CursorShape -> GhosttyCursorStyle
+toCursorStyle = \case
+  BarCursor -> GhosttyCursorStyleBar
+  BlockCursor -> GhosttyCursorStyleBlock
+  UnderlineCursor -> GhosttyCursorStyleUnderline
+  HollowBlockCursor -> GhosttyCursorStyleBlockHollow
+
+-- | A cursor shape from the binding's.
+fromCursorStyle :: CallSite -> GhosttyCursorStyle -> IO CursorShape
+fromCursorStyle site = \case
+  GhosttyCursorStyleBar -> pure BarCursor
+  GhosttyCursorStyleBlock -> pure BlockCursor
+  GhosttyCursorStyleUnderline -> pure UnderlineCursor
+  GhosttyCursorStyleBlockHollow -> pure HollowBlockCursor
+  GhosttyCursorStyleUnknown n -> unknownEnum site ghosttyCursorStyleEnum n
 
 -- | A style from the binding's: its colours, and its flag word decoded, the
 -- attributes from their bits and the underline from its field (bits 8–10).

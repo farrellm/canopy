@@ -20,7 +20,7 @@ module Ghostty.Effectful.Internal.Parse
   )
 where
 
-import Control.Exception (bracket, throwIO)
+import Control.Exception (bracket)
 import Data.ByteString qualified as BS
 import Foreign.C.String (castCharToCChar)
 import Foreign.C.Types (CBool, CSize)
@@ -30,9 +30,10 @@ import Foreign.Marshal.Utils (toBool, with)
 import Foreign.Ptr (castPtr)
 import Foreign.Storable (Storable, peek)
 import Ghostty.Effectful.Color (Rgb)
-import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), ResultCode (..))
-import Ghostty.Effectful.Internal.Convert (fromRgb, fromUnderline, unknownEnum)
-import Ghostty.Effectful.Internal.Error (expectSuccess, newHandle, resultCode)
+import Ghostty.Effectful.Error (CallSite (..))
+import Ghostty.Effectful.Event (OscTerminator (..))
+import Ghostty.Effectful.Internal.Convert (fromRgb, fromUnderline, oscTerminator, stringText, unfoldWhileM, unknownEnum)
+import Ghostty.Effectful.Internal.Error (expectSuccess, newHandle, outVia)
 import Ghostty.Effectful.Style (Underline)
 import Ghostty.FFI.Osc
 import Ghostty.FFI.Sgr
@@ -47,7 +48,7 @@ data Separator
     Semicolon
   | -- | @:@
     Colon
-  deriving stock (Eq, Show, Enum, Bounded)
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
 
 -- | One attribute an SGR sequence sets. The constructors are the header's
 -- @GHOSTTY_SGR_ATTR_*@ names.
@@ -131,17 +132,11 @@ parseSgrParams ps
           withArrayLen (map (sepChar . snd) ps) $ \_ seps -> do
             expectSuccess (CallSite "ghostty_sgr_set_params")
               =<< ghosttySgrSetParams parser params seps (fromIntegral n)
-            alloca $ \ap -> collect parser ap []
+            alloca $ \ap -> unfoldWhileM (toBool <$> ghosttySgrNext parser ap) (attribute =<< peek ap)
   where
     sepChar = \case
       Semicolon -> castCharToCChar ';'
       Colon -> castCharToCChar ':'
-
-    collect parser ap acc = do
-      more <- toBool <$> ghosttySgrNext parser ap
-      if more
-        then peek ap >>= attribute >>= \a -> collect parser ap (a : acc)
-        else pure (reverse acc)
 
     site = CallSite "ghostty_sgr_next"
 
@@ -190,15 +185,6 @@ maxSgrParams :: Int
 maxSgrParams = 24
 
 -- * OSC
-
--- | How an OSC sequence was ended. A reply to one ends the same way, since
--- some programs recognise only a reply that matches.
-data OscTerminator
-  = -- | ST: @ESC \\@
-    TerminatedBySt
-  | -- | BEL
-    TerminatedByBel
-  deriving stock (Eq, Show, Enum, Bounded)
 
 -- | A command an OSC sequence holds. The constructors are the header's
 -- @GHOSTTY_OSC_COMMAND_*@ names. The parser reports the data of two: a
@@ -270,11 +256,7 @@ parseOscBytes limit end body =
     -- One datum of the command; the header says each is there for its type,
     -- so anything but success (@GHOSTTY_NO_VALUE@ included) is an invariant.
     datum :: (Storable a) => GhosttyOscCommand -> GhosttyOscCommandData -> IO a
-    datum cmd key = alloca $ \out -> do
-      r <- ghosttyOscCommandData cmd key (castPtr out)
-      case resultCode r of
-        ResultSuccess -> peek out
-        other -> throwIO (Invariant site other)
+    datum cmd key = outVia site (ghosttyOscCommandData cmd key . castPtr)
 
     command :: GhosttyOscCommand -> GhosttyOscCommandType -> IO (Maybe OscCommand)
     command cmd = \case
@@ -282,17 +264,12 @@ parseOscBytes limit end body =
       GhosttyOscCommandChangeWindowTitle -> do
         -- A GhosttyString: exactly its bytes, which are not NUL-terminated
         -- and may hold a NUL (regression 8).
-        title <- ghosttyStringBytes =<< datum cmd GhosttyOscDataChangeWindowTitleStr
-        pure (Just (OscChangeWindowTitle (decodeUtf8 title)))
+        Just . OscChangeWindowTitle <$> (stringText =<< datum cmd GhosttyOscDataChangeWindowTitleStr)
       GhosttyOscCommandUnknown -> do
         s <- datum cmd GhosttyOscDataUnknownContent
         content <- ghosttyStringBytes s
-        truncated <- toBool <$> (datum cmd GhosttyOscDataUnknownTruncated :: IO CBool)
-        terminator <-
-          datum cmd GhosttyOscDataUnknownTerminator >>= \case
-            GhosttyOscTerminatorSt -> pure TerminatedBySt
-            GhosttyOscTerminatorBel -> pure TerminatedByBel
-            GhosttyOscTerminatorUnknown n -> unknownEnum site ghosttyOscTerminatorEnum n
+        truncated <- toBool @CBool <$> datum cmd GhosttyOscDataUnknownTruncated
+        terminator <- either (unknownEnum site ghosttyOscTerminatorEnum) pure . oscTerminator =<< datum cmd GhosttyOscDataUnknownTerminator
         pure (Just (OscUnknown UnknownOsc {content, truncated, terminator}))
       GhosttyOscCommandChangeWindowIcon -> pure (Just OscChangeWindowIcon)
       GhosttyOscCommandSemanticPrompt -> pure (Just OscSemanticPrompt)

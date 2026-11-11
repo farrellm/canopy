@@ -1,6 +1,7 @@
 {-# LANGUAGE CApiFFI #-}
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE RoleAnnotations #-}
 
 -- | The encoders' representations and their raw calls (DESIGN.md §4.8). The
 -- public API is "Ghostty.Effectful.Encode", which exports these types
@@ -12,10 +13,7 @@
 -- reports and paste encoding have no handle. Every call here but 'pasteInto'
 -- is @unsafe@ and calls nothing back (§3.3).
 module Ghostty.Effectful.Internal.Encode
-  ( -- * Buffers
-    bytesVia,
-
-    -- * Key encoders
+  ( -- * Key encoders
     KeyEncoder (..),
     KeyOptions (..),
     defaultKeyOptions,
@@ -51,6 +49,7 @@ module Ghostty.Effectful.Internal.Encode
     SizeReportStyle (..),
     encodeSizeReportOf,
     ModeNumber (..),
+    ModeFamily (..),
     modeNumber,
     knownMode,
     ModeReport (..),
@@ -59,6 +58,7 @@ module Ghostty.Effectful.Internal.Encode
 
     -- * Paste
     Rejected (..),
+    Bracketing (..),
     PasteSafety (..),
     pasteSafe,
     encodePasteBytes,
@@ -66,28 +66,26 @@ module Ghostty.Effectful.Internal.Encode
   )
 where
 
-import Control.Exception (finally, onException, throwIO)
-import Data.Bits ((.|.))
+import Control.Exception (finally, onException)
 import Data.ByteString qualified as BS
 import Data.ByteString.Unsafe qualified as BSU
 import Data.Text qualified as T
 import Foreign.C.Types (CBool, CSize)
-import Foreign.Marshal.Alloc (alloca, allocaBytes)
+import Foreign.Marshal.Alloc (alloca)
 import Foreign.Marshal.Utils (fromBool, toBool, with)
 import Foreign.Ptr (Ptr, castPtr, nullPtr)
 import Foreign.Storable (Storable, peek)
-import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), ResultCode (..))
+import Ghostty.Effectful.Error (CallSite (..), ResultCode (..))
 import Ghostty.Effectful.Event (TerminalEvent)
 import Ghostty.Effectful.Input
-import Ghostty.Effectful.Internal.Convert (modeCode, withSize)
-import Ghostty.Effectful.Internal.Error (expectSuccess, newHandle, resultCode)
+import Ghostty.Effectful.Internal.Convert (colorSchemeCode, emptyString, flagBits, kittyFlagBits, modeCode, withSize, withString)
+import Ghostty.Effectful.Internal.Error (bytesVia, configured, expectSuccess, newHandle, succeedsUnless)
 import Ghostty.Effectful.Internal.Feed (drainEvents)
 import Ghostty.Effectful.Internal.Size (CellPixels (..), Extent, GridSize (..), fromExtent)
 import Ghostty.Effectful.Internal.Terminal (Terminal (..))
 import Ghostty.Effectful.Mode (ModeKey)
-import Ghostty.Effectful.Terminal.Keys (ColorScheme (..), KittyFlags (..))
+import Ghostty.Effectful.Terminal.Keys (ColorScheme (..), KittyFlags (..), noKittyFlags)
 import Ghostty.FFI.ColorScheme (ghosttyColorSchemeReportEncode)
-import Ghostty.FFI.Device (pattern GhosttyColorSchemeDark, pattern GhosttyColorSchemeLight)
 import Ghostty.FFI.Focus (ghosttyFocusEncode, pattern GhosttyFocusGained, pattern GhosttyFocusLost)
 import Ghostty.FFI.Io (GhosttyMimeReader (..), GhosttyMimeReaderFn)
 import Ghostty.FFI.Key.Encoder
@@ -108,34 +106,25 @@ import Ghostty.FFI.Mouse.Event
 import Ghostty.FFI.Paste (GhosttyPaste (..), ghosttyPasteEncode, ghosttyPasteIsSafe, ghosttyTerminalPaste, pattern GhosttyPasteSourceClipboard)
 import Ghostty.FFI.SizeReport
 import Ghostty.FFI.Terminal.Callbacks (pattern GhosttyClipboardLocationStandard)
-import Ghostty.FFI.Types (GhosttyResult, GhosttyString (..))
+import Ghostty.FFI.Types (GhosttyResult)
 
 -- * Buffers
 
--- | The bytes an encode call writes: first into a buffer that holds any
--- sequence a key, mouse or report makes, and, if the call says it needs
--- more (@GHOSTTY_OUT_OF_SPACE@, with the size), again into one of that
--- size. So a too-small buffer never escapes (DESIGN.md §4.7). Running out
--- of memory throws 'OutOfMemory'; any other result, 'Invariant'.
-bytesVia :: CallSite -> (Ptr Word8 -> CSize -> Ptr CSize -> IO GhosttyResult) -> IO ByteString
-bytesVia site call = alloca $ \written -> attempt written 64 >>= maybe (peek written >>= retry written) pure
-  where
-    attempt written n = allocaBytes n $ \buf -> do
-      r <- call buf (fromIntegral n) written
-      case resultCode r of
-        ResultSuccess -> Just <$> (peek written >>= \m -> BS.packCStringLen (castPtr buf, fromIntegral m))
-        ResultOutOfSpace -> pure Nothing
-        ResultOutOfMemory -> throwIO (OutOfMemory site)
-        other -> throwIO (Invariant site other)
-    -- The second call is given what the first asked for, so it cannot run
-    -- out of space unless the call is not the same twice.
-    retry written n = attempt written (max 1 (fromIntegral n)) >>= maybe (throwIO (Invariant site ResultOutOfSpace)) pure
+-- | The bytes an encode call writes, which reports their length (or the
+-- length it needs) through an out-parameter ('bytesVia').
+encodeVia :: CallSite -> (Ptr Word8 -> CSize -> Ptr CSize -> IO GhosttyResult) -> IO ByteString
+encodeVia site call = alloca $ \written -> bytesVia site $ \buf cap -> do
+  r <- call buf (fromIntegral cap) written
+  (r,) . fromIntegral <$> peek written
 
 -- * Key encoders
 
 -- | A key encoder, alive in the region @k@ that
 -- 'Ghostty.Effectful.Encode.withKeyEncoder' opens, with the event handle it
--- encodes from.
+-- encodes from. Its role is nominal, so 'coerce' cannot take it out of its
+-- region.
+type role KeyEncoder nominal
+
 data KeyEncoder k = KeyEncoder
   { -- | the library's encoder
     encoder :: GhosttyKeyEncoder,
@@ -176,7 +165,7 @@ defaultKeyOptions =
       ignoreKeypadWithNumlock = False,
       altEscPrefix = False,
       modifyOtherKeys2 = False,
-      kittyFlags = KittyFlags False False False False False,
+      kittyFlags = noKittyFlags,
       macosOptionAsAlt = OptionNotAlt,
       backarrowKeyMode = False
     }
@@ -191,7 +180,7 @@ data OptionAsAlt
     OptionLeftAlt
   | -- | the right one
     OptionRightAlt
-  deriving stock (Eq, Show, Enum, Bounded)
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
 
 -- | @ghostty_key_encoder_new@ and @ghostty_key_event_new@, with the options
 -- set. Either handle is freed if the other cannot be made.
@@ -199,8 +188,7 @@ openKeyEncoder :: KeyOptions -> IO (KeyEncoder k)
 openKeyEncoder o = do
   encoder <- newHandle (CallSite "ghostty_key_encoder_new") ghosttyKeyEncoderNew
   event <- newHandle (CallSite "ghostty_key_event_new") ghosttyKeyEventNew `onException` ghosttyKeyEncoderFree encoder
-  let enc = KeyEncoder {encoder, event}
-  enc <$ setKeyOptions enc o
+  configured (`setKeyOptions` o) closeKeyEncoder KeyEncoder {encoder, event}
 
 -- | Free the event and the encoder.
 closeKeyEncoder :: KeyEncoder k -> IO ()
@@ -215,7 +203,7 @@ setKeyOptions enc o = do
   flag GhosttyKeyEncoderOptIgnoreKeypadWithNumlock o.ignoreKeypadWithNumlock
   flag GhosttyKeyEncoderOptAltEscPrefix o.altEscPrefix
   flag GhosttyKeyEncoderOptModifyOtherKeysState2 o.modifyOtherKeys2
-  set GhosttyKeyEncoderOptKittyFlags (kittyBits o.kittyFlags)
+  set GhosttyKeyEncoderOptKittyFlags (kittyFlagBits o.kittyFlags)
   set GhosttyKeyEncoderOptMacosOptionAsAlt (optionAsAlt o.macosOptionAsAlt)
   flag GhosttyKeyEncoderOptBackarrowKeyMode o.backarrowKeyMode
   where
@@ -250,17 +238,14 @@ encodeKeyEvent enc e = do
   -- The header asks for no C0 control or DEL in the text: the encoder
   -- derives a control key from the key itself.
   let utf8 = encodeUtf8 (T.filter (\c -> c >= ' ' && c /= '\DEL') e.text) :: ByteString
-      encode = bytesVia (CallSite "ghostty_key_encoder_encode") (ghosttyKeyEncoderEncode enc.encoder enc.event)
-      setText str = setEvent "ghostty_key_event_set_utf8" $ with str (ghosttyKeyEventSetUtf8 enc.event)
-      -- A string of length zero clears the text; its pointer is not read.
-      noText = GhosttyString {ptr = nullPtr, len = 0}
-  if BS.null utf8
-    then setText noText >> encode
-    else BSU.unsafeUseAsCStringLen utf8 $ \(p, n) -> do
-      setText GhosttyString {ptr = castPtr p, len = fromIntegral n}
-      -- The event keeps the pointer; leave none behind that outlives it,
-      -- even when the encode throws.
-      encode `finally` setText noText
+      encode = encodeVia (CallSite "ghostty_key_encoder_encode") (ghosttyKeyEncoderEncode enc.encoder enc.event)
+      setText = setEvent "ghostty_key_event_set_utf8" . ghosttyKeyEventSetUtf8 enc.event
+  withString utf8 $ \p -> do
+    -- An empty string clears the text.
+    setText p
+    -- The event keeps the pointer; leave none behind that outlives it,
+    -- even when the encode throws. Empty text left nothing to clear.
+    if BS.null utf8 then encode else encode `finally` with emptyString setText
 
 -- | The binding's key.
 keyCode :: Key -> GhosttyKey
@@ -442,32 +427,21 @@ keyCode = \case
   KeyCut -> GhosttyKeyCut
   KeyPaste -> GhosttyKeyPaste
 
--- | The Kitty flags as the header's bits.
-kittyBits :: KittyFlags -> GhosttyKittyKeyFlags
-kittyBits f =
-  bit' f.disambiguate GhosttyKittyKeyDisambiguate
-    .|. bit' f.reportEvents GhosttyKittyKeyReportEvents
-    .|. bit' f.reportAlternates GhosttyKittyKeyReportAlternates
-    .|. bit' f.reportAll GhosttyKittyKeyReportAll
-    .|. bit' f.reportAssociated GhosttyKittyKeyReportAssociated
-  where
-    bit' b v = if b then v else 0
-
 -- | The modifiers as the header's bits: a modifier's own bit, and its side's
 -- bit when it is the right one.
 modsBits :: Mods -> GhosttyMods
 modsBits m =
-  held m.shift GhosttyModsShift GhosttyModsShiftSide
-    .|. held m.ctrl GhosttyModsCtrl GhosttyModsCtrlSide
-    .|. held m.alt GhosttyModsAlt GhosttyModsAltSide
-    .|. held m.super GhosttyModsSuper GhosttyModsSuperSide
-    .|. (if m.capsLock then GhosttyModsCapsLock else 0)
-    .|. (if m.numLock then GhosttyModsNumLock else 0)
+  flagBits $
+    concatMap
+      held
+      [ (m.shift, GhosttyModsShift, GhosttyModsShiftSide),
+        (m.ctrl, GhosttyModsCtrl, GhosttyModsCtrlSide),
+        (m.alt, GhosttyModsAlt, GhosttyModsAltSide),
+        (m.super, GhosttyModsSuper, GhosttyModsSuperSide)
+      ]
+      <> [(m.capsLock, GhosttyModsCapsLock), (m.numLock, GhosttyModsNumLock)]
   where
-    held s own right = case s of
-      Nothing -> 0
-      Just LeftSide -> own
-      Just RightSide -> own .|. right
+    held (side, own, right) = [(isJust side, own), (side == Just RightSide, right)]
 
 -- | The binding's value for macOS's Option.
 optionAsAlt :: OptionAsAlt -> GhosttyOptionAsAlt
@@ -481,7 +455,9 @@ optionAsAlt = \case
 
 -- | A mouse encoder, alive in the region @m@ that
 -- 'Ghostty.Effectful.Encode.withMouseEncoder' opens, with the event handle
--- it encodes from.
+-- it encodes from. Its role is nominal, as 'KeyEncoder''s is.
+type role MouseEncoder nominal
+
 data MouseEncoder m = MouseEncoder
   { -- | the library's encoder
     encoder :: GhosttyMouseEncoder,
@@ -530,7 +506,7 @@ data MouseTracking
     ButtonTracking
   | -- | and every motion (mode 1003)
     AnyTracking
-  deriving stock (Eq, Show, Enum, Bounded)
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
 
 -- | How mouse events are written.
 data MouseFormat
@@ -544,7 +520,7 @@ data MouseFormat
     UrxvtFormat
   | -- | SGR in pixels (mode 1016)
     SgrPixelsFormat
-  deriving stock (Eq, Show, Enum, Bounded)
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
 
 -- | The surface a mouse moves over, in pixels. A cell is never zero
 -- pixels along either axis, which the library would ignore.
@@ -597,8 +573,7 @@ openMouseEncoder :: MouseOptions -> IO (MouseEncoder m)
 openMouseEncoder o = do
   encoder <- newHandle (CallSite "ghostty_mouse_encoder_new") ghosttyMouseEncoderNew
   event <- newHandle (CallSite "ghostty_mouse_event_new") ghosttyMouseEventNew `onException` ghosttyMouseEncoderFree encoder
-  let enc = MouseEncoder {encoder, event}
-  enc <$ setMouseOptions enc o
+  configured (`setMouseOptions` o) closeMouseEncoder MouseEncoder {encoder, event}
 
 -- | Free the event and the encoder.
 closeMouseEncoder :: MouseEncoder m -> IO ()
@@ -648,7 +623,7 @@ encodeMouseEvent enc e = do
   setEvent "ghostty_mouse_event_set_position" $
     with (GhosttyMousePosition (realToFrac e.position.x) (realToFrac e.position.y)) $
       ghosttyMouseEventSetPosition enc.event
-  bytesVia (CallSite "ghostty_mouse_encoder_encode") (ghosttyMouseEncoderEncode enc.encoder enc.event)
+  encodeVia (CallSite "ghostty_mouse_encoder_encode") (ghosttyMouseEncoderEncode enc.encoder enc.event)
 
 -- | An event setter's call, which refuses only what the binding never passes:
 -- any refusal is 'Invariant' at the named function.
@@ -712,11 +687,11 @@ data Focus
     FocusGained
   | -- | it lost focus (@CSI O@)
     FocusLost
-  deriving stock (Eq, Show, Enum, Bounded)
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
 
 -- | @ghostty_focus_encode@.
 encodeFocusEvent :: Focus -> IO ByteString
-encodeFocusEvent f = bytesVia (CallSite "ghostty_focus_encode") $ ghosttyFocusEncode $ case f of
+encodeFocusEvent f = encodeVia (CallSite "ghostty_focus_encode") $ ghosttyFocusEncode $ case f of
   FocusGained -> GhosttyFocusGained
   FocusLost -> GhosttyFocusLost
 
@@ -733,13 +708,13 @@ data SizeReportStyle
   | -- | the screen in cells, the answer to @CSI 19 t@: @CSI 9 ; rows ; cols t@.
     -- The physical screen is not known, so this is the text area too.
     ReportScreenCells
-  deriving stock (Eq, Show, Enum, Bounded)
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
 
 -- | @ghostty_size_report_encode@, through its by-value shim (§3.3).
 encodeSizeReportOf :: SizeReportStyle -> GridSize -> CellPixels -> IO ByteString
 encodeSizeReportOf style g px =
   with (GhosttySizeReportSize (fromExtent g.rows) (fromExtent g.cols) px.width px.height) $ \sp ->
-    bytesVia (CallSite "ghostty_size_report_encode") (ghosttySizeReportEncode code sp)
+    encodeVia (CallSite "ghostty_size_report_encode") (ghosttySizeReportEncode code sp)
   where
     code = case style of
       ReportInBand -> GhosttySizeReportMode2048
@@ -753,12 +728,18 @@ encodeSizeReportOf style g px =
 newtype ModeNumber = ModeNumber GhosttyMode
   deriving stock (Eq, Show)
 
--- | The ANSI ('True') or DEC private ('False') mode of the given number, if
--- it fits the header's 15 bits.
-modeNumber :: Bool -> Word16 -> Maybe ModeNumber
-modeNumber ansi n
-  | n > 0x7fff = Nothing
-  | otherwise = Just (ModeNumber (ghosttyModeNew n (fromBool ansi)))
+-- | Which numbering a mode's number is in.
+data ModeFamily
+  = -- | set with @CSI n h@
+    AnsiMode
+  | -- | set with @CSI ? n h@
+    DecPrivateMode
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
+
+-- | The mode of the given number, if it fits the header's 15 bits.
+modeNumber :: ModeFamily -> Word16 -> Maybe ModeNumber
+modeNumber family n =
+  ModeNumber (ghosttyModeNew n (fromBool (family == AnsiMode))) <$ guard (n <= 0x7fff)
 
 -- | A mode the library recognises, by its number.
 knownMode :: ModeKey r -> ModeNumber
@@ -776,13 +757,13 @@ data ModeReport
     ModePermanentlySet
   | -- | it is reset and cannot be changed
     ModePermanentlyReset
-  deriving stock (Eq, Show, Enum, Bounded)
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
 
 -- | @ghostty_mode_report_encode@: @CSI ? n ; s $ y@ for a DEC private mode,
 -- @CSI n ; s $ y@ for an ANSI one.
 encodeModeReportOf :: ModeNumber -> ModeReport -> IO ByteString
 encodeModeReportOf (ModeNumber m) s =
-  bytesVia (CallSite "ghostty_mode_report_encode") (ghosttyModeReportEncode m (reportState s))
+  encodeVia (CallSite "ghostty_mode_report_encode") (ghosttyModeReportEncode m (reportState s))
   where
     reportState :: ModeReport -> GhosttyModeReportState
     reportState = \case
@@ -796,9 +777,7 @@ encodeModeReportOf (ModeNumber m) s =
 -- query (@CSI ? 996 n@), or the unsolicited report of mode 2031.
 encodeColorSchemeReportOf :: ColorScheme -> IO ByteString
 encodeColorSchemeReportOf s =
-  bytesVia (CallSite "ghostty_color_scheme_report_encode") $ ghosttyColorSchemeReportEncode $ case s of
-    Light -> GhosttyColorSchemeLight
-    Dark -> GhosttyColorSchemeDark
+  encodeVia (CallSite "ghostty_color_scheme_report_encode") (ghosttyColorSchemeReportEncode (colorSchemeCode s))
 
 -- * Paste
 
@@ -809,13 +788,21 @@ encodeColorSchemeReportOf s =
 data Rejected = Rejected
   deriving stock (Eq, Show)
 
+-- | Whether a paste is framed by the bracketed paste markers.
+data Bracketing
+  = -- | framed, as in bracketed paste mode (2004)
+    Bracketed
+  | -- | not framed: line feeds become carriage returns
+    Unbracketed
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
+
 -- | Whether to paste text that could inject commands.
 data PasteSafety
   = -- | refuse it ('Rejected')
     RefuseUnsafe
   | -- | paste it
     AllowUnsafe
-  deriving stock (Eq, Show, Enum, Bounded)
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
 
 -- | @ghostty_paste_is_safe@: whether the text holds nothing that could
 -- inject commands in any mode: no line break, no bracketed paste
@@ -825,14 +812,15 @@ pasteSafe :: ByteString -> IO Bool
 pasteSafe b = BSU.unsafeUseAsCStringLen b $ \(p, n) -> toBool <$> ghosttyPasteIsSafe p (fromIntegral n)
 
 -- | @ghostty_paste_encode@: the text as a paste writes it, without a
--- terminal: unsafe control bytes become spaces, and it is bracketed
--- ('True') or has its line feeds made carriage returns. The call changes
--- its input in place, so each attempt is given a fresh copy
--- ('BS.useAsCStringLen' copies).
-encodePasteBytes :: Bool -> ByteString -> IO ByteString
-encodePasteBytes bracketed b =
-  bytesVia (CallSite "ghostty_paste_encode") $ \buf len written ->
-    BS.useAsCStringLen b $ \(p, n) -> ghosttyPasteEncode p (fromIntegral n) (fromBool bracketed) buf len written
+-- terminal: unsafe control bytes become spaces, and it is bracketed or
+-- has its line feeds made carriage returns. The call changes its input in
+-- place, so each attempt is given a fresh copy ('BS.useAsCStringLen'
+-- copies).
+encodePasteBytes :: Bracketing -> ByteString -> IO ByteString
+encodePasteBytes bracketing b =
+  encodeVia (CallSite "ghostty_paste_encode") $ \buf len written ->
+    BS.useAsCStringLen b $ \(p, n) ->
+      ghosttyPasteEncode p (fromIntegral n) (fromBool (bracketing == Bracketed)) buf len written
 
 -- | The C MIME reader of @cbits/gveff_paste.c@: writes the @GhosttyString@
 -- its userdata points at. A MIME reader receives structs by value, which no
@@ -848,25 +836,19 @@ foreign import capi "gveff_paste.h &gveff_paste_reader"
 -- installed, so a paste is never a Kitty paste event (DESIGN.md §4.5).
 pasteInto :: Terminal s -> PasteSafety -> ByteString -> IO (Either Rejected [TerminalEvent])
 pasteInto t safety text =
-  BSU.unsafeUseAsCStringLen text $ \(tp, tn) ->
-    with (GhosttyString (castPtr tp) (fromIntegral tn)) $ \textp ->
-      BSU.unsafeUseAsCStringLen "text/plain" $ \(mp, mn) ->
-        with (GhosttyString (castPtr mp) (fromIntegral mn)) $ \mimep -> do
-          let request = withSize $ \size ->
-                GhosttyPaste
-                  { size,
-                    location = GhosttyClipboardLocationStandard,
-                    source = GhosttyPasteSourceClipboard,
-                    mimes = mimep,
-                    mimesLen = 1,
-                    reader = GhosttyMimeReader {read = gveffPasteReader, userdata = castPtr textp},
-                    allowUnsafe = fromBool (safety == AllowUnsafe)
-                  }
-          r <- with request $ \rp -> ghosttyTerminalPaste t.handle rp nullPtr
-          case resultCode r of
-            ResultSuccess -> Right <$> drainEvents t
-            ResultRejected -> pure (Left Rejected)
-            ResultOutOfMemory -> throwIO (OutOfMemory site)
-            other -> throwIO (Invariant site other)
+  withString text $ \textp ->
+    withString "text/plain" $ \mimep -> do
+      let request = withSize $ \size ->
+            GhosttyPaste
+              { size,
+                location = GhosttyClipboardLocationStandard,
+                source = GhosttyPasteSourceClipboard,
+                mimes = mimep,
+                mimesLen = 1,
+                reader = GhosttyMimeReader {read = gveffPasteReader, userdata = castPtr textp},
+                allowUnsafe = fromBool (safety == AllowUnsafe)
+              }
+      r <- with request $ \rp -> ghosttyTerminalPaste t.handle rp nullPtr
+      succeedsUnless ResultRejected site r >>= bool (pure (Left Rejected)) (Right <$> drainEvents t)
   where
     site = CallSite "ghostty_terminal_paste"

@@ -9,7 +9,7 @@ import Foreign.C.ConstPtr (ConstPtr (..))
 import Foreign.C.Types (CBool, CChar, CSize)
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Marshal.Array (peekArray, withArrayLen)
-import Foreign.Marshal.Utils (with)
+import Foreign.Marshal.Utils (toBool, with)
 import Foreign.Ptr (Ptr, castPtr, nullPtr, plusPtr)
 import Foreign.Storable (Storable (..))
 import Ghostty.FFI.Color (GhosttyColorRgb (..))
@@ -18,6 +18,7 @@ import Ghostty.FFI.Osc
 import Ghostty.FFI.Sgr
 import Ghostty.FFI.Types
 import Ghostty.FFI.Unicode
+import Test.Ghostty.FFI.Support (newHandle, outValue, unfoldWhileM)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
@@ -110,9 +111,7 @@ tests =
 -- * OSC
 
 withOsc :: (GhosttyOscParser -> IO a) -> IO a
-withOsc = bracket new ghosttyOscFree
-  where
-    new = alloca $ \pp -> ghosttyOscNew nullPtr pp >>= (@?= GhosttySuccess) >> peek pp
+withOsc = bracket (newHandle ghosttyOscNew) ghosttyOscFree
 
 -- | Feed a sequence's bytes and end it with its terminator.
 oscCommand :: GhosttyOscParser -> ByteString -> Word8 -> IO GhosttyOscCommand
@@ -121,16 +120,12 @@ oscCommand p bytes end = do
   ghosttyOscEnd p end
 
 oscDatum :: (Storable a) => GhosttyOscCommand -> GhosttyOscCommandData -> IO a
-oscDatum cmd d = alloca $ \vp -> do
-  ghosttyOscCommandData cmd d (castPtr vp) >>= (@?= GhosttySuccess)
-  peek vp
+oscDatum cmd d = outValue (ghosttyOscCommandData cmd d . castPtr)
 
 -- * SGR
 
 withSgr :: (GhosttySgrParser -> IO a) -> IO a
-withSgr = bracket new ghosttySgrFree
-  where
-    new = alloca $ \pp -> ghosttySgrNew nullPtr pp >>= (@?= GhosttySuccess) >> peek pp
+withSgr = bracket (newHandle ghosttySgrNew) ghosttySgrFree
 
 -- | Set the parameters, with their separators if given, and read every
 -- attribute.
@@ -144,12 +139,7 @@ sgrAttributes p params seps = do
     withSeps act = maybe (act nullPtr) (`BS.useAsCString` act) seps
 
 sgrNextAll :: GhosttySgrParser -> IO [GhosttySgrAttribute]
-sgrNextAll p = alloca $ \ap ->
-  let go acc =
-        ghosttySgrNext p ap >>= \case
-          0 -> pure (reverse acc)
-          _ -> peek ap >>= \a -> go (a : acc)
-   in go []
+sgrNextAll p = alloca $ \ap -> unfoldWhileM (toBool <$> ghosttySgrNext p ap) (peek ap)
 
 -- * Unicode
 

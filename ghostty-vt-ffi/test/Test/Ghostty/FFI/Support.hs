@@ -4,6 +4,11 @@
 -- does.
 module Test.Ghostty.FFI.Support
   ( withTerminal,
+    succeeds,
+    outValue,
+    newHandle,
+    withValue,
+    unfoldWhileM,
     withCallback,
     feed,
     pokeSized,
@@ -18,7 +23,7 @@ import Data.ByteString qualified as BS
 import Data.ByteString.Unsafe qualified as BSU
 import Foreign.C.Types (CSize)
 import Foreign.Marshal.Alloc (alloca, allocaBytes, allocaBytesAligned)
-import Foreign.Marshal.Utils (fillBytes)
+import Foreign.Marshal.Utils (fillBytes, with)
 import Foreign.Ptr (FunPtr, Ptr, castPtr, freeHaskellFunPtr, nullPtr)
 import Foreign.Storable (Storable (..))
 import Ghostty.FFI.Layout (CStruct (..))
@@ -29,10 +34,32 @@ import Test.Tasty.HUnit (Assertion, assertFailure, (@?=))
 -- | A terminal of the given size, freed when the test ends.
 withTerminal :: Word16 -> Word16 -> (GhosttyTerminal -> Assertion) -> Assertion
 withTerminal cols rows act = do
-  t <- alloca $ \tp -> do
-    ghosttyTerminalNew nullPtr tp cols rows >>= (@?= GhosttySuccess)
-    peek tp
+  t <- newHandle $ \a tp -> ghosttyTerminalNew a tp cols rows
   act t `finally` ghosttyTerminalFree t
+
+-- | Assert that a call succeeds.
+succeeds :: IO GhosttyResult -> Assertion
+succeeds call = call >>= (@?= GhosttySuccess)
+
+-- | What a call writes to its out-parameter, the call asserted to succeed.
+outValue :: (Storable a) => (Ptr a -> IO GhosttyResult) -> IO a
+outValue call = alloca $ \p -> succeeds (call p) >> peek p
+
+-- | A handle from a @…_new(allocator, &out)@ call, with the default
+-- allocator.
+newHandle :: (Storable h) => (Ptr allocator -> Ptr h -> IO GhosttyResult) -> IO h
+newHandle new = outValue (new nullPtr)
+
+-- | Call with a pointer to the value, asserting that the call succeeds.
+withValue :: (Storable a) => a -> (Ptr a -> IO GhosttyResult) -> Assertion
+withValue v call = with v (succeeds . call)
+
+-- | Run the action while the test holds, collecting its results in order:
+-- an iterator's @next@ and its current value.
+unfoldWhileM :: (Monad m) => m Bool -> m a -> m [a]
+unfoldWhileM more act = go []
+  where
+    go acc = ifM more (act >>= \a -> go (a : acc)) (pure (reverse acc))
 
 -- | A Haskell callback, freed when the action ends.
 withCallback :: IO (FunPtr a) -> (FunPtr a -> IO b) -> IO b

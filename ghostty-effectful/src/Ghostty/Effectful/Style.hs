@@ -34,7 +34,7 @@ data Underline
     DottedUnderline
   | -- | dashed
     DashedUnderline
-  deriving stock (Eq, Show, Enum, Bounded)
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
 
 -- | A style: colours, attributes and underline.
 data Style = Style

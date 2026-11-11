@@ -18,10 +18,10 @@ import Ghostty.Effectful.Format
 import Ghostty.Effectful.Point (Coord (..), Point (..))
 import Ghostty.Effectful.Terminal
 import Numeric (showHex)
-import Test.Ghostty.Effectful.Support (ghostty, grid)
+import Test.Ghostty.Effectful.Support (expectJust, grid, withConfig)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.Golden (goldenVsString)
-import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
+import Test.Tasty.HUnit (testCase, (@?=))
 
 tests :: TestTree
 tests =
@@ -91,8 +91,8 @@ goldens =
 golden :: String -> String -> Format -> (forall s. Terminal s -> Eff '[Ghostty, IOE] ByteString) -> TestTree
 golden name variant f k =
   goldenVsString file ("test/golden/format/" <> file) $ do
-    bytes <- maybe (assertFailure ("no stream " <> name)) (pure . encodeUtf8) (lookup name streams)
-    visible <$> ghostty (withTerminal config $ \t -> feed t bytes *> k t)
+    bytes <- encodeUtf8 <$> expectJust ("no stream " <> name) (lookup name streams)
+    visible <$> formatted bytes k
   where
     file = name <> (if null variant then "" else "-" <> variant) <> "." <> ext f
     ext = \case
@@ -208,8 +208,8 @@ plain = formatOptions Plain
 
 -- | Feed a fresh 20×5 terminal and run the action on it.
 formatted :: ByteString -> (forall s. Terminal s -> Eff '[Ghostty, IOE] a) -> IO a
-formatted bytes k = ghostty $ withTerminal config $ \t -> feed t bytes *> k t
+formatted bytes k = withConfig smallConfig $ \t -> feed t bytes *> k t
 
 -- | A 20×5 terminal: narrow enough to wrap, short enough to scroll.
-config :: TerminalConfig
-config = terminalConfig (grid 20 5)
+smallConfig :: TerminalConfig
+smallConfig = terminalConfig (grid 20 5)

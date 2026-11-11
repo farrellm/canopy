@@ -9,8 +9,7 @@ module Ghostty.Effectful.Unicode
 where
 
 import Effectful (Eff, (:>))
-import Effectful.Dispatch.Static (unsafeEff_)
-import Ghostty.Effectful.Internal.Effect (Ghostty, owned)
+import Ghostty.Effectful.Internal.Effect (Ghostty, owned, ownedIO)
 import Ghostty.Effectful.Internal.Unicode (Grapheme (..), graphemesOf, widthOf)
 
 -- | The cells one character takes: 0 for controls, combining marks and
@@ -25,9 +24,7 @@ import Ghostty.Effectful.Internal.Unicode (Grapheme (..), graphemesOf, widthOf)
 -- >>> runEff (runGhostty (traverse codepointWidth ("a漢\x301" :: String)))
 -- Right [1,2,0]
 codepointWidth :: (Ghostty :> es) => Char -> Eff es Word8
-codepointWidth c = do
-  _ <- owned "codepointWidth"
-  pure (widthOf c)
+codepointWidth c = widthOf c <$ owned "codepointWidth"
 
 -- | The text's grapheme clusters, each with its width, as the terminal
 -- segments and measures them with grapheme clustering on (mode 2027): a
@@ -41,6 +38,5 @@ codepointWidth c = do
 -- >>> fmap (map (.width)) <$> runEff (runGhostty (graphemes "e\x301\&👍🏽x"))
 -- Right [1,2,1]
 graphemes :: (Ghostty :> es) => Text -> Eff es [Grapheme]
-graphemes t = do
-  _ <- owned "graphemes"
-  unsafeEff_ (graphemesOf t)
+graphemes t =
+  ownedIO "graphemes" (graphemesOf t)

@@ -48,7 +48,7 @@ data CellWidth
   | -- | the last column of a row, left empty because the wide character
     -- that would have started there wrapped to the next row
     SpacerHead
-  deriving stock (Eq, Show, Enum, Bounded)
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
 
 -- | What a cell holds, by the program's OSC 133 marks.
 data SemanticContent
@@ -58,7 +58,7 @@ data SemanticContent
     ContentInput
   | -- | part of a prompt
     ContentPrompt
-  deriving stock (Eq, Show, Enum, Bounded)
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
 
 -- | An OSC 8 hyperlink.
 newtype Hyperlink = Hyperlink

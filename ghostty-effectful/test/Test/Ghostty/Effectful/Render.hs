@@ -7,7 +7,6 @@
 module Test.Ghostty.Effectful.Render (tests) where
 
 import Control.Exception (ErrorCall (..), throwIO)
-import Data.Char (isUpper, toUpper)
 import Data.List (stripPrefix)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as T
@@ -55,13 +54,9 @@ import Ghostty.FFI.Render
   )
 import Ghostty.FFI.Terminal (GhosttyTerminalScrollViewport (..), ghosttyTerminalScrollViewport)
 import Ghostty.FFI.Types (pattern GhosttySuccess)
-import Test.Ghostty.Effectful.Support (config, ghostty, grid)
+import Test.Ghostty.Effectful.Support (Some (..), expectJust, ghostty, grid, headerName, rowName, withFresh)
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
-
--- | Some key, its type forgotten.
-data Some f where
-  Some :: f a -> Some f
+import Test.Tasty.HUnit (testCase, (@?=))
 
 tests :: TestTree
 tests =
@@ -79,19 +74,19 @@ tests =
 renderStates :: [TestTree]
 renderStates =
   [ testCase "a render state is open inside its scope and freed after" $ do
-      r <- ghostty $ withTerminal config $ \t -> do
+      r <- withFresh $ \t -> do
         inside <- withRenderState t (const openRenderStates)
         after <- openRenderStates
         pure (inside, after)
       r @?= (1, 0),
     testCase "a render state is freed when its scope throws" $ do
-      r <- ghostty $ withTerminal config $ \t -> do
+      r <- withFresh $ \t -> do
         e <- E.try @ErrorCall (withRenderState t $ \_ -> liftIO (throwIO (ErrorCall "boom")))
         n <- openRenderStates
         pure (either (\(ErrorCall m) -> m) (const "no exception") e, n)
       r @?= ("boom", 0),
     testCase "two render states of one terminal each see it" $ do
-      r <- ghostty $ withTerminal config $ \t -> do
+      r <- withFresh $ \t -> do
         _ <- feed t "two"
         withRenderState t $ \a -> withRenderState t $ \b -> do
           ta <- withFrame a texts
@@ -111,7 +106,7 @@ frames =
     -- cursor stays on row 1, where it was at the end of the first frame,
     -- so no other row is touched.
     testCase "after a frame, only the rows changed since are dirty" $ do
-      r <- ghostty $ withTerminal config $ \t -> withRenderState t $ \rs -> do
+      r <- withFresh $ \t -> withRenderState t $ \rs -> do
         _ <- feed t "a\r\nb\r\nc\ESC[2;2H"
         frame1 <- withFrame rs $ \f -> (,) <$> getF f RenderDirty <*> (length <$> dirtyRows f)
         _ <- feed t "x"
@@ -121,7 +116,7 @@ frames =
       r @?= ((FullyDirty, 24), (PartlyDirty, [1]), (NotDirty, [])),
     -- The cursor leaves row 0 for row 1, so both rows changed.
     testCase "a frame that throws leaves its changes for the next" $ do
-      r <- ghostty $ withTerminal config $ \t -> withRenderState t $ \rs -> do
+      r <- withFresh $ \t -> withRenderState t $ \rs -> do
         _ <- feed t "a"
         _ <- withFrame rs (const pass)
         _ <- feed t "\r\nb"
@@ -129,7 +124,7 @@ frames =
         withFrame rs (fmap (map rowY) . dirtyRows)
       r @?= [0, 1],
     testCase "a frame inside another of the same render state is that frame" $ do
-      r <- ghostty $ withTerminal config $ \t -> withRenderState t $ \rs -> do
+      r <- withFresh $ \t -> withRenderState t $ \rs -> do
         _ <- feed t "a"
         withFrame rs $ \outer -> do
           _ <- feed t "b"
@@ -145,7 +140,7 @@ frames =
       r @?= ["r2", "r0", "r1", "r1", "r0", "r2"],
     -- PLAN.md M1.7: copied cells survive the next update.
     testCase "cells copied from a frame survive the next update" $ do
-      r <- ghostty $ withTerminal config $ \t -> withRenderState t $ \rs -> do
+      r <- withFresh $ \t -> withRenderState t $ \rs -> do
         _ <- feed t "old"
         before <- withFrame rs (topRows 1 cells)
         _ <- feed t "\rnew"
@@ -181,7 +176,7 @@ cellTests =
       c <- rendered "e\204\129" firstCell
       c.text @?= "e\769",
     testCase "a linked cell reads its URI while the terminal is the frame's" $ do
-      r <- ghostty $ withTerminal config $ \t -> withRenderState t $ \rs -> do
+      r <- withFresh $ \t -> withRenderState t $ \rs -> do
         _ <- feed t "\ESC]8;;https://example.org\ESC\\L\ESC]8;;\ESC\\n"
         withFrame rs $ \f -> do
           live <- V.toList . V.take 2 <$> cellsOf f 0
@@ -207,7 +202,7 @@ holds =
   [ -- DESIGN.md §4.3: the frame is the one the program had drawn when the
     -- hold began, though the rest of the write was processed after it.
     testCase "a hold shows the frame from when it began, until it ends" $ do
-      r <- ghostty $ withTerminal config $ \t -> withRenderState t $ \rs -> do
+      r <- withFresh $ \t -> withRenderState t $ \rs -> do
         evs <- feed t "A\ESC[?2026hB"
         during <- withFrame rs $ \f -> (,frameHeld f) . take 1 <$> texts f
         evs' <- feed t "C\ESC[?2026l"
@@ -215,7 +210,7 @@ holds =
         pure (evs, during, evs', after)
       r @?= ([RenderHold True], (["A"], True), [RenderHold False], (["ABC"], False)),
     testCase "a hold its owner ends by turning the mode off shows the terminal" $ do
-      r <- ghostty $ withTerminal config $ \t -> withRenderState t $ \rs -> do
+      r <- withFresh $ \t -> withRenderState t $ \rs -> do
         _ <- feed t "A\ESC[?2026hB"
         _ <- withFrame rs (const pass)
         setT t (SetMode ModeSynchronizedOutput) False
@@ -225,14 +220,14 @@ holds =
     -- held until the next frame read the mode, so turning it on again
     -- first brought the old hold's frame back.
     testCase "regression 5: a hold turned off and on again by setT shows the terminal" $ do
-      r <- ghostty $ withTerminal config $ \t -> withRenderState t $ \rs -> do
+      r <- withFresh $ \t -> withRenderState t $ \rs -> do
         _ <- feed t "A\ESC[?2026hB"
         setT t (SetMode ModeSynchronizedOutput) False
         setT t (SetMode ModeSynchronizedOutput) True
         withFrame rs $ \f -> (,frameHeld f) . take 1 <$> texts f
       r @?= (["AB"], False),
     testCase "a hold that begins while a frame is open is not captured" $ do
-      r <- ghostty $ withTerminal config $ \t -> withRenderState t $ \rs -> do
+      r <- withFresh $ \t -> withRenderState t $ \rs -> do
         _ <- feed t "A"
         open <- withFrame rs $ \f -> do
           _ <- feed t "\ESC[?2026hB"
@@ -241,7 +236,7 @@ holds =
         pure (open, next)
       r @?= (["A"], (["AB"], False)),
     testCase "a render state opened during a hold shows the terminal" $ do
-      r <- ghostty $ withTerminal config $ \t -> do
+      r <- withFresh $ \t -> do
         _ <- feed t "A\ESC[?2026hB"
         withRenderState t $ \rs -> withFrame rs $ \f -> (,frameHeld f) . take 1 <$> texts f
       r @?= (["AB"], False)
@@ -252,7 +247,7 @@ holds =
 keys :: [TestTree]
 keys =
   [ testCase "every frame key reads its value on a fresh frame" $ do
-      failures <- ghostty $ withTerminal config $ \t -> do
+      failures <- withFresh $ \t -> do
         setT t SetColorForeground (Just fg)
         setT t SetColorBackground (Just bg)
         setT t SetColorCursor (Just cur)
@@ -265,7 +260,7 @@ keys =
     -- which the high level does not bind yet, so the cursor's row is below
     -- it.
     testCase "the cursor reads as nowhere when it is outside the viewport" $ do
-      r <- ghostty $ withTerminal config $ \t -> do
+      r <- withFresh $ \t -> do
         _ <- feed t (mconcat (replicate 30 "line\r\n"))
         liftIO (with (ScrollViewportDelta (-5)) (ghosttyTerminalScrollViewport t.handle)) >>= liftIO . (@?= GhosttySuccess)
         withRenderState t $ \rs -> withFrame rs $ \f ->
@@ -280,7 +275,7 @@ keys =
         (map (\(Some k) -> (headerName (fromMaybe "" (stripPrefix "Render" (show k))), rowName ghosttyRenderStateDataEnum (frameNumber (frameKey k)))) allFrameData)
         @?= [],
     testCase "every row key reads its value on a fresh frame" $ do
-      failures <- ghostty $ withTerminal config $ \t -> do
+      failures <- withFresh $ \t -> do
         _ <- feed t "abcdefghij\r\n"
         withRenderState t $ \rs -> withFrame rs $ \f -> do
           rows <- allRows f
@@ -289,7 +284,7 @@ keys =
     -- The header: a row keeps its id as it moves; one new to the frame has
     -- an id never seen before. (Writing into a row keeps its id too.)
     testCase "a row keeps its identity as the screen scrolls" $ do
-      r <- ghostty $ withTerminal config $ \t -> withRenderState t $ \rs -> do
+      r <- withFresh $ \t -> withRenderState t $ \rs -> do
         _ <- feed t (T.encodeUtf8 (T.intercalate "\r\n" [show i | i <- [0 .. 23 :: Int]]))
         ids <- withFrame rs (topRows 24 (`getR` RowId))
         _ <- feed t "\r\nnew"
@@ -442,7 +437,7 @@ freshRow r k = do
 
 -- | Feed an 80×24 terminal, and read one frame of it.
 rendered :: ByteString -> (forall s f. Frame s f -> Eff '[Ghostty, IOE] a) -> IO a
-rendered bytes k = ghostty $ withTerminal config $ \t -> withRenderState t $ \rs -> do
+rendered bytes k = withFresh $ \t -> withRenderState t $ \rs -> do
   _ <- feed t bytes
   withFrame rs k
 
@@ -464,29 +459,17 @@ lineOf = T.stripEnd . T.concat . map (.text) . V.toList
 
 -- | The cells of a row of the frame.
 cellsOf :: Frame s f -> Int -> Eff '[Ghostty, IOE] (V.Vector Cell)
-cellsOf f i = allRows f >>= maybe (liftIO (assertFailure "no such row")) cells . viaNonEmpty head . drop i
+cellsOf f i = allRows f >>= expectJust "no such row" . (!!? i) >>= cells
 
 -- | The frame's top-left cell.
 firstCell :: Frame s f -> Eff '[Ghostty, IOE] Cell
-firstCell f = cellsOf f 0 >>= maybe (liftIO (assertFailure "no cells")) pure . (V.!? 0)
+firstCell f = cellsOf f 0 >>= expectJust "no cells" . (V.!? 0)
 
 -- | Colours set before a frame is read.
 fg, bg, cur :: Rgb
 fg = Rgb 1 2 3
 bg = Rgb 4 5 6
 cur = Rgb 7 8 9
-
--- | A constructor's name as the header spells its row (@CursorX@ is
--- @CURSOR_X@).
-headerName :: String -> Text
-headerName = toText . go . takeWhile (/= ' ')
-  where
-    go (c : cs) = toUpper c : concatMap (\x -> if isUpper x then ['_', x] else [toUpper x]) cs
-    go [] = []
-
--- | The header's name for a row's number.
-rowName :: CEnum -> Integer -> Maybe Text
-rowName e n = fst <$> find ((== n) . snd) e.values
 
 -- | Keys' numbers.
 frameNumber :: GhosttyRenderStateData -> Integer

@@ -102,10 +102,12 @@ test-suite ghostty-effectful-test
   other-modules:
     Test.Ghostty.Effectful
     Test.Ghostty.Effectful.Encode
+    Test.Ghostty.Effectful.Error
     Test.Ghostty.Effectful.Events
     Test.Ghostty.Effectful.Format
     Test.Ghostty.Effectful.Keys
     Test.Ghostty.Effectful.Parse
+    Test.Ghostty.Effectful.Region
     Test.Ghostty.Effectful.Render
     Test.Ghostty.Effectful.Support
     Test.Ghostty.Effectful.Terminal
@@ -139,7 +141,9 @@ benchmark ghostty-effectful-bench
   type:             exitcode-stdio-1.0
   hs-source-dirs:   bench
   main-is:          Main.hs
-  other-modules:    Bench.Ghostty.Effectful.Feed
+  other-modules:
+    Bench.Ghostty.Effectful.Feed
+    Bench.Ghostty.Effectful.Render
   ghc-options:      -O2 -with-rtsopts=-T
   build-depends:
     , base ^>=4.21.2.0
@@ -149,6 +153,7 @@ benchmark ghostty-effectful-bench
     , ghostty-effectful
     , tasty-bench ^>=0.5.1
     , text ^>=2.1
+    , vector ^>=0.13
 
   mixins:
     base hiding (Prelude),

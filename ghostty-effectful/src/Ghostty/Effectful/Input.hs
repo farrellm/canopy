@@ -214,7 +214,7 @@ data KeyAction
     KeyPress
   | -- | held down, repeating
     KeyRepeat
-  deriving stock (Eq, Show, Enum, Bounded)
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
 
 -- | Which of a pair of modifier keys.
 data Side
@@ -222,7 +222,7 @@ data Side
     LeftSide
   | -- | the right one
     RightSide
-  deriving stock (Eq, Show, Enum, Bounded)
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
 
 -- | The modifiers held during an event. A modifier's side is known only
 -- while it is held, so each is a 'Maybe' 'Side' rather than two flags.
@@ -311,7 +311,7 @@ data MouseAction
     MouseRelease
   | -- | the mouse moved
     MouseMotion
-  deriving stock (Eq, Show, Enum, Bounded)
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
 
 -- | A mouse button. Four and five are the scroll wheel's up and down, six
 -- and seven its left and right.
@@ -340,7 +340,7 @@ data MouseButton
     MouseTen
   | -- | button 11
     MouseEleven
-  deriving stock (Eq, Show, Enum, Bounded)
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
 
 -- | A point on the terminal's surface, in pixels from its top left,
 -- padding included.

@@ -12,8 +12,8 @@ import Data.Text qualified as T
 import Foreign.C.ConstPtr (ConstPtr (..))
 import Foreign.C.Types (CBool)
 import Foreign.Marshal.Alloc (alloca)
-import Foreign.Ptr (Ptr, castPtr)
-import Foreign.Storable (peek)
+import Foreign.Ptr (castPtr)
+import Foreign.Storable (Storable, peek)
 import Ghostty.FFI.BuildInfo
 import Ghostty.FFI.Types
 import Language.Haskell.TH.Syntax (addDependentFile, makeRelativeToProject, runIO)
@@ -73,16 +73,16 @@ tests =
           (key, present) @?= (key, 1)
     ]
 
+-- | A build-info value of the key's type, failing the test with the key
+-- if the library will not say.
+buildInfo :: (Storable a) => GhosttyBuildInfo -> IO a
+buildInfo key = alloca $ \p ->
+  ghosttyBuildInfo key (castPtr p) >>= \case
+    GhosttySuccess -> peek p
+    r -> assertFailure ("ghostty_build_info " <> show key <> ": " <> show r)
+
 buildString :: GhosttyBuildInfo -> IO Text
-buildString key = alloca $ \(p :: Ptr GhosttyString) -> do
-  r <- ghosttyBuildInfo key (castPtr p)
-  case r of
-    GhosttySuccess -> decodeUtf8 <$> (ghosttyStringBytes =<< peek p)
-    _ -> assertFailure ("ghostty_build_info " <> show key <> ": " <> show r)
+buildString key = decodeUtf8 <$> (ghosttyStringBytes =<< buildInfo key)
 
 buildBool :: GhosttyBuildInfo -> IO CBool
-buildBool key = alloca $ \(p :: Ptr CBool) -> do
-  r <- ghosttyBuildInfo key (castPtr p)
-  case r of
-    GhosttySuccess -> peek p
-    _ -> assertFailure ("ghostty_build_info " <> show key <> ": " <> show r)
+buildBool = buildInfo

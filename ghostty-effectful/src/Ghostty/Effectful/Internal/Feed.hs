@@ -19,11 +19,12 @@ import Control.Exception (onException, throwIO, try)
 import Data.ByteString.Unsafe qualified as BSU
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (Ptr, castPtr, plusPtr)
-import Foreign.Storable (Storable (..), peek)
-import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), ResultCode (..))
+import Foreign.Storable (peek, poke)
+import Ghostty.Effectful.Error (CallSite (..), ResultCode (..))
 import Ghostty.Effectful.Event (TerminalEvent)
-import Ghostty.Effectful.Internal.Callbacks (Answers (..), drain, joinWrites, resolve)
-import Ghostty.Effectful.Internal.Error (expectSuccess, resultCode)
+import Ghostty.Effectful.Internal.Callbacks (Answers (..), drain, joinWrites, resolveOnto)
+import Ghostty.Effectful.Internal.Convert (withSize)
+import Ghostty.Effectful.Internal.Error (expectSuccess, succeedsUnless)
 import Ghostty.Effectful.Internal.Keys (getData)
 import Ghostty.Effectful.Internal.Size (CellPixels (..), GridSize (..), fromExtent)
 import Ghostty.Effectful.Internal.Terminal (Terminal (..), wrote)
@@ -68,7 +69,7 @@ resetTerminal t = do
 
 -- | The events buffered since the last drain, resolved.
 drainEvents :: Terminal s -> IO [TerminalEvent]
-drainEvents t = resolve (getData t.handle) =<< drain t.events
+drainEvents t = joinWrites . reverse <$> (resolveOnto (getData t.handle) [] =<< drain t.events)
 
 -- | Write VT to the terminal, stopping after each OSC
 -- (@GHOSTTY_TERMINAL_BOUNDARY_OSC_END@) to resolve the events so far, so a
@@ -81,39 +82,53 @@ drainEvents t = resolve (getData t.handle) =<< drain t.events
 feedTerminal :: Terminal s -> ByteString -> IO [TerminalEvent]
 feedTerminal t bytes = do
   wrote t
-  before <- try (drainEvents t)
-  (failure, after) <- BSU.unsafeUseAsCStringLen bytes $ \(p, n) -> alloca $ \stop -> go stop (castPtr p) n (leftToMaybe before) []
+  before <- resolved (Resolved Nothing [])
+  Resolved failure events <-
+    BSU.unsafeUseAsCStringLen bytes $ \(p, n) ->
+      alloca $ \stop -> go stop (castPtr p) n before
   whenJust failure throwIO
-  pure (joinWrites (fromRight [] before <> after))
+  pure (joinWrites (reverse events))
   where
-    go :: Ptr GhosttyTerminalWriteStop -> Ptr Word8 -> Int -> Maybe SomeException -> [[TerminalEvent]] -> IO (Maybe SomeException, [TerminalEvent])
-    go stop p n failure acc
-      | n <= 0 = pure (failure, concat (reverse acc))
+    go :: Ptr GhosttyTerminalWriteStop -> Ptr Word8 -> Int -> Resolved -> IO Resolved
+    go stop p n acc
+      | n <= 0 = pure acc
       | otherwise = do
           poke stop emptyStop
           r <- ghosttyTerminalVtWriteUntil t.handle p (fromIntegral n) boundary stop
-          resolved <- try (drainEvents t)
-          let failure' = failure <|> leftToMaybe resolved
-              acc' = fromRight [] resolved : acc
-          case resultCode r of
-            ResultNoValue -> pure (failure', concat (reverse acc'))
-            ResultSuccess -> do
+          acc' <- resolved acc
+          -- NO_VALUE: the input ended before a boundary.
+          stopped <- succeedsUnless ResultNoValue (CallSite "ghostty_terminal_vt_write_until") r
+          if stopped
+            then do
               used <- fromIntegral . (.consumed) <$> peek stop
-              go stop (p `plusPtr` used) (n - used) failure' acc'
-            other -> throwIO (Invariant (CallSite "ghostty_terminal_vt_write_until") other)
+              go stop (p `plusPtr` used) (n - used) acc'
+            else pure acc'
+
+    -- Resolve what the callbacks buffered onto the events so far; if that
+    -- throws, the first exception is kept and the drained entries dropped.
+    resolved :: Resolved -> IO Resolved
+    resolved (Resolved failure events) = do
+      ps <- drain t.events
+      try (resolveOnto (getData t.handle) events ps) <&> \case
+        Right events' -> Resolved failure events'
+        Left e -> Resolved (failure <|> Just e) events
 
     boundary = let GhosttyTerminalBoundary b = GhosttyTerminalBoundaryOscEnd in fromIntegral b
 
-    -- GHOSTTY_INIT_SIZED: the size, and zeros. ('sizeOf' ignores its
-    -- argument.)
+    -- GHOSTTY_INIT_SIZED: the size, and zeros.
     emptyStop :: GhosttyTerminalWriteStop
     emptyStop =
-      GhosttyTerminalWriteStop
-        { size = fromIntegral (sizeOf emptyStop),
-          consumed = 0,
-          reached = 0,
-          kind = GhosttyTerminalStringKind 0,
-          introducer = GhosttyTerminalStringIntroducer 0,
-          end = GhosttyTerminalStringEnd 0,
-          byte = 0
-        }
+      withSize $ \size ->
+        GhosttyTerminalWriteStop
+          { size,
+            consumed = 0,
+            reached = 0,
+            kind = GhosttyTerminalStringKind 0,
+            introducer = GhosttyTerminalStringIntroducer 0,
+            end = GhosttyTerminalStringEnd 0,
+            byte = 0
+          }
+
+-- | A write's progress: the first exception resolving threw, and the events
+-- resolved, newest first.
+data Resolved = Resolved !(Maybe SomeException) ![TerminalEvent]
