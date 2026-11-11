@@ -167,6 +167,13 @@ tests =
                     mark (CommandEnd (Just 2) "") 0 0,
                     mark (CommandEnd Nothing "") 0 0
                   ],
+          testCase "an OSC 133 D mark's exit code, shared or not" $ do
+            evs <- withFresh (`feed` "\ESC]133;D;255\a\ESC]133;D;256\a\ESC]133;D;-1\a")
+            evs
+              @?= [ mark (CommandEnd (Just 255) "") 0 0,
+                    mark (CommandEnd (Just 256) "") 0 0,
+                    mark (CommandEnd (Just (-1)) "") 0 0
+                  ],
           testCase "an OSC 133 D mark carries its error" $ do
             evs <- withFresh (`feed` "\ESC]133;D;1;err=boom\a")
             evs @?= [mark (CommandEnd (Just 1) "boom") 0 0],

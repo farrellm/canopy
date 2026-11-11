@@ -53,6 +53,7 @@ import Control.Exception (catch, handle, mask_, onException, throwIO)
 import Data.Bits (shiftR)
 import Data.ByteString qualified as BS
 import Data.ByteString.Unsafe qualified as BSU
+import Data.Vector qualified as V
 import Foreign.C.Types (CBool (..), CInt (..), CSize (..))
 import Foreign.Marshal.Alloc (alloca, free, mallocBytes)
 import Foreign.Marshal.Array (peekArray)
@@ -651,7 +652,7 @@ joined :: [ByteString] -> [TerminalEvent] -> [TerminalEvent]
 joined run out = case run of
   [] -> out
   [b] -> WritePty b : out
-  _ -> WritePty (BS.concat run) : out
+  _ -> (WritePty $! BS.concat run) : out
 {-# INLINE joined #-}
 
 -- | A key read that must have a value: NO_VALUE is the library's broken
@@ -680,7 +681,7 @@ markOnto cursor e own acc = case e.kind of
   GhosttySemanticPromptOutputStart
     | e.command.len == 0 -> mark (OutputStart mempty)
   GhosttySemanticPromptCommandEnd
-    | e.error.len == 0 -> mark (CommandEnd (exitCodeOf e) mempty)
+    | e.error.len == 0 -> mark (commandEnd e)
   GhosttySemanticPromptOutputStart -> markRead cursor e own acc
   GhosttySemanticPromptCommandEnd -> markRead cursor e own acc
   -- The header says INVALID is never reported, so it is no more named
@@ -688,7 +689,9 @@ markOnto cursor e own acc = case e.kind of
   GhosttySemanticPromptInvalid -> unnamed ghosttySemanticPromptKindEnum 0
   GhosttySemanticPromptKindUnknown n -> unnamed ghosttySemanticPromptKindEnum n
   where
-    mark step = pure $! Resolved own (SemanticPrompt (promptMark cursor step) : acc)
+    -- The event is built now, not left a thunk: the benchmark's 'length'
+    -- would never force one, but every caller does.
+    mark step = let !ev = SemanticPrompt (promptMark cursor step) in pure $! Resolved own (ev : acc)
     unnamed en v = pure $! Resolved (Just (toException (unknownEnumError (CallSite "GhosttyTerminalSemanticPromptFn") en v))) acc
 {-# INLINE markOnto #-}
 
@@ -712,6 +715,28 @@ promptMark cursor step = PromptMark {step, cursor = Point {col = fromIntegral cu
 -- | @D@'s exit code, if the shell reported one.
 exitCodeOf :: GhosttyTerminalSemanticPrompt -> Maybe Int32
 exitCodeOf e = e.exitCode <$ guard (toBool e.hasExitCode)
+
+-- | @D@ with no error text, as nearly every one is: shared, built once,
+-- for no exit code or one from 0 to 255 (every code a Unix shell reports),
+-- so such a mark allocates no step of its own (DESIGN.md §12.3).
+commandEnd :: GhosttyTerminalSemanticPrompt -> PromptStep
+commandEnd e
+  | not (toBool e.hasExitCode) = commandEndNoCode
+  | code >= 0 && code < 256 = commandEnds `V.unsafeIndex` fromIntegral code
+  | otherwise = CommandEnd (Just code) mempty
+  where
+    code = e.exitCode
+{-# INLINE commandEnd #-}
+
+-- | @D@ with no exit code and no error text.
+commandEndNoCode :: PromptStep
+commandEndNoCode = CommandEnd Nothing mempty
+{-# NOINLINE commandEndNoCode #-}
+
+-- | @D@ with each exit code from 0 to 255 and no error text.
+commandEnds :: V.Vector PromptStep
+commandEnds = V.generate 256 (\n -> CommandEnd (Just (fromIntegral n)) mempty)
+{-# NOINLINE commandEnds #-}
 
 -- | @UNKNOWN_SEQUENCE@.
 onUnknownSequence :: Sink -> GhosttyTerminal -> Ptr () -> Ptr GhosttyTerminalUnknownSequence -> IO ()

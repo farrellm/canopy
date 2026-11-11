@@ -2176,6 +2176,16 @@ walk passes on had to be forced: left lazy, it was a thunk per mark, and the wri
 than before. Prompts 4.3 MB, from 6.0 MB, copying 3.6 MB from 4.0, about 60 bytes a mark; plain
 text in 4 KiB writes 35 KB, from 43 KB, the drain before the write gone with the slices.
 
+What a mark still cost beyond its event and list cell was a `D` mark's step: a `CommandEnd` and a
+thunk for its exit code, on every one (2026-11-11). A `D` with no error text, nearly all of them,
+now takes a step built once and shared: one with no exit code, or one of 256 for the codes 0 to 255,
+which covers every code a Unix shell reports; any other code or error text builds its own. Its
+STG also showed the `D` event itself left a thunk, because choosing the shared step branches, and
+the benchmark, which only counts the events, never forced it; every caller would have paid the
+thunk and then the event. So the event is built when the mark is taken, and so are a joined reply's
+bytes. Prompts 3.4 MB, from 4.3 MB, 48 bytes a mark by ticky, the event and its list cell; copying
+1.3 MB, from 3.6 MB; 14.3–15.7 ms against 15.1–16.3 ms in alternating runs, much the same.
+
 **Rendering**, the same suite's `Render` group: the same terminal life with a screen fed and a
 render state opened, then one frame of every cell copied out (plain, SGR-coloured and wide/combining
 screens), one frame's cursor and colours, and 24 frames of one new line each, the steady state of a
