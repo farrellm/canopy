@@ -183,7 +183,7 @@ getData h key = case key of
     fromMemoryUsage <$> (orInvariant site ResultNoValue =<< fetchInto r (withSize memoryUsage))
   where
     k = dataKey key
-    site = enumSite "ghostty_terminal_get" ghosttyTerminalDataEnum (coerce k)
+    site = getSite k
     r = KeyRead h k site
 
 -- | One @ghostty_terminal_get@ read: the terminal, the key, and where its
@@ -197,17 +197,34 @@ data KeyRead = KeyRead GhosttyTerminal GhosttyTerminalData CallSite
 -- | 'CursorX' and 'CursorY', read into the terminal's slot rather than
 -- each into an 'Foreign.Marshal.Alloc.alloca' of its own: they are read
 -- after every prompt mark ('Ghostty.Effectful.Internal.Callbacks.resolveOnto').
+-- The keys and their call sites are top-level constants, built once, not
+-- a 'KeyRead' and a site for each read.
 cursorAt :: Terminal s -> IO (Word16, Word16)
-cursorAt t = unsafeWithForeignPtr t.cursorSlot $ \p ->
-  (,) <$> requiredAt p (keyRead CursorX) <*> requiredAt p (keyRead CursorY)
-  where
-    keyRead :: TerminalData a -> KeyRead
-    keyRead key = let k = dataKey key in KeyRead t.handle k (enumSite "ghostty_terminal_get" ghosttyTerminalDataEnum (coerce k))
+cursorAt t = unsafeWithForeignPtr t.cursorSlot $ \p -> do
+  x <- requiredAt p t.handle cursorXKey cursorXSite
+  y <- requiredAt p t.handle cursorYKey cursorYSite
+  pure (x, y)
+
+-- | The keys 'cursorAt' reads, and their call sites.
+cursorXKey, cursorYKey :: GhosttyTerminalData
+cursorXKey = dataKey CursorX
+cursorYKey = dataKey CursorY
+
+cursorXSite, cursorYSite :: CallSite
+cursorXSite = getSite cursorXKey
+cursorYSite = getSite cursorYKey
+{-# NOINLINE cursorXSite #-}
+{-# NOINLINE cursorYSite #-}
 
 -- | 'required', into the given memory.
-requiredAt :: (Storable b) => Ptr b -> KeyRead -> IO b
-requiredAt p (KeyRead h k site) =
+requiredAt :: (Storable b) => Ptr b -> GhosttyTerminal -> GhosttyTerminalData -> CallSite -> IO b
+requiredAt p h k site =
   orInvariant site ResultNoValue =<< optionalAtWith p id ResultNoValue site (ghosttyTerminalGet h k . castPtr)
+{-# INLINE requiredAt #-}
+
+-- | The call site of @ghostty_terminal_get@ with the key.
+getSite :: GhosttyTerminalData -> CallSite
+getSite k = enumSite "ghostty_terminal_get" ghosttyTerminalDataEnum (coerce k)
 
 -- | The read into memory set up by the caller; 'Nothing' on NO_VALUE.
 fetchWith :: (Storable b) => KeyRead -> (Ptr b -> IO ()) -> IO (Maybe b)

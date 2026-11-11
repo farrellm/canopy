@@ -2100,8 +2100,10 @@ keeps (`Internal.Keys.cursorAt`), not an `alloca` each, and a stop that drained 
 resolve and its `try` (2026-11-10): prompts 76 ms and 80 MB, about 1.1 KB a stop; plain text in
 4 KiB writes 103 KB, from 171 KB. Taking the marks reads each copied struct in place and converts
 it, not through a list of copies (`peekArray`), and only a mark with strings to read is guarded by
-`handle` (2026-11-11): prompts 66 ms and 60 MB, about 850 bytes a stop. What is left is mostly the
-`safe` call and the events kept.
+`handle` (2026-11-11): prompts 66 ms and 60 MB, about 850 bytes a stop. The cursor reads' keys and
+call sites are top-level constants, not a `KeyRead` and a site built for each read (2026-11-11):
+prompts 64 ms and 51 MB, about 720 bytes a stop. What is left is mostly the `safe` call and the
+events kept.
 
 **Rendering**, the same suite's `Render` group: the same terminal life with a screen fed and a
 render state opened, then one frame of every cell copied out (plain, SGR-coloured and wide/combining
