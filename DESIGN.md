@@ -500,8 +500,7 @@ from it:
   this sentence first read "with an explicit unknown case". `ResultCode` keeps its unknown case,
   because it is what `Invariant` carries, not what an operation returns.)
 - **`unsafe` FFI calls by default**, `safe` only for calls that can call back into Haskell
-  (`vt_write`, `vt_write_until`, `paste`, `render_state_update` if it ever gains callbacks, and
-  `ghostty-effectful`'s own `gveff_write`, which calls `vt_write_until`, D19). This is
+  (`vt_write`, `vt_write_until`, `paste`, `render_state_update` if it ever gains callbacks). This is
   a per-import decision recorded in the import's comment, because an `unsafe` call that re-enters
   Haskell is a crash, and that cannot be checked by the compiler. What is checked is that each
   decision was made against the header as it is: `ghostty-vt-ffi/safety.txt` records every bound
@@ -811,23 +810,25 @@ data TerminalEvent                     -- Ghostty.Effectful.Event
 ```
 
 Events come back in the order the bytes produced them, which matters: a `SemanticPrompt C` must be
-seen at the right point in the stream so that the output range it opens starts at the right row. To
-get that, `feed` writes with `ghostty_terminal_vt_write_until(…, GHOSTTY_TERMINAL_BOUNDARY_OSC_END,
-…)`, which stops right after each OSC terminator and reports how much it consumed. The loop over the
-stops is C (`gveff_write`, D19): after a stop that added a prompt mark, C reads
-`CURSOR_X`/`CURSOR_Y` beside the mark; after a stop where a Haskell callback appended, C returns,
-and the buffer is drained and resolved: a title or working-directory change gets the new value
-(their callbacks carry none). Then the write continues with the rest of the chunk. So a run of stops
-with only marks in them is one `safe` call, not one a stop. The header forbids calling `vt_write` from inside a callback, which this
-never does: the terminal is read between writes, not inside them. (Checked, M1.6: an OSC ended by
-`ESC \` is dispatched at the `ESC`, where `vt_write_until` stops, so its mark's cursor is right too;
-and the same stream split at every byte gives the same events.) Adjacent `WritePty`s are joined, so
-one reply is one write: across stops, and with any events buffered before the write.
+seen at the right point in the stream so that the output range it opens starts at the right row,
+with the cursor just after the mark. **Each callback reads what it needs inside itself** (D20): a
+prompt mark's cursor (`CURSOR_X`/`CURSOR_Y`, read by the C callback), and a title or working
+directory change's new value (their callbacks carry none, and the header asks for the read inside
+them). That is the library's own pattern: the header says to read the title and working directory
+"inside the callback", and that the terminal has already updated its screen when the mark callback
+runs. It forbids only writing to the terminal from inside a callback, which this never does. So
+`feed` need not stop anywhere: it is `ghostty_terminal_vt_write` over the chunk, in slices of 64 KiB
+so that what one call leaves unresolved stays bounded. (Until D20 it wrote with
+`vt_write_until(…, BOUNDARY_OSC_END, …)` and read the cursor after each stop, which needed a stop per
+OSC. Checked before the change, in C: over 63,000 marks, ended by BEL and by `ESC \`, some mid-line,
+the cursor read inside the callback equalled the one read after the stop for every mark. And the
+same stream split at every byte gives the same events.) Adjacent `WritePty`s are joined, so one
+reply is one write: across slices, and with any events buffered before the write.
 
 A callback must not let an exception into C, so each body is guarded: an exception is recorded in
 the buffer and thrown by the drain, after the write. So is a C enum value the binding does not name
-(`UnknownEnum`, §4.7), which a callback cannot throw. A failure while resolving the events of one
-return from the C write loop (a run of stops, D19) does not stop the write: every byte is written, so the terminal never falls behind the program's output,
+(`UnknownEnum`, §4.7), which a callback cannot throw. A failure while resolving one slice's events
+does not stop the write: every byte is written, so the terminal never falls behind the program's output,
 and the first failure is thrown after. `resize` and `reset` call callbacks too (the end of a render
 hold, mode 2048's in-band size report), so they return `[TerminalEvent]` as `feed` does. `setT`
 returns `()`: the header says setting a mode never invokes a callback, not even the end of a render
@@ -860,13 +861,11 @@ render states a hold captures into, and the prompt marks.
 **A prompt mark is copied in C** (D18). A call from C into Haskell makes a Haskell thread, and in a
 stream of marks that was most of a mark's cost (§12.3). So `SEMANTIC_PROMPT` is C: it copies the
 event, its command and error strings too, onto a list in the `USERDATA`, and no Haskell runs. A drain
-takes the Haskell buffer and the C list (`takeMarks`) and resolves both. **The C write loop
-sequences them** (D19): a mark ends its stop, and C returns at the end of the stop in which a
-Haskell callback appended, so the order is the marks of the stops before that one (C counts them,
-`gveff_marks_before`), then the Haskell buffer, then that stop's mark if it had one. C also returns
-once 256 marks wait (`GVEFF_MARK_BATCH`), bounding what one return holds, and the Haskell callbacks
-tell C they appended through a flag in the `USERDATA` that `push` sets. No other call produces
-marks: `resize`, `reset` and `paste` cannot.
+takes the Haskell buffer and the C list (`takePending`) and resolves both. **Each mark records its
+place** (D20): `push` counts the Haskell entries in a field of the `USERDATA` (`pushed`), the C
+callback stores that count with each mark, and the drain resets it, so a drain puts each mark after
+exactly the Haskell entries that came before it in the stream. No other call produces marks:
+`resize`, `reset` and `paste` cannot.
 A mark C cannot copy for want of memory is dropped and recorded, and the drain throws `OutOfMemory`
 after the write, as it throws a Haskell callback's exception. A drain with no marks makes one
 `unsafe` call and allocates nothing. Taking the marks is not wrapped in `finally`: converting one
@@ -2136,6 +2135,16 @@ newest-first list the write builds is put in order and has its `WritePty` runs j
 and 12 MB, copying 9 MB, against 31–35 ms, 19 MB and 19 MB; plain text in 4 KiB writes 95 KB, from
 101 KB. A feed of one PTY read keeps far fewer events than this benchmark's 1 MiB write.
 
+What was left was mostly libghostty: 60% of the time, its largest part `vt_write_until` itself,
+whose every call sets up a 20 KiB frame before parsing. In C alone, the same 1 MiB of marks took
+14.2 ms as a call per OSC stop and 11.2 ms as one `vt_write`, the minimum of 12 runs each; plain
+text took the same either way. So the stops went (D20): each callback reads what it needs inside
+itself, and `feed` is `vt_write` in 64 KiB slices (2026-11-11). Prompts 19.7–21.8 ms against
+22.0–23.7 ms in alternating runs, allocation unchanged at 12 MB; plain text in 4 KiB writes 47 KB,
+from 95 KB, the C loop's per-feed out-parameter and its resolve gone. One `vt_write` of the whole
+1 MiB, unsliced, copied 11 MB rather than 9 and was slower than the slices: every mark of the write
+waited in C and was converted at once.
+
 **Rendering**, the same suite's `Render` group: the same terminal life with a screen fed and a
 render state opened, then one frame of every cell copied out (plain, SGR-coloured and wide/combining
 screens), one frame's cursor and colours, and 24 frames of one new line each, the steady state of a
@@ -2272,8 +2281,9 @@ input; a per-session toggle hides them.
 | D15 | The runtime check is exact: the linked library is the pinned release, with every optional feature (`==1.0.0` in `pkgconfig-depends` too), though 1.x makes a newer minor memory-safe (relaxation is D-deferred-11) | §3.1, §3.4 |
 | D16 | The public effectful API follows upstream's renames at a pin bump (`ModeKey` after the `GHOSTTY_MODE_*` names, `CursorSgrStyle`), as §4.4's naming rule already requires | §4.4 |
 | D17 | The release build of libghostty-vt targets the baseline CPU (`build-libghostty.sh --release`, `-Dcpu=baseline`), since releases link it statically | §3.1 |
-| D18 | `SEMANTIC_PROMPT` is a C callback that copies the mark into the `USERDATA`, since a call into Haskell per mark was most of a mark's cost; first taken after the Haskell buffer at each OSC stop, now sequenced around it by the C write loop (D19) | §4.5, §12.3 |
-| D19 | The loop over `vt_write_until`'s OSC stops is C (`gveff_write`): it reads each mark's cursor, and returns to Haskell only when a Haskell callback appended, 256 marks wait, or the input ends, sequencing the marks around the Haskell buffer; since pausing the thread for a `safe` call per stop was the largest cost left | §4.5, §12.3 |
+| D18 | `SEMANTIC_PROMPT` is a C callback that copies the mark into the `USERDATA`, since a call into Haskell per mark was most of a mark's cost; first taken after the Haskell buffer at each OSC stop, then sequenced around it by the C write loop (D19), now by the count it records (D20) | §4.5, §12.3 |
+| D19 | The loop over `vt_write_until`'s OSC stops is C (`gveff_write`): it reads each mark's cursor, and returns to Haskell only when a Haskell callback appended, 256 marks wait, or the input ends, sequencing the marks around the Haskell buffer; since pausing the thread for a `safe` call per stop was the largest cost left. Superseded by D20, which needs no stops | §4.5, §12.3 |
+| D20 | Callbacks read what they need inside themselves (a mark's cursor in C, a title or working directory in Haskell), as the header asks for the title and working directory, and each mark records how many Haskell entries came before it; so `feed` is `vt_write` in 64 KiB slices, with no stops. Each `vt_write_until` call per OSC cost the parser its setup | §4.5, §12.3 |
 
 ### 15.2 Deferred
 

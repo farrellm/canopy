@@ -19,22 +19,17 @@
  * into Haskell makes a Haskell thread, which was most of a mark's cost
  * (DESIGN.md §12.3). It copies the event, its strings too, onto `marks`,
  * which Haskell takes after the write returns. A copy that cannot be made is
- * recorded in `mark_failure`.
+ * recorded in `mark_failure`. It also reads the cursor inside the callback
+ * (D20): the header says the terminal has already updated its screen when
+ * the callback runs, and asks for the title and working directory to be read
+ * inside theirs, so a read inside a callback is the library's own pattern;
+ * only writing to the terminal from one is forbidden. And it records how many
+ * entries the Haskell callbacks had appended before it (`pushed`, which
+ * Haskell's `push` counts and its drain resets), so a drain can put each mark
+ * where the stream had it. So a write needs no stops: it is one vt_write.
  *
- * The write loop is C too (gveff_write, D19), so that a stream of marks costs
- * one `safe` call, not one a stop: each `safe` call pauses the Haskell thread,
- * walking its stack. It writes until each OSC ends, and after a stop that
- * added a mark it reads the cursor into `cursors`, beside the mark. It goes on
- * to the next stop unless a Haskell callback appended (`appended`, which
- * Haskell's `push` sets), since what Haskell appends may need reading at its
- * stop (a title, a working directory), or the marks reach a batch. A mark is
- * the last event of its stop, so on return the order is: the marks of the
- * stops before the last (`marks_before` of them), what Haskell appended, then
- * the last stop's mark, if it had one.
- *
- * Every function here is called between writes, except the callbacks and
- * gveff_write, which is the write; nothing here locks: libghostty-vt's
- * handles are used from one thread (§4.6).
+ * Every function here is called between writes, except the callbacks; nothing
+ * here locks: libghostty-vt's handles are used from one thread (§4.6).
  */
 #ifndef GVEFF_TERMINAL_H
 #define GVEFF_TERMINAL_H
@@ -68,11 +63,11 @@ typedef struct {
   GhosttyResult failure;
   GhosttyTerminalSemanticPrompt *marks;
   uint32_t *cursors;
+  size_t *before;
   size_t mark_count;
   size_t mark_capacity;
   GhosttyResult mark_failure;
-  size_t marks_before;
-  bool appended;
+  size_t pushed;
   GhosttyResult cursor_failure;
   GhosttyTerminalData cursor_failure_key;
 } GveffUserdata;
@@ -120,19 +115,19 @@ bool gveff_marks_pending(const GveffUserdata *ud);
 GhosttyTerminalSemanticPrompt *gveff_marks(GveffUserdata *ud);
 size_t gveff_mark_count(const GveffUserdata *ud);
 
-/* Each mark's cursor, read right after its stop: the column in the low 16
+/* Each mark's cursor, read inside its callback: the column in the low 16
  * bits, the row in the high 16. Parallel to gveff_marks. */
 uint32_t *gveff_mark_cursors(GveffUserdata *ud);
 
-/* How many of the marks came before what Haskell appended in the last
- * gveff_write: those of the stops before its last. */
-size_t gveff_marks_before(const GveffUserdata *ud);
+/* For each mark, how many entries the Haskell callbacks had appended before
+ * it since the count was last reset. Parallel to gveff_marks. */
+size_t *gveff_marks_before(GveffUserdata *ud);
 
 /* Free the marks' strings and empty the list. */
 void gveff_marks_clear(GveffUserdata *ud);
 
-/* The flag Haskell's `push` sets when a callback appends. */
-bool *gveff_appended(GveffUserdata *ud);
+/* The count Haskell's `push` adds one to, and its drain resets. */
+size_t *gveff_pushed(GveffUserdata *ud);
 
 /* The first cursor read that failed since this was last called, or success;
  * and reset it. */
@@ -140,16 +135,6 @@ GhosttyResult gveff_cursor_failure(GveffUserdata *ud);
 
 /* The key that failed read, which a reset leaves. */
 GhosttyTerminalData gveff_cursor_failure_key(const GveffUserdata *ud);
-
-/* Write `len` bytes, stopping after each OSC; after a stop that added a mark,
- * read the cursor beside it. Return after the stop where a Haskell callback
- * appended, or once GVEFF_MARK_BATCH marks are waiting, or at the end of the
- * input, with the bytes written in `*consumed`. Anything but success is
- * ghostty_terminal_vt_write_until's own refusal. Runs Haskell callbacks, so its
- * import is `safe`. */
-#define GVEFF_MARK_BATCH 256
-GhosttyResult gveff_write(GhosttyTerminal terminal, GveffUserdata *ud, const uint8_t *data,
-                          size_t len, size_t *consumed);
 
 /* The first mark that could not be copied since this was last called, or
  * GHOSTTY_SUCCESS; and reset it. */
