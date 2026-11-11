@@ -14,6 +14,7 @@ import Data.ByteString qualified as BS
 import Data.Text qualified as T
 import Effectful (Eff, IOE, runEff)
 import Ghostty.Effectful (Ghostty, runGhostty)
+import Ghostty.Effectful.Event (TerminalEvent)
 import Ghostty.Effectful.Terminal (GridSize (..), extent, feed, terminalConfig, withTerminal)
 import Test.Tasty.Bench (Benchmark, bench, bgroup, env, whnfIO)
 
@@ -34,11 +35,19 @@ benchmarks =
     stream name bytes = env (pure bytes) $ \b -> bench name (whnfIO (feedFresh [b]))
 
 -- | Feed the chunks, in order, to a fresh 80×24 terminal, and count the
--- events, which forces them.
+-- events, forcing each one ('forcedCount').
 feedFresh :: [ByteString] -> IO Int
 feedFresh chunks = ghostty $ do
   g <- maybe (liftIO (die "80×24 is empty")) pure (GridSize <$> extent 80 <*> extent 24)
-  withTerminal (terminalConfig g) $ \t -> sum <$> traverse (fmap length . feed t) chunks
+  withTerminal (terminalConfig g) $ \t -> foldlM (\ !n c -> forcedCount n <$> feed t c) 0 chunks
+
+-- | Add the events to the count, each forced whole as a caller would read
+-- it: comparing an event with itself evaluates every field. Counting the
+-- list alone forces only its spine, so an event or a field left as a
+-- thunk would cost the benchmark nothing and every caller its price
+-- (DESIGN.md §12.3).
+forcedCount :: Int -> [TerminalEvent] -> Int
+forcedCount = foldl' (\ !n e -> if e == e then n + 1 else n)
 
 -- | Run under the effect; a version mismatch ends the run.
 ghostty :: Eff '[Ghostty, IOE] a -> IO a

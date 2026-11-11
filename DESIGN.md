@@ -2186,6 +2186,14 @@ thunk and then the event. So the event is built when the mark is taken, and so a
 bytes. Prompts 3.4 MB, from 4.3 MB, 48 bytes a mark by ticky, the event and its list cell; copying
 1.3 MB, from 3.6 MB; 14.3–15.7 ms against 15.1–16.3 ms in alternating runs, much the same.
 
+So the benchmark now forces every event whole, as a caller reads it, by comparing each with itself,
+as the `Render` group compares cells; counting the list forced only its spine (2026-11-11). On the
+code before the shared steps it reports 4.6 MB for prompts, not 4.3: the thunks it could not see.
+On the code since, allocation is unchanged, so no event or field is left a thunk; the comparison
+adds about 3 ms to prompts' time. Its count is a strict fold over the writes, not `sum` over a list
+of lazy counts, which kept each write's events until the end: plain text in 4 KiB writes 31 KB, from
+35 KB.
+
 **Rendering**, the same suite's `Render` group: the same terminal life with a screen fed and a
 render state opened, then one frame of every cell copied out (plain, SGR-coloured and wide/combining
 screens), one frame's cursor and colours, and 24 frames of one new line each, the steady state of a
