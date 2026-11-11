@@ -15,19 +15,21 @@ module Ghostty.Effectful.Internal.Feed
   )
 where
 
-import Control.Exception (onException, throwIO, try)
+import Control.Exception (catch, onException, throwIO)
 import Data.ByteString.Unsafe qualified as BSU
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (Ptr, castPtr, plusPtr)
 import Foreign.Storable (peek, poke)
 import Ghostty.Effectful.Error (CallSite (..), ResultCode (..))
-import Ghostty.Effectful.Event (TerminalEvent)
-import Ghostty.Effectful.Internal.Callbacks (Answers (..), Pending, drain, joinWrites, resolveOnto, takeMarks)
-import Ghostty.Effectful.Internal.Convert (withSize)
+import Ghostty.Effectful.Event (PromptMark (..), TerminalEvent (..))
+import Ghostty.Effectful.Internal.Callbacks (Answers (..), Pending (..), drain, joinWrites, takeMarks)
+import Ghostty.Effectful.Internal.Convert (unknownEnum, withSize)
 import Ghostty.Effectful.Internal.Error (expectSuccess, succeedsUnless)
 import Ghostty.Effectful.Internal.Keys (cursorAt, getData)
 import Ghostty.Effectful.Internal.Size (CellPixels (..), GridSize (..), fromExtent)
 import Ghostty.Effectful.Internal.Terminal (Terminal (..), wrote)
+import Ghostty.Effectful.Point (Point (..))
+import Ghostty.Effectful.Terminal.Keys (TerminalData (..))
 import Ghostty.FFI.Terminal
   ( GhosttyTerminalBoundary (..),
     GhosttyTerminalStringEnd (..),
@@ -69,7 +71,27 @@ resetTerminal t = do
 
 -- | The events buffered since the last drain, resolved.
 drainEvents :: Terminal s -> IO [TerminalEvent]
-drainEvents t = joinWrites . reverse <$> (resolveOnto (getData t.handle) (cursorAt t) [] =<< drained t)
+drainEvents t = joinWrites . reverse <$> (resolveOnto t [] =<< drained t)
+
+-- | Turn drained entries into events, newest first onto the given ones,
+-- reading what they need from the terminal, which is between writes now.
+-- Throws what a callback recorded. (Here, not in
+-- "Ghostty.Effectful.Internal.Callbacks", so it calls the reads directly:
+-- passed in, each would be a closure built for every stop with entries.)
+resolveOnto :: Terminal s -> [TerminalEvent] -> [Pending] -> IO [TerminalEvent]
+resolveOnto t = foldlM (\acc p -> (: acc) <$> event p)
+  where
+    event = \case
+      Ready e -> pure e
+      TitlePending -> TitleChanged <$> getData t.handle Title
+      PwdPending -> PwdChanged <$> getData t.handle Pwd
+      PromptPending step -> do
+        (x, y) <- cursorAt t
+        -- The row converted now, not a thunk left in the event.
+        let !row = fromIntegral y
+        pure (SemanticPrompt PromptMark {step, cursor = Point {col = x, row}})
+      Unnamed site e n -> unknownEnum site e n
+      Failed e -> throwIO e
 
 -- | What the callbacks appended since the last drain, oldest first: the
 -- Haskell callbacks' buffer, then the C callback's prompt marks, each the
@@ -113,15 +135,16 @@ feedTerminal t bytes = do
     -- Resolve what the callbacks buffered onto the events so far; if that
     -- throws, the first exception is kept and the drained entries dropped.
     -- Nothing drained, as after most stops, skips the resolve and its
-    -- 'try', which would allocate their closures for nothing.
+    -- 'catch', which would allocate their closures for nothing. A 'catch'
+    -- returning the 'Resolved' built, not 'try' and a map, allocates no
+    -- 'Either' and leaves no thunk to force.
     resolved :: Resolved -> IO Resolved
     resolved r@(Resolved failure events) =
       drained t >>= \case
         [] -> pure r
         ps ->
-          try (resolveOnto (getData t.handle) (cursorAt t) events ps) <&> \case
-            Right events' -> Resolved failure events'
-            Left e -> Resolved (failure <|> Just e) events
+          (Resolved failure <$!> resolveOnto t events ps)
+            `catch` \e -> pure (Resolved (failure <|> Just e) events)
 
     boundary = let GhosttyTerminalBoundary b = GhosttyTerminalBoundaryOscEnd in fromIntegral b
 

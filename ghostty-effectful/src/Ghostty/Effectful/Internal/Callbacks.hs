@@ -9,8 +9,8 @@
 -- 'sheltered': an exception inside one is recorded, not let into C, and thrown
 -- by whoever drains the buffer. What needs the terminal (the title after a
 -- title change, the cursor after a prompt mark) is a 'Pending' entry,
--- resolved ('resolveOnto') between writes, because a callback must not call back into its
--- terminal. A C enum value the binding does not name is recorded the same
+-- resolved between writes (in "Ghostty.Effectful.Internal.Feed"), because a
+-- callback must not call back into its terminal. A C enum value the binding does not name is recorded the same
 -- way, and becomes 'UnknownEnum' then.
 --
 -- @ENQUIRY@ and @XTVERSION@ return a struct by value, which no Haskell
@@ -27,7 +27,6 @@ module Ghostty.Effectful.Internal.Callbacks
     Pending (..),
     drain,
     takeMarks,
-    resolveOnto,
     joinWrites,
 
     -- * Answers
@@ -60,11 +59,10 @@ import Foreign.Ptr (FunPtr, Ptr, castFunPtr, castFunPtrToPtr, castPtr, freeHaske
 import Foreign.Storable (Storable (..))
 import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), ResultCode (..))
 import Ghostty.Effectful.Event
-import Ghostty.Effectful.Internal.Convert (colorSchemeCode, emptyString, oscTerminator, stringText, unknownEnum)
+import Ghostty.Effectful.Internal.Convert (colorSchemeCode, emptyString, oscTerminator, stringText)
 import Ghostty.Effectful.Internal.Error (expectSuccess, resultCode, resultError)
 import Ghostty.Effectful.Internal.Size (CellPixels (..), GridSize (..), extent, fromExtent)
-import Ghostty.Effectful.Point (Point (..))
-import Ghostty.Effectful.Terminal.Keys (ColorScheme (..), DeviceAttributes (..), TerminalData (..))
+import Ghostty.Effectful.Terminal.Keys (ColorScheme (..), DeviceAttributes (..))
 import Ghostty.FFI.Device
 import Ghostty.FFI.Layout (CEnum)
 import Ghostty.FFI.Osc (ghosttyOscTerminatorEnum)
@@ -123,23 +121,6 @@ drain buf = do
   ps <- readIORef buf
   writeIORef buf []
   pure (reverse ps)
-
--- | Turn drained entries into events, newest first onto the given ones,
--- reading what they need from the terminal (through the given reads: any
--- key, and the cursor), which is between writes now. Throws what a callback
--- recorded.
-resolveOnto :: (forall a. TerminalData a -> IO a) -> IO (Word16, Word16) -> [TerminalEvent] -> [Pending] -> IO [TerminalEvent]
-resolveOnto getData cursor = foldlM (\acc p -> (: acc) <$> event p)
-  where
-    event = \case
-      Ready e -> pure e
-      TitlePending -> TitleChanged <$> getData Title
-      PwdPending -> PwdChanged <$> getData Pwd
-      PromptPending step -> do
-        (x, y) <- cursor
-        pure (SemanticPrompt PromptMark {step, cursor = Point {col = x, row = fromIntegral y}})
-      Unnamed site e n -> unknownEnum site e n
-      Failed e -> throwIO e
 
 -- | Join each run of adjacent 'WritePty's into one, so a reply goes to the
 -- PTY in one write.

@@ -196,7 +196,7 @@ data KeyRead = KeyRead GhosttyTerminal GhosttyTerminalData CallSite
 
 -- | 'CursorX' and 'CursorY', read into the terminal's slot rather than
 -- each into an 'Foreign.Marshal.Alloc.alloca' of its own: they are read
--- after every prompt mark ('Ghostty.Effectful.Internal.Callbacks.resolveOnto').
+-- after every prompt mark ("Ghostty.Effectful.Internal.Feed").
 -- The keys and their call sites are top-level constants, built once, not
 -- a 'KeyRead' and a site for each read.
 cursorAt :: Terminal s -> IO (Word16, Word16)
@@ -204,6 +204,7 @@ cursorAt t = unsafeWithForeignPtr t.cursorSlot $ \p -> do
   x <- requiredAt p t.handle cursorXKey cursorXSite
   y <- requiredAt p t.handle cursorYKey cursorYSite
   pure (x, y)
+{-# INLINE cursorAt #-}
 
 -- | The keys 'cursorAt' reads, and their call sites.
 cursorXKey, cursorYKey :: GhosttyTerminalData
