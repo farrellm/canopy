@@ -23,11 +23,12 @@
 -- asks for inside the callback (DESIGN.md §4.3), and then calls the Haskell
 -- callback that appends the event. @SEMANTIC_PROMPT@ is C as well, so that a
 -- mark runs no Haskell (DESIGN.md §4.5, D18): it copies the mark into the
--- @USERDATA@, and 'takePending' takes the copies after the write.
+-- @USERDATA@, and 'takeOnto' takes the copies after the write.
 module Ghostty.Effectful.Internal.Callbacks
   ( -- * Pending events
     Pending (..),
-    takePending,
+    Resolved (..),
+    takeOnto,
     joinWritesNewestFirst,
 
     -- * Answers
@@ -61,7 +62,7 @@ import Foreign.Ptr (FunPtr, Ptr, castFunPtr, castFunPtrToPtr, castPtr, freeHaske
 import Foreign.Storable (Storable (..))
 import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), ResultCode (..))
 import Ghostty.Effectful.Event
-import Ghostty.Effectful.Internal.Convert (colorSchemeCode, emptyString, enumSite, oscTerminator, stringText)
+import Ghostty.Effectful.Internal.Convert (colorSchemeCode, emptyString, enumSite, oscTerminator, stringText, unknownEnumError)
 import Ghostty.Effectful.Internal.Error (expectSuccess, resultCode, resultError)
 import Ghostty.Effectful.Internal.Size (CellPixels (..), GridSize (..), extent, fromExtent)
 import Ghostty.Effectful.Point (Point (..))
@@ -159,7 +160,7 @@ data Installed = Installed
     -- | the @USERDATA@ the C callbacks answer from
     userdata :: Ptr GveffUserdata,
     -- | the @USERDATA@'s count of buffered entries, which 'push' adds to
-    -- and 'takePending' resets
+    -- and 'takeOnto' resets
     pushed :: Ptr CSize
   }
 
@@ -279,7 +280,7 @@ foreign import capi "gveff_terminal.h &gveff_render_hold"
   gveffRenderHold :: GhosttyTerminalRenderHoldFn
 
 -- | The prompt-mark callback, in C: it copies the mark onto the
--- @USERDATA@'s marks, which 'takePending' takes.
+-- @USERDATA@'s marks, which 'takeOnto' takes.
 foreign import capi "gveff_terminal.h &gveff_semantic_prompt"
   gveffSemanticPrompt :: GhosttyTerminalSemanticPromptFn
 
@@ -409,7 +410,7 @@ push sink p = do
 -- | Where the callbacks append: the terminal's buffer, and the
 -- @USERDATA@'s count of what is in it, which C reads for each prompt mark.
 data Sink = Sink
-  { -- | the buffer 'takePending' takes
+  { -- | the buffer 'takeOnto' takes
     entries :: IORef [Pending],
     -- | the @USERDATA@'s @pushed@
     count :: Ptr CSize
@@ -574,71 +575,86 @@ onProgramStatus buf _ _ rp = sheltered buf () $ do
           <*> stringText r.message
       push buf (Ready (ProgramStatus report))
 
--- | What the callbacks appended since the last take, oldest first, leaving
--- the buffer and the marks empty: the Haskell callbacks' entries, with the
--- prompt marks C copied put among them where the stream had them, by the
--- count C recorded with each (DESIGN.md §4.5, D20). Each mark carries the
--- cursor C read inside its callback. A mark that could not be copied, or a
--- cursor that could not be read, is a 'Failed' entry after the rest; so is
--- an exception converting a mark.
-takePending :: IORef [Pending] -> Installed -> IO [Pending]
-takePending buf i = do
+-- | A drain's progress: the first failure a drain met, and the events
+-- resolved so far, newest first.
+data Resolved = Resolved !(Maybe SomeException) ![TerminalEvent]
+
+-- | Take what the callbacks appended since the last take onto the events
+-- so far, newest first, leaving the buffer and the marks empty: the Haskell
+-- callbacks' entries, with the prompt marks C copied put among them where
+-- the stream had them, by the count C recorded with each (DESIGN.md §4.5,
+-- D20). Each mark carries the cursor C read inside its callback. One pass,
+-- building one list: the entries become events as they are placed (§12.3).
+--
+-- A failure (an exception in a callback, an unnamed enum value, a mark
+-- that could not be copied or a cursor that could not be read) drops the
+-- whole take's events and is kept, unless one was kept already; it is not
+-- thrown, so every take empties what it took. Nothing appended returns
+-- the progress as it was, allocating nothing: every write asks.
+takeOnto :: IORef [Pending] -> Installed -> Resolved -> IO Resolved
+takeOnto buf i r@(Resolved failure events) = do
   -- A read then a write, not atomicModifyIORef': only the owner thread
   -- touches the buffer (DESIGN.md §4.6), and the callbacks that append to
   -- it run on that thread inside a C call, never between the two.
   hs <- readIORef buf
   writeIORef buf []
   poke i.pushed 0
-  -- One call, allocating nothing, when there are no marks: every drain asks.
+  -- One call, allocating nothing, when there are no marks.
   pending <- toBool <$> gveffMarksPending i.userdata
   if not pending
-    then pure $! reverse hs
+    then case hs of
+      [] -> pure r
+      _ -> settle <$!> walk nullPtr nullPtr nullPtr 0 0 0 (reverse hs) Nothing events
     else do
       n <- fromIntegral <$> gveffMarkCount i.userdata
       p <- gveffMarks i.userdata
       cs <- gveffMarkCursors i.userdata
       bs <- gveffMarksBefore i.userdata
-      -- No 'finally' (a 'catch#' and its closures on every take): converting
-      -- throws nothing synchronously, since 'markPending' catches what its
+      -- No 'finally' (a 'catch#' and its closures on every take): the walk
+      -- throws nothing synchronously, since 'markOnto' catches what its
       -- string reads throw. An asynchronous exception before the clear
       -- leaves the marks for the next take, and freeing the USERDATA frees
       -- what is never taken.
-      ms <- merge p cs bs [] (length hs - 1) hs (n - 1)
+      Resolved own acc <- walk p cs bs n 0 0 (reverse hs) Nothing events
       gveffMarksClear i.userdata
       copied <- gveffMarksFailure i.userdata
       cursor <- gveffCursorFailure i.userdata
-      -- Built now, not left as a thunk; nothing to append, as usual, when
-      -- every mark was copied and every cursor read.
       case (resultCode copied, resultCode cursor) of
-        (ResultSuccess, ResultSuccess) -> pure ms
-        (c, r) -> do
+        (ResultSuccess, ResultSuccess) -> pure $! settle (Resolved own acc)
+        (c, rc) -> do
           key <- gveffCursorFailureKey i.userdata
-          pure $! ms <> failures c r key
+          let late
+                | c /= ResultSuccess = toException (resultError (CallSite "gveff_semantic_prompt") c)
+                | otherwise = toException (readError (enumSite "ghostty_terminal_get" ghosttyTerminalDataEnum (coerce key)) rc)
+          pure $! settle (Resolved (own <|> Just late) acc)
   where
-    -- Newest first onto the result, which comes out oldest first: entry @j@
-    -- of the buffer (newest first, @hs@) and mark @k@. A mark that came
-    -- after @j@ Haskell entries or more goes after entry @j@; one recorded
-    -- past the buffer's end (an interrupted take's) goes after all of it.
-    merge :: Ptr GhosttyTerminalSemanticPrompt -> Ptr Word32 -> Ptr CSize -> [Pending] -> Int -> [Pending] -> Int -> IO [Pending]
-    merge p cs bs acc j hs k
-      | k >= 0 = do
-          before <- fromIntegral <$> peekElemOff bs k
-          if before > j
-            then do
-              c <- peekElemOff cs k
-              m <- markPending c =<< peekElemOff p k
-              merge p cs bs (m : acc) j hs (k - 1)
-            else entry
-      | otherwise = entry
-      where
-        entry = case hs of
-          h : hs' -> merge p cs bs (h : acc) (j - 1) hs' k
-          [] -> pure acc
-    failures c r key =
-      [Failed (toException (resultError (CallSite "gveff_semantic_prompt") c)) | c /= ResultSuccess]
-        <> [ Failed (toException (readError (enumSite "ghostty_terminal_get" ghosttyTerminalDataEnum (coerce key)) r))
-           | r /= ResultSuccess
-           ]
+    -- The take's own failure drops its events.
+    settle = \case
+      Resolved Nothing acc -> Resolved failure acc
+      Resolved own _ -> Resolved (failure <|> own) events
+
+-- | Place the entries (oldest first) and marks @k@ to @n - 1@ onto the
+-- events, newest first, @j@ entries having been placed. A mark goes before
+-- the next entry if C counted @j@ entries or fewer before it; one counted
+-- past the buffer's end (an interrupted take's) goes after all of it.
+walk :: Ptr GhosttyTerminalSemanticPrompt -> Ptr Word32 -> Ptr CSize -> Int -> Int -> Int -> [Pending] -> Maybe SomeException -> [TerminalEvent] -> IO Resolved
+walk p cs bs !n !k !j hs !own !acc
+  | k < n = do
+      before <- fromIntegral <$> peekElemOff bs k
+      if before <= j || null hs
+        then do
+          c <- peekElemOff cs k
+          e <- peekElemOff p k
+          markOnto c e own acc >>= \(Resolved own' acc') -> walk p cs bs n (k + 1) j hs own' acc'
+        else entry
+  | otherwise = entry
+  where
+    entry = case hs of
+      [] -> pure $! Resolved own acc
+      h : rest -> case h of
+        Ready e -> walk p cs bs n k (j + 1) rest own (e : acc)
+        Unnamed site en v -> walk p cs bs n k (j + 1) rest (own <|> Just (toException (unknownEnumError site en v))) acc
+        Failed x -> walk p cs bs n k (j + 1) rest (own <|> Just x) acc
 
 -- | A key read that must have a value: NO_VALUE is the library's broken
 -- promise, anything else its own error.
@@ -648,32 +664,55 @@ readError site c
   | otherwise = resultError site c
 
 -- | @SEMANTIC_PROMPT@'s event, copied by the C callback, with the cursor C
--- read right after it (the column in the low 16 bits, the row in the high),
--- as an entry.
-markPending :: Word32 -> GhosttyTerminalSemanticPrompt -> IO Pending
-markPending cursor e = case e.kind of
+-- read inside it (the column in the low 16 bits, the row in the high),
+-- onto the events, or its failure kept. Only reading a string can throw,
+-- so an empty one, as a mark's strings nearly always are, is not read, and
+-- the mark is built in the loop with nothing else allocated; one with text
+-- is 'markRead''s.
+markOnto :: Word32 -> GhosttyTerminalSemanticPrompt -> Maybe SomeException -> [TerminalEvent] -> IO Resolved
+markOnto cursor e own acc = case e.kind of
   GhosttySemanticPromptPromptStart -> case e.promptKind of
     GhosttySemanticPromptPromptPrimary -> mark (PromptStart PrimaryPrompt)
     GhosttySemanticPromptPromptRight -> mark (PromptStart RightPrompt)
     GhosttySemanticPromptPromptContinuation -> mark (PromptStart ContinuationPrompt)
     GhosttySemanticPromptPromptSecondary -> mark (PromptStart SecondaryPrompt)
-    GhosttySemanticPromptPromptKindUnknown n -> pure (Unnamed site ghosttySemanticPromptPromptKindEnum n)
+    GhosttySemanticPromptPromptKindUnknown n -> unnamed ghosttySemanticPromptPromptKindEnum n
   GhosttySemanticPromptInputStart -> mark InputStart
-  -- Only reading the strings can throw; the other entries are built
-  -- without running anything.
-  GhosttySemanticPromptOutputStart -> caught $ mark . OutputStart =<< stringText e.command
-  GhosttySemanticPromptCommandEnd -> caught $ do
-    err <- stringText e.error
-    mark (CommandEnd (e.exitCode <$ guard (toBool e.hasExitCode)) err)
+  GhosttySemanticPromptOutputStart
+    | e.command.len == 0 -> mark (OutputStart mempty)
+  GhosttySemanticPromptCommandEnd
+    | e.error.len == 0 -> mark (CommandEnd (exitCodeOf e) mempty)
+  GhosttySemanticPromptOutputStart -> markRead cursor e own acc
+  GhosttySemanticPromptCommandEnd -> markRead cursor e own acc
   -- The header says INVALID is never reported, so it is no more named
   -- than an unknown value.
-  GhosttySemanticPromptInvalid -> pure (Unnamed site ghosttySemanticPromptKindEnum 0)
-  GhosttySemanticPromptKindUnknown n -> pure (Unnamed site ghosttySemanticPromptKindEnum n)
+  GhosttySemanticPromptInvalid -> unnamed ghosttySemanticPromptKindEnum 0
+  GhosttySemanticPromptKindUnknown n -> unnamed ghosttySemanticPromptKindEnum n
   where
-    site = CallSite "GhosttyTerminalSemanticPromptFn"
-    mark step = pure (Ready (SemanticPrompt PromptMark {step, cursor = at}))
-    !at = Point {col = fromIntegral cursor, row = cursor `shiftR` 16}
-    caught = handle (pure . Failed)
+    mark step = pure $! Resolved own (SemanticPrompt (promptMark cursor step) : acc)
+    unnamed en v = pure $! Resolved (own <|> Just (toException (unknownEnumError (CallSite "GhosttyTerminalSemanticPromptFn") en v))) acc
+{-# INLINE markOnto #-}
+
+-- | A mark whose string is not empty: read it, catching what the read
+-- throws.
+markRead :: Word32 -> GhosttyTerminalSemanticPrompt -> Maybe SomeException -> [TerminalEvent] -> IO Resolved
+markRead cursor e own acc =
+  handle (\x -> pure $! Resolved (own <|> Just x) acc) $ do
+    step <- case e.kind of
+      GhosttySemanticPromptCommandEnd -> CommandEnd (exitCodeOf e) <$> stringText e.error
+      _ -> OutputStart <$> stringText e.command
+    pure $! Resolved own (SemanticPrompt (promptMark cursor step) : acc)
+{-# NOINLINE markRead #-}
+
+-- | A mark at the cursor C packed: the column in the low 16 bits, the row
+-- in the high.
+promptMark :: Word32 -> PromptStep -> PromptMark
+promptMark cursor step = PromptMark {step, cursor = Point {col = fromIntegral cursor, row = cursor `shiftR` 16}}
+{-# INLINE promptMark #-}
+
+-- | @D@'s exit code, if the shell reported one.
+exitCodeOf :: GhosttyTerminalSemanticPrompt -> Maybe Int32
+exitCodeOf e = e.exitCode <$ guard (toBool e.hasExitCode)
 
 -- | @UNKNOWN_SEQUENCE@.
 onUnknownSequence :: Sink -> GhosttyTerminal -> Ptr () -> Ptr GhosttyTerminalUnknownSequence -> IO ()

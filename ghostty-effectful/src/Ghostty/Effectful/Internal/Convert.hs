@@ -7,6 +7,7 @@
 module Ghostty.Effectful.Internal.Convert
   ( -- * Enums
     unknownEnum,
+    unknownEnumError,
     enumName,
     enumSite,
     oscTerminator,
@@ -128,7 +129,11 @@ import Ghostty.FFI.Types
 
 -- | Throw 'UnknownEnum' for a value of the described enum.
 unknownEnum :: CallSite -> CEnum -> CInt -> IO a
-unknownEnum site e n = throwIO (UnknownEnum site e.name (toInteger n))
+unknownEnum site e n = throwIO (unknownEnumError site e n)
+
+-- | The error 'unknownEnum' throws, for a caller that keeps it.
+unknownEnumError :: CallSite -> CEnum -> CInt -> GhosttyError
+unknownEnumError site e n = UnknownEnum site e.name (toInteger n)
 
 -- | The full C name of an enum's value (@GHOSTTY_TERMINAL_DATA_COLS@), or
 -- the number if the binding does not name it.

@@ -798,7 +798,7 @@ data TerminalEvent                     -- Ghostty.Effectful.Event
   | Bell
   | TitleChanged Text
   | PwdChanged Text
-  | SemanticPrompt PromptMark          -- OSC 133: A/B/C/D with parameters (§7.3), and the cursor
+  | SemanticPrompt !PromptMark         -- OSC 133: A/B/C/D with parameters (§7.3), and the cursor
   | ClipboardWrite ClipboardLocation [ClipboardContent]
   | Notification Text Text
   | Progress ProgressReport
@@ -861,7 +861,8 @@ render states a hold captures into, and the prompt marks.
 **A prompt mark is copied in C** (D18). A call from C into Haskell makes a Haskell thread, and in a
 stream of marks that was most of a mark's cost (§12.3). So `SEMANTIC_PROMPT` is C: it copies the
 event, its command and error strings too, onto a list in the `USERDATA`, and no Haskell runs. A drain
-takes the Haskell buffer and the C list (`takePending`) and resolves both. **Each mark records its
+takes the Haskell buffer and the C list (`takeOnto`) and turns both into events in one pass, onto
+the write's events. **Each mark records its
 place** (D20): `push` counts the Haskell entries in a field of the `USERDATA` (`pushed`), the C
 callback stores that count with each mark, and the drain resets it, so a drain puts each mark after
 exactly the Haskell entries that came before it in the stream. No other call produces marks:
@@ -869,7 +870,8 @@ exactly the Haskell entries that came before it in the stream. No other call pro
 A mark C cannot copy for want of memory is dropped and recorded, and the drain throws `OutOfMemory`
 after the write, as it throws a Haskell callback's exception. A drain with no marks makes one
 `unsafe` call and allocates nothing. Taking the marks is not wrapped in `finally`: converting one
-throws nothing synchronously (a string that cannot be read is that mark's `Failed` entry), so only
+throws nothing synchronously (a string that cannot be read is kept as the take's failure, and an
+empty one, as nearly all are, is not read), so only
 an asynchronous exception can interrupt it, and then the marks stay on the list for the next drain
 rather than being lost; freeing the `USERDATA` frees any never taken.
 
@@ -1986,7 +1988,9 @@ long-running interactive program that accumulates thunks in its state leaks, and
 by users, not the compiler. Lazy fields are opted into with `~` where a structure is genuinely lazy.
 `ghostty-effectful`'s `Point` and `PromptMark` are strict and unpacked too, for size rather than
 leaks: both are always read whole from the library, and a write of many prompt marks keeps one of
-each per event alive until `feed` returns (§12.3).
+each per event alive until `feed` returns (§12.3). For the same reason `SemanticPrompt` unpacks its
+`PromptMark`, so a mark event is one object. A caller that passes the mark on as a value of its own
+rebuilds it, a short-lived 24 bytes, rather than every event a feed keeps carrying the box.
 
 ---
 
@@ -2144,6 +2148,20 @@ itself, and `feed` is `vt_write` in 64 KiB slices (2026-11-11). Prompts 19.7–2
 from 95 KB, the C loop's per-feed out-parameter and its resolve gone. One `vt_write` of the whole
 1 MiB, unsliced, copied 11 MB rather than 9 and was slower than the slices: every mark of the write
 waited in C and was converted at once.
+
+The events themselves were then most of what was left (2026-11-11). A mark went through three
+lists: the drain's merged entries, each in a `Ready` box; those resolved onto the write's events;
+and the ordered, joined result. Now the drain turns each entry into its event as it places it,
+straight onto the write's events (`takeOnto`), so only the first and last lists remain. That alone
+was worse, 12.8 MB, until its STG showed why: the string-reading marks' `handle` and its
+continuation were closures capturing the whole progress, each mark's result was a thunk, and the
+loop's counter was boxed. A mark whose strings are empty, nearly all of them, now reads nothing and
+needs no `handle`; one with text goes to a separate function; and the loop is strict. Then
+`SemanticPrompt` unpacks its `PromptMark` (§10.7): a mark event is 24 bytes, from 40 (the
+cursor's two fields share a word). Prompts 16.4–17.3 ms against 19.8–20.8 ms in alternating runs,
+and 6.0 MB, from 11.5 MB. By ticky that is 84 bytes a mark: 60 as the take builds it (the event and
+its list cell, 48 bytes, and on a `D` mark its `CommandEnd` and a thunk for the exit code), and the
+joined list's cell. Plain text in 4 KiB writes 43 KB, from 47 KB.
 
 **Rendering**, the same suite's `Render` group: the same terminal life with a screen fed and a
 render state opened, then one frame of every cell copied out (plain, SGR-coloured and wide/combining

@@ -159,6 +159,9 @@ tests =
                     mark (CommandEnd (Just 2) "") 0 0,
                     mark (CommandEnd Nothing "") 0 0
                   ],
+          testCase "an OSC 133 D mark carries its error" $ do
+            evs <- withFresh (`feed` "\ESC]133;D;1;err=boom\a")
+            evs @?= [mark (CommandEnd (Just 1) "boom") 0 0],
           testCase "the working directory" $ do
             evs <- withFresh (`feed` "\ESC]7;file://host/tmp\a")
             evs @?= [PwdChanged "file://host/tmp"],
@@ -243,6 +246,23 @@ tests =
               pure (fp, ((void a, ax), (void b, bx)))
             freeHaskellFunPtr fp
             (mid, before) @?= ((Left boom, 3), (Left boom, 5)),
+          -- The same with prompt marks either side of two failures, which a
+          -- take places and converts in the same pass: the first failure is
+          -- thrown after the whole write, and the marks are taken all the
+          -- same, so the next write returns none of them.
+          testCase "regression 1: a failure among marks is the first, and takes the marks" $ do
+            (fp, (failed, x, next)) <- withFresh $ \t -> do
+              n <- newIORef (0 :: Int)
+              fp <- liftIO . mkGhosttyTerminalBellFn $ \_ _ -> do
+                k <- atomicModifyIORef' n (\k -> (k + 1, k))
+                modifyIORef' t.events (Failed (toException (ErrorCall (if k == 0 then "first" else "second"))) :)
+              _ <- liftIO (ghosttyTerminalSet t.handle GhosttyTerminalOptBell (castFunPtrToPtr fp))
+              a <- try @ErrorCall (feed t "\ESC]133;A\a\a\ESC]133;B\a\a\ESC]133;D;0\aabc")
+              ax <- getT t CursorX
+              b <- feed t "d"
+              pure (fp, (void a, ax, b))
+            freeHaskellFunPtr fp
+            (failed, x, next) @?= (Left (ErrorCall "first"), 3, []),
           -- Replies were joined only within one stop, so an OSC between two
           -- replies split one reply into two writes.
           testCase "regression 2: a reply split by an OSC stop is one write" $ do

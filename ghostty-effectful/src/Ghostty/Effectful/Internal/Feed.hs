@@ -11,13 +11,12 @@ module Ghostty.Effectful.Internal.Feed
   )
 where
 
-import Control.Exception (catch, onException, throwIO)
+import Control.Exception (onException, throwIO)
 import Data.ByteString.Unsafe qualified as BSU
 import Foreign.Ptr (Ptr, castPtr, plusPtr)
 import Ghostty.Effectful.Error (CallSite (..))
 import Ghostty.Effectful.Event (TerminalEvent (..))
-import Ghostty.Effectful.Internal.Callbacks (Answers (..), Pending (..), joinWritesNewestFirst, takePending)
-import Ghostty.Effectful.Internal.Convert (unknownEnum)
+import Ghostty.Effectful.Internal.Callbacks (Answers (..), Resolved (..), joinWritesNewestFirst, takeOnto)
 import Ghostty.Effectful.Internal.Error (expectSuccess)
 import Ghostty.Effectful.Internal.Size (CellPixels (..), GridSize (..), fromExtent)
 import Ghostty.Effectful.Internal.Terminal (Terminal (..), wrote)
@@ -50,24 +49,19 @@ resetTerminal t = do
   ghosttyTerminalReset t.handle
   drainEvents t
 
--- | The events buffered since the last drain, resolved.
+-- | The events buffered since the last drain, resolved; throws what a
+-- callback recorded.
 drainEvents :: Terminal s -> IO [TerminalEvent]
-drainEvents t = joinWritesNewestFirst <$> (resolveOnto [] =<< drained t)
+drainEvents t = do
+  Resolved failure events <- resolved t (Resolved Nothing [])
+  whenJust failure throwIO
+  pure $! joinWritesNewestFirst events
 
--- | Turn drained entries into events, newest first onto the given ones.
--- Throws what a callback recorded.
-resolveOnto :: [TerminalEvent] -> [Pending] -> IO [TerminalEvent]
-resolveOnto = foldlM (\acc p -> (: acc) <$> event p)
-  where
-    event = \case
-      Ready e -> pure e
-      Unnamed site e n -> unknownEnum site e n
-      Failed e -> throwIO e
-
--- | What the callbacks appended since the last drain, oldest first, prompt
--- marks among the rest in the stream's order ('takePending').
-drained :: Terminal s -> IO [Pending]
-drained t = takePending t.events t.installed
+-- | Take what the callbacks appended since the last drain onto a write's
+-- progress ('takeOnto'): prompt marks among the rest in the stream's order,
+-- the first failure kept.
+resolved :: Terminal s -> Resolved -> IO Resolved
+resolved t = takeOnto t.events t.installed
 
 -- | Write VT to the terminal: one @ghostty_terminal_vt_write@. Every
 -- callback reads what it needs inside itself (a prompt mark's cursor, a new
@@ -82,12 +76,12 @@ drained t = takePending t.events t.installed
 feedTerminal :: Terminal s -> ByteString -> IO [TerminalEvent]
 feedTerminal t bytes = do
   wrote t
-  before <- resolved (Resolved Nothing [])
+  before <- resolved t (Resolved Nothing [])
   Resolved failure events <-
     BSU.unsafeUseAsCStringLen bytes $ \(p, n) ->
       -- One slice, as for nearly every PTY read: no loop to build.
       if n <= sliceBytes
-        then ghosttyTerminalVtWrite t.handle (castPtr p) (fromIntegral n) >> resolved before
+        then ghosttyTerminalVtWrite t.handle (castPtr p) (fromIntegral n) >> resolved t before
         else go (castPtr p) n before
   whenJust failure throwIO
   pure $! joinWritesNewestFirst events
@@ -98,28 +92,10 @@ feedTerminal t bytes = do
       | otherwise = do
           let k = min n sliceBytes
           ghosttyTerminalVtWrite t.handle p (fromIntegral k)
-          acc' <- resolved acc
+          acc' <- resolved t acc
           go (p `plusPtr` k) (n - k) acc'
-
-    -- Resolve what the callbacks buffered onto the events so far; if that
-    -- throws, the first exception is kept and the drained entries dropped.
-    -- Nothing drained, as before most writes, skips the resolve and its
-    -- 'catch', which would allocate their closures for nothing. A 'catch'
-    -- returning the 'Resolved' built, not 'try' and a map, allocates no
-    -- 'Either' and leaves no thunk to force.
-    resolved :: Resolved -> IO Resolved
-    resolved r@(Resolved failure events) =
-      drained t >>= \case
-        [] -> pure r
-        ps ->
-          (Resolved failure <$!> resolveOnto events ps)
-            `catch` \e -> pure (Resolved (failure <|> Just e) events)
 
 -- | How much of a write goes to the library at once: a PTY read is usually
 -- less, so most writes are one slice.
 sliceBytes :: Int
 sliceBytes = 65536
-
--- | A write's progress: the first exception resolving threw, and the events
--- resolved, newest first.
-data Resolved = Resolved !(Maybe SomeException) ![TerminalEvent]

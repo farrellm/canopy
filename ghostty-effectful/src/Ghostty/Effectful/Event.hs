@@ -56,8 +56,8 @@ data TerminalEvent
     -- was cleared.
     PwdChanged Text
   | -- | A shell integration mark (OSC 133), with where the cursor was just
-    -- after it.
-    SemanticPrompt PromptMark
+    -- after it. Unpacked, so a mark event is one object (DESIGN.md §10.7).
+    SemanticPrompt {-# UNPACK #-} !PromptMark
   | -- | A clipboard write (OSC 52, OSC 1337, OSC 5522) the terminal's
     -- configuration accepted. An empty list clears the clipboard.
     ClipboardWrite ClipboardLocation [ClipboardContent]
