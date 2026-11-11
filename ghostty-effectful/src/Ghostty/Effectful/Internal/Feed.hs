@@ -13,10 +13,10 @@ where
 
 import Control.Exception (onException, throwIO)
 import Data.ByteString.Unsafe qualified as BSU
-import Foreign.Ptr (Ptr, castPtr, plusPtr)
+import Foreign.Ptr (castPtr)
 import Ghostty.Effectful.Error (CallSite (..))
 import Ghostty.Effectful.Event (TerminalEvent (..))
-import Ghostty.Effectful.Internal.Callbacks (Answers (..), Resolved (..), joinWritesNewestFirst, takeOnto)
+import Ghostty.Effectful.Internal.Callbacks (Answers (..), Resolved (..), takeEvents)
 import Ghostty.Effectful.Internal.Error (expectSuccess)
 import Ghostty.Effectful.Internal.Size (CellPixels (..), GridSize (..), fromExtent)
 import Ghostty.Effectful.Internal.Terminal (Terminal (..), wrote)
@@ -49,53 +49,25 @@ resetTerminal t = do
   ghosttyTerminalReset t.handle
   drainEvents t
 
--- | The events buffered since the last drain, resolved; throws what a
--- callback recorded.
+-- | The events buffered since the last drain, oldest first, adjacent
+-- 'WritePty's joined; throws the first failure a callback recorded.
 drainEvents :: Terminal s -> IO [TerminalEvent]
 drainEvents t = do
-  Resolved failure events <- resolved t (Resolved Nothing [])
+  Resolved failure events <- takeEvents t.events t.installed
   whenJust failure throwIO
-  pure $! joinWritesNewestFirst events
+  pure events
 
--- | Take what the callbacks appended since the last drain onto a write's
--- progress ('takeOnto'): prompt marks among the rest in the stream's order,
--- the first failure kept.
-resolved :: Terminal s -> Resolved -> IO Resolved
-resolved t = takeOnto t.events t.installed
-
--- | Write VT to the terminal: one @ghostty_terminal_vt_write@. Every
--- callback reads what it needs inside itself (a prompt mark's cursor, a new
--- title or working directory), and each prompt mark records its place among
--- the Haskell callbacks' entries, so the write need not stop at them
--- (DESIGN.md §4.5, D20). It is written in slices of 'sliceBytes', each
--- resolved before the next, so what one write holds unresolved in C and in
--- the buffer stays bounded; a split anywhere gives the same events. Events
--- buffered before the write come first, and adjacent 'WritePty's are
--- joined. Every byte is written even if a callback failed (an exception, an
--- unnamed enum value): the first failure is thrown after the write.
+-- | Write VT to the terminal: one @ghostty_terminal_vt_write@, and one
+-- take. Every callback reads what it needs inside itself (a prompt mark's
+-- cursor, a new title or working directory), and each prompt mark records
+-- its place among the Haskell callbacks' entries, so the write need not
+-- stop at them (DESIGN.md §4.5, D20), and the take puts the whole write's
+-- events in order as it builds them (§12.3). Events buffered before the
+-- write come first, and adjacent 'WritePty's are joined. Every byte is
+-- written even if a callback failed (an exception, an unnamed enum value):
+-- the first failure is thrown after the write.
 feedTerminal :: Terminal s -> ByteString -> IO [TerminalEvent]
 feedTerminal t bytes = do
   wrote t
-  before <- resolved t (Resolved Nothing [])
-  Resolved failure events <-
-    BSU.unsafeUseAsCStringLen bytes $ \(p, n) ->
-      -- One slice, as for nearly every PTY read: no loop to build.
-      if n <= sliceBytes
-        then ghosttyTerminalVtWrite t.handle (castPtr p) (fromIntegral n) >> resolved t before
-        else go (castPtr p) n before
-  whenJust failure throwIO
-  pure $! joinWritesNewestFirst events
-  where
-    go :: Ptr Word8 -> Int -> Resolved -> IO Resolved
-    go p n acc
-      | n <= 0 = pure acc
-      | otherwise = do
-          let k = min n sliceBytes
-          ghosttyTerminalVtWrite t.handle p (fromIntegral k)
-          acc' <- resolved t acc
-          go (p `plusPtr` k) (n - k) acc'
-
--- | How much of a write goes to the library at once: a PTY read is usually
--- less, so most writes are one slice.
-sliceBytes :: Int
-sliceBytes = 65536
+  BSU.unsafeUseAsCStringLen bytes $ \(p, n) -> ghosttyTerminalVtWrite t.handle (castPtr p) (fromIntegral n)
+  drainEvents t

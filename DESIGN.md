@@ -817,17 +817,18 @@ directory change's new value (their callbacks carry none, and the header asks fo
 them). That is the library's own pattern: the header says to read the title and working directory
 "inside the callback", and that the terminal has already updated its screen when the mark callback
 runs. It forbids only writing to the terminal from inside a callback, which this never does. So
-`feed` need not stop anywhere: it is `ghostty_terminal_vt_write` over the chunk, in slices of 64 KiB
-so that what one call leaves unresolved stays bounded. (Until D20 it wrote with
+`feed` need not stop anywhere: it is one `ghostty_terminal_vt_write` over the chunk, and one take of
+what the callbacks left (D21). (Until D20 it wrote with
 `vt_write_until(…, BOUNDARY_OSC_END, …)` and read the cursor after each stop, which needed a stop per
 OSC. Checked before the change, in C: over 63,000 marks, ended by BEL and by `ESC \`, some mid-line,
 the cursor read inside the callback equalled the one read after the stop for every mark. And the
 same stream split at every byte gives the same events.) Adjacent `WritePty`s are joined, so one
-reply is one write: across slices, and with any events buffered before the write.
+reply is one write, with any events buffered before the write too: those are the oldest of the
+take's entries.
 
 A callback must not let an exception into C, so each body is guarded: an exception is recorded in
 the buffer and thrown by the drain, after the write. So is a C enum value the binding does not name
-(`UnknownEnum`, §4.7), which a callback cannot throw. A failure while resolving one slice's events
+(`UnknownEnum`, §4.7), which a callback cannot throw. A failure in a callback
 does not stop the write: every byte is written, so the terminal never falls behind the program's output,
 and the first failure is thrown after. `resize` and `reset` call callbacks too (the end of a render
 hold, mode 2048's in-band size report), so they return `[TerminalEvent]` as `feed` does. `setT`
@@ -861,8 +862,9 @@ render states a hold captures into, and the prompt marks.
 **A prompt mark is copied in C** (D18). A call from C into Haskell makes a Haskell thread, and in a
 stream of marks that was most of a mark's cost (§12.3). So `SEMANTIC_PROMPT` is C: it copies the
 event, its command and error strings too, onto a list in the `USERDATA`, and no Haskell runs. A drain
-takes the Haskell buffer and the C list (`takeOnto`) and turns both into events in one pass, onto
-the write's events. **Each mark records its
+takes the Haskell buffer and the C list (`takeEvents`) and turns both into events in one pass,
+newest first as the buffer is kept, so the list it builds is the one returned, oldest first and with
+its replies joined (D21). **Each mark records its
 place** (D20): `push` counts the Haskell entries in a field of the `USERDATA` (`pushed`), the C
 callback stores that count with each mark, and the drain resets it, so a drain puts each mark after
 exactly the Haskell entries that came before it in the stream. No other call produces marks:
@@ -2163,6 +2165,17 @@ and 6.0 MB, from 11.5 MB. By ticky that is 84 bytes a mark: 60 as the take build
 its list cell, 48 bytes, and on a `D` mark its `CommandEnd` and a thunk for the exit code), and the
 joined list's cell. Plain text in 4 KiB writes 43 KB, from 47 KB.
 
+That joined list was a reversal: the take built the events newest first, so the order-and-join pass
+copied every one (2026-11-11). The take now walks the buffer and the marks newest first, the order
+the buffer is kept in, so consing each event in front leaves the list oldest first; it joins
+`WritePty` runs as it goes, and the list it builds is the one `feed` returns (D21). That needs one
+take per write, so the write is no longer sliced: one `vt_write` and one take. One unsliced write
+had been slower under D20 because the take then built two lists of the whole write's events at
+once; with one list it is not (15.5–15.9 ms against 15.6–18.3 ms in alternating runs). The tail the
+walk passes on had to be forced: left lazy, it was a thunk per mark, and the write allocated more
+than before. Prompts 4.3 MB, from 6.0 MB, copying 3.6 MB from 4.0, about 60 bytes a mark; plain
+text in 4 KiB writes 35 KB, from 43 KB, the drain before the write gone with the slices.
+
 **Rendering**, the same suite's `Render` group: the same terminal life with a screen fed and a
 render state opened, then one frame of every cell copied out (plain, SGR-coloured and wide/combining
 screens), one frame's cursor and colours, and 24 frames of one new line each, the steady state of a
@@ -2301,7 +2314,8 @@ input; a per-session toggle hides them.
 | D17 | The release build of libghostty-vt targets the baseline CPU (`build-libghostty.sh --release`, `-Dcpu=baseline`), since releases link it statically | §3.1 |
 | D18 | `SEMANTIC_PROMPT` is a C callback that copies the mark into the `USERDATA`, since a call into Haskell per mark was most of a mark's cost; first taken after the Haskell buffer at each OSC stop, then sequenced around it by the C write loop (D19), now by the count it records (D20) | §4.5, §12.3 |
 | D19 | The loop over `vt_write_until`'s OSC stops is C (`gveff_write`): it reads each mark's cursor, and returns to Haskell only when a Haskell callback appended, 256 marks wait, or the input ends, sequencing the marks around the Haskell buffer; since pausing the thread for a `safe` call per stop was the largest cost left. Superseded by D20, which needs no stops | §4.5, §12.3 |
-| D20 | Callbacks read what they need inside themselves (a mark's cursor in C, a title or working directory in Haskell), as the header asks for the title and working directory, and each mark records how many Haskell entries came before it; so `feed` is `vt_write` in 64 KiB slices, with no stops. Each `vt_write_until` call per OSC cost the parser its setup | §4.5, §12.3 |
+| D20 | Callbacks read what they need inside themselves (a mark's cursor in C, a title or working directory in Haskell), as the header asks for the title and working directory, and each mark records how many Haskell entries came before it; so `feed` is `vt_write` with no stops. Each `vt_write_until` call per OSC cost the parser its setup. Its 64 KiB slices are superseded by D21 | §4.5, §12.3 |
+| D21 | `feed` is one `vt_write` and one take: the take walks the Haskell buffer and the marks newest first and builds the returned list in order, `WritePty` runs joined, rather than building it reversed and copying it in order; since a slice's take would leave a list to append | §4.5, §12.3 |
 
 ### 15.2 Deferred
 

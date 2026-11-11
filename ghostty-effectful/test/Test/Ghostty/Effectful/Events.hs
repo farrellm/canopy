@@ -147,7 +147,15 @@ tests =
             evs @?= ([WritePty "\ESC[48;24;80;480;800t"], [WritePty "\ESC[48;30;100;600;1000t"]),
           testCase "a reply is joined into one WritePty" $ do
             evs <- withFresh (`feed` "\ESC[6n\ESC[c\ESC[?2004$p")
-            evs @?= [WritePty "\ESC[1;1R\ESC[?62;22c\ESC[?2004;2$y"]
+            evs @?= [WritePty "\ESC[1;1R\ESC[?62;22c\ESC[?2004;2$y"],
+          testCase "a prompt mark between replies keeps them apart, in order" $ do
+            evs <- withFresh (`feed` "\ESC[6n\ESC]133;A\a\ESC[6n\ESC[c\ESC]133;B\a")
+            evs
+              @?= [ WritePty "\ESC[1;1R",
+                    mark (PromptStart PrimaryPrompt) 0 0,
+                    WritePty "\ESC[1;1R\ESC[?62;22c",
+                    mark InputStart 0 0
+                  ]
         ],
       testGroup
         "events"

@@ -33,9 +33,9 @@ events instead of callbacks. No export may expose a pointer.
   C (`cbits/gveff_terminal.c`, with the terminal's `USERDATA` struct), since they return a struct by
   value. `SEMANTIC_PROMPT` is C too (D18): it copies each mark into the `USERDATA`, with the cursor
   read inside the callback and the count of Haskell entries before it (D20: `push` counts, so every
-  append must go through `push`); `takeOnto` merges the marks into the Haskell buffer by those
-  counts, turning each entry into its event in the same pass. A title or working directory is read inside its callback too, so `feed` is one
-  `vt_write` per 64 KiB, with no stops. Any operation whose C call can run a callback returns the events it caused, as `feed`,
+  append must go through `push`); `takeEvents` merges the marks into the Haskell buffer by those
+  counts, newest first, building the returned list in order in the same pass (D21). A title or working directory is read inside its callback too, so `feed` is one
+  `vt_write` and one take, with no stops. Any operation whose C call can run a callback returns the events it caused, as `feed`,
   `resize` and `reset` do (`Internal.Feed`, which can read the terminal's keys); `setT`'s cannot,
   and a test holds that. Every struct a callback receives is frozen (no `size`), so it is read whole.
 - **Render states and frames** (§4.3, `Internal.Render`, public `Render`): a render state is its
