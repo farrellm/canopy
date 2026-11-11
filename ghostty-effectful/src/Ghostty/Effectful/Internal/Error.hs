@@ -10,9 +10,12 @@ module Ghostty.Effectful.Internal.Error
     newHandle,
     configured,
     outVia,
+    outAt,
     optionalVia,
     optionalViaWith,
+    optionalAtWith,
     bytesVia,
+    bytesAt,
   )
 where
 
@@ -96,13 +99,19 @@ configured set free h = h <$ set h `onException` free h
 -- | The value a call writes to its out-parameter, for a call whose only
 -- documented failure is running out of memory ('expectSuccess').
 outVia :: (Storable b) => CallSite -> (Ptr b -> IO GhosttyResult) -> IO b
-outVia site call = alloca $ \out -> do
-  expectSuccess site =<< call out
-  peek out
+outVia site call = alloca $ \out -> outAt out site call
 -- Inlined, as 'optionalVia' is: a read is a few loads around a C call, and
 -- out of line it would take the 'Storable' dictionary and a closure for the
 -- call on every read.
 {-# INLINE outVia #-}
+
+-- | 'outVia' into memory the caller provides, which a run of reads reuses:
+-- each 'alloca' is a pinned allocation, which costs more than the read.
+outAt :: (Storable b) => Ptr b -> CallSite -> (Ptr b -> IO GhosttyResult) -> IO b
+outAt out site call = do
+  expectSuccess site =<< call out
+  peek out
+{-# INLINE outAt #-}
 
 -- | 'outVia' for a call with one documented refusal besides running out of
 -- memory ('succeedsUnless'): 'Nothing' on that refusal.
@@ -114,14 +123,19 @@ optionalVia = optionalViaWith id
 -- 'optionalVia''s result would build the 'Just' twice, which costs the
 -- per-cell colour reads.)
 optionalViaWith :: (Storable b) => (b -> c) -> ResultCode -> CallSite -> (Ptr b -> IO GhosttyResult) -> IO (Maybe c)
-optionalViaWith convert refusal site call = alloca $ \out -> do
+optionalViaWith convert refusal site call = alloca $ \out -> optionalAtWith out convert refusal site call
+{-# INLINE optionalViaWith #-}
+
+-- | 'optionalViaWith' into memory the caller provides, as 'outAt' is.
+optionalAtWith :: (Storable b) => Ptr b -> (b -> c) -> ResultCode -> CallSite -> (Ptr b -> IO GhosttyResult) -> IO (Maybe c)
+optionalAtWith out convert refusal site call = do
   r <- call out
   case resultCode r of
     ResultSuccess -> Just . convert <$> peek out
     c
       | c == refusal -> pure Nothing
       | otherwise -> throwIO (resultError site c)
-{-# INLINE optionalViaWith #-}
+{-# INLINE optionalAtWith #-}
 
 -- | The bytes a call writes into a buffer: given the buffer and its
 -- capacity, the call returns its result and the length it wrote, or, with
@@ -130,13 +144,24 @@ optionalViaWith convert refusal site call = alloca $ \out -> do
 -- unless the call is not the same twice, so a short buffer never escapes
 -- (DESIGN.md §4.7). Any other result throws its 'resultError'.
 bytesVia :: CallSite -> (Ptr Word8 -> Int -> IO (GhosttyResult, Int)) -> IO ByteString
-bytesVia site call = attempt 64 >>= either (attempt . max 1 >=> either (const outOfSpace) pure) pure
+bytesVia site call = allocaBytes firstTry $ \buf -> bytesAt buf firstTry site call
+{-# INLINE bytesVia #-}
+
+-- | The capacity of 'bytesVia''s first try.
+firstTry :: Int
+firstTry = 64
+
+-- | 'bytesVia', its first try into a buffer of the given capacity the
+-- caller provides, as 'outAt''s is.
+bytesAt :: Ptr Word8 -> Int -> CallSite -> (Ptr Word8 -> Int -> IO (GhosttyResult, Int)) -> IO ByteString
+bytesAt buf0 cap0 site call = attempt buf0 cap0 >>= either (retry . max 1) pure
   where
-    attempt cap = allocaBytes cap $ \buf -> do
+    retry cap = allocaBytes cap (`attempt` cap) >>= either (const outOfSpace) pure
+    attempt buf cap = do
       (r, n) <- call buf cap
       case resultCode r of
         ResultSuccess -> Right <$> BS.packCStringLen (castPtr buf, n)
         ResultOutOfSpace -> pure (Left n)
         other -> throwIO (resultError site other)
     outOfSpace = throwIO (Invariant site ResultOutOfSpace)
-{-# INLINE bytesVia #-}
+{-# INLINE bytesAt #-}

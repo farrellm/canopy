@@ -2086,6 +2086,14 @@ inside a per-read or per-cell function are the cost to watch here. GHC binds eac
 specialisation of a local polymorphic helper as a closure, which the function allocates on every
 call. So the binding's readers are top level, and its small FFI read helpers are `INLINE`.
 
+The other cost is the out-parameter. Each `alloca` is a pinned allocation, which costs more than
+the read it serves, and a cell took ten. So a row's cell reads write into slots made once for the
+row, one per type read (`Internal.Render.CellSlots`, through `outAt`, `optionalAtWith` and
+`bytesAt`). Second figures (2026-11-10): a full frame takes 0.4–0.6 ms and allocates 400–600 bytes
+a cell. The readers count as they go: summed lazily, the 24-frame case kept every frame's cells
+alive to the end and measured the collector, at 100 ms where the reads take 12. Each new line
+scrolls the screen, so all 24 of its frames are fully dirty and read every row.
+
 ---
 
 ## 13. Milestones

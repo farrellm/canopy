@@ -14,7 +14,9 @@ events instead of callbacks. No export may expose a pointer.
   (§10.6).
 - **Results become `GhosttyError` through `Ghostty.Effectful.Internal.Error`** (`expectSuccess`,
   `succeedsUnless`, `outVia`, `optionalVia`/`optionalViaWith`, `bytesVia`; never a hand-written
-  switch): out of
+  switch). A run of reads in a loop uses their `…At` forms (`outAt`, `optionalAtWith`, `bytesAt`)
+  on memory made once for the run, as `Internal.Render.CellSlots` is, since each `alloca` is a pinned
+  allocation (§12.3). Out of
   memory is `OutOfMemory`, and a result the header says cannot happen for the arguments the types
   allow is `Invariant`. Marshalling shared between modules (strings, flags, palettes, enum call
   sites) is in `Internal.Convert`. Make the bad argument
