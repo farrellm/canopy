@@ -1985,6 +1985,9 @@ cassini.
 `StrictData` in every model module (`Tendril.**` T0–T4, `Canopy.App.Model`, `Canopy.Session.**`): a
 long-running interactive program that accumulates thunks in its state leaks, and the leak is found
 by users, not the compiler. Lazy fields are opted into with `~` where a structure is genuinely lazy.
+`ghostty-effectful`'s `Point` and `PromptMark` are strict and unpacked too, for size rather than
+leaks: both are always read whole from the library, and a write of many prompt marks keeps one of
+each per event alive until `feed` returns (§12.3).
 
 ---
 
@@ -2123,6 +2126,15 @@ cursor, which retires the shared cursor slot and the constant call sites above (
 31–32 ms against 44–47 ms in alternating runs, and 19 MB, about 270 bytes a stop; the `safe` calls
 are 0.6% of the time. What is left is libghostty's parsing (44%) and the collector (37%), most of
 it the 71,000 events the benchmark keeps.
+
+The collector's share is the events one `feed` builds and keeps until it returns, not the rate of
+allocation: under `+RTS -A64m` the same run copies 1 MB, not 19, and takes 22 ms, not 37. So the
+events got smaller and fewer copies of the list are made (2026-11-11): `Point`'s fields and
+`PromptMark`'s cursor are strict and unpacked (§10.7), 120 bytes a mark event becoming 72, and the
+newest-first list the write builds is put in order and has its `WritePty` runs joined in one pass
+(`joinWritesNewestFirst`), not a `reverse` and a lazy join, each a list of its own. Prompts 22–23 ms
+and 12 MB, copying 9 MB, against 31–35 ms, 19 MB and 19 MB; plain text in 4 KiB writes 95 KB, from
+101 KB. A feed of one PTY read keeps far fewer events than this benchmark's 1 MiB write.
 
 **Rendering**, the same suite's `Render` group: the same terminal life with a screen fed and a
 render state opened, then one frame of every cell copied out (plain, SGR-coloured and wide/combining

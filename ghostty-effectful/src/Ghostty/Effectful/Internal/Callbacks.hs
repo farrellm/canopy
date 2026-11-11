@@ -31,7 +31,7 @@ module Ghostty.Effectful.Internal.Callbacks
     drain,
     takeMarks,
     writeVt,
-    joinWrites,
+    joinWritesNewestFirst,
 
     -- * Answers
     Answers (..),
@@ -129,19 +129,26 @@ drain buf = do
   -- Reversed now, not left as a thunk: usually it is empty.
   pure $! reverse ps
 
--- | Join each run of adjacent 'WritePty's into one, so a reply goes to the
--- PTY in one write.
-joinWrites :: [TerminalEvent] -> [TerminalEvent]
-joinWrites = \case
-  WritePty a : rest@(WritePty _ : _) ->
-    let (more, rest') = writes rest
-     in WritePty (BS.concat (a : more)) : joinWrites rest'
-  e : rest -> e : joinWrites rest
-  [] -> []
+-- | Events resolved newest first, put oldest first with each run of
+-- adjacent 'WritePty's joined into one, so a reply goes to the PTY in one
+-- write. One pass, building one list: a 'reverse' and then a join would
+-- build two, and a long write keeps its events alive until they are
+-- returned (DESIGN.md §12.3).
+joinWritesNewestFirst :: [TerminalEvent] -> [TerminalEvent]
+joinWritesNewestFirst = go []
   where
-    writes = \case
-      WritePty b : rest -> first (b :) (writes rest)
-      rest -> ([], rest)
+    go acc = \case
+      WritePty b : rest -> run [b] rest
+        where
+          -- The run's bytes oldest first, as each older one is consed on.
+          run bs = \case
+            WritePty c : rest' -> run (c : bs) rest'
+            rest' -> go (WritePty (concatRun bs) : acc) rest'
+      e : rest -> go (e : acc) rest
+      [] -> acc
+    concatRun = \case
+      [b] -> b
+      bs -> BS.concat bs
 
 -- | What a terminal's query callbacks answer with, and the grid they report.
 data Answers = Answers

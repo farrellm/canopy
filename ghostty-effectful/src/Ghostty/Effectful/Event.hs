@@ -86,9 +86,11 @@ data TerminalEvent
 -- | An OSC 133 mark and the cursor just after it.
 data PromptMark = PromptMark
   { -- | which mark
-    step :: PromptStep,
-    -- | the cursor, in the active area
-    cursor :: Point 'Active
+    step :: !PromptStep,
+    -- | the cursor, in the active area. Unpacked, as 'Point''s own fields
+    -- are (DESIGN.md §12.3): a stream of marks keeps one per event alive for
+    -- a whole 'Ghostty.Effectful.Terminal.feed'.
+    cursor :: {-# UNPACK #-} !(Point 'Active)
   }
   deriving stock (Eq, Show)
 

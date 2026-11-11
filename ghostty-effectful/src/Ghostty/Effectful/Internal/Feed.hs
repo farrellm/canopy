@@ -23,7 +23,7 @@ import Foreign.Ptr (Ptr, castPtr, plusPtr)
 import Foreign.Storable (peek)
 import Ghostty.Effectful.Error (CallSite (..))
 import Ghostty.Effectful.Event (TerminalEvent (..))
-import Ghostty.Effectful.Internal.Callbacks (Answers (..), Pending (..), drain, joinWrites, takeMarks, writeVt)
+import Ghostty.Effectful.Internal.Callbacks (Answers (..), Pending (..), drain, joinWritesNewestFirst, takeMarks, writeVt)
 import Ghostty.Effectful.Internal.Convert (unknownEnum)
 import Ghostty.Effectful.Internal.Error (expectSuccess)
 import Ghostty.Effectful.Internal.Keys (getData)
@@ -62,7 +62,7 @@ resetTerminal t = do
 
 -- | The events buffered since the last drain, resolved.
 drainEvents :: Terminal s -> IO [TerminalEvent]
-drainEvents t = joinWrites . reverse <$> (resolveOnto t [] =<< drained t)
+drainEvents t = joinWritesNewestFirst <$> (resolveOnto t [] =<< drained t)
 
 -- | Turn drained entries into events, newest first onto the given ones,
 -- reading what they need from the terminal, which is between writes now.
@@ -103,7 +103,7 @@ feedTerminal t bytes = do
     BSU.unsafeUseAsCStringLen bytes $ \(p, n) ->
       alloca $ \used -> go used (castPtr p) n before
   whenJust failure throwIO
-  pure (joinWrites (reverse events))
+  pure $! joinWritesNewestFirst events
   where
     go :: Ptr CSize -> Ptr Word8 -> Int -> Resolved -> IO Resolved
     go used p n acc
