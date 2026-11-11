@@ -2,18 +2,24 @@
 #include "gveff_terminal.h"
 
 #include <stdlib.h>
+#include <string.h>
 
 _Static_assert(offsetof(GveffUserdata, answers) == 0,
                "answers must be first: Haskell reads them through the USERDATA pointer");
 
 GveffUserdata *gveff_userdata_new(void) {
   GveffUserdata *ud = calloc(1, sizeof *ud);
-  if (ud != NULL) ud->failure = GHOSTTY_SUCCESS;
+  if (ud != NULL) {
+    ud->failure = GHOSTTY_SUCCESS;
+    ud->mark_failure = GHOSTTY_SUCCESS;
+  }
   return ud;
 }
 
 void gveff_userdata_free(GveffUserdata *ud) {
   if (ud == NULL) return;
+  gveff_marks_clear(ud);
+  free(ud->marks);
   free(ud->captures);
   free(ud);
 }
@@ -95,4 +101,64 @@ void gveff_render_hold(GhosttyTerminal terminal, void *userdata, bool held) {
     if (r != GHOSTTY_SUCCESS && ud->failure == GHOSTTY_SUCCESS) ud->failure = r;
   }
   if (ud->notify != NULL) ud->notify(terminal, userdata, held);
+}
+
+bool gveff_marks_pending(const GveffUserdata *ud) {
+  return ud->mark_count != 0 || ud->mark_failure != GHOSTTY_SUCCESS;
+}
+
+GhosttyTerminalSemanticPrompt *gveff_marks(GveffUserdata *ud) { return ud->marks; }
+
+size_t gveff_mark_count(const GveffUserdata *ud) { return ud->mark_count; }
+
+void gveff_marks_clear(GveffUserdata *ud) {
+  for (size_t i = 0; i < ud->mark_count; i++) {
+    free((void *)ud->marks[i].command.ptr);
+    free((void *)ud->marks[i].error.ptr);
+  }
+  ud->mark_count = 0;
+}
+
+GhosttyResult gveff_marks_failure(GveffUserdata *ud) {
+  GhosttyResult r = ud->mark_failure;
+  ud->mark_failure = GHOSTTY_SUCCESS;
+  return r;
+}
+
+/* A copy of a borrowed string, or an empty one; false if it cannot be made. */
+static bool copy_string(GhosttyString *s) {
+  if (s->len == 0) {
+    *s = (GhosttyString){.ptr = NULL, .len = 0};
+    return true;
+  }
+  uint8_t *p = malloc(s->len);
+  if (p == NULL) return false;
+  memcpy(p, s->ptr, s->len);
+  s->ptr = p;
+  return true;
+}
+
+/* Copy the event onto the marks. A copy that cannot be made drops the mark
+ * and records the failure, which Haskell throws after the write. */
+void gveff_semantic_prompt(GhosttyTerminal terminal, void *userdata,
+                           const GhosttyTerminalSemanticPrompt *event) {
+  (void)terminal;
+  GveffUserdata *ud = userdata;
+  if (ud->mark_count == ud->mark_capacity) {
+    size_t capacity = ud->mark_capacity == 0 ? 4 : ud->mark_capacity * 2;
+    GhosttyTerminalSemanticPrompt *grown = realloc(ud->marks, capacity * sizeof *grown);
+    if (grown == NULL) goto out_of_memory;
+    ud->marks = grown;
+    ud->mark_capacity = capacity;
+  }
+  GhosttyTerminalSemanticPrompt m = *event;
+  if (!copy_string(&m.command)) goto out_of_memory;
+  if (!copy_string(&m.error)) {
+    free((void *)m.command.ptr);
+    goto out_of_memory;
+  }
+  ud->marks[ud->mark_count++] = m;
+  return;
+out_of_memory:
+  if (ud->mark_failure == GHOSTTY_SUCCESS) ud->mark_failure = GHOSTTY_OUT_OF_MEMORY;
 }

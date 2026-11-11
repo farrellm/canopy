@@ -22,7 +22,7 @@ import Foreign.Ptr (Ptr, castPtr, plusPtr)
 import Foreign.Storable (peek, poke)
 import Ghostty.Effectful.Error (CallSite (..), ResultCode (..))
 import Ghostty.Effectful.Event (TerminalEvent)
-import Ghostty.Effectful.Internal.Callbacks (Answers (..), drain, joinWrites, resolveOnto)
+import Ghostty.Effectful.Internal.Callbacks (Answers (..), Pending, drain, joinWrites, resolveOnto, takeMarks)
 import Ghostty.Effectful.Internal.Convert (withSize)
 import Ghostty.Effectful.Internal.Error (expectSuccess, succeedsUnless)
 import Ghostty.Effectful.Internal.Keys (getData)
@@ -69,7 +69,13 @@ resetTerminal t = do
 
 -- | The events buffered since the last drain, resolved.
 drainEvents :: Terminal s -> IO [TerminalEvent]
-drainEvents t = joinWrites . reverse <$> (resolveOnto (getData t.handle) [] =<< drain t.events)
+drainEvents t = joinWrites . reverse <$> (resolveOnto (getData t.handle) [] =<< drained t)
+
+-- | What the callbacks appended since the last drain, oldest first: the
+-- Haskell callbacks' buffer, then the C callback's prompt marks, each the
+-- last event of its stop.
+drained :: Terminal s -> IO [Pending]
+drained t = (<>) <$> drain t.events <*> takeMarks t.installed
 
 -- | Write VT to the terminal, stopping after each OSC
 -- (@GHOSTTY_TERMINAL_BOUNDARY_OSC_END@) to resolve the events so far, so a
@@ -108,7 +114,7 @@ feedTerminal t bytes = do
     -- throws, the first exception is kept and the drained entries dropped.
     resolved :: Resolved -> IO Resolved
     resolved (Resolved failure events) = do
-      ps <- drain t.events
+      ps <- drained t
       try (resolveOnto (getData t.handle) events ps) <&> \case
         Right events' -> Resolved failure events'
         Left e -> Resolved (failure <|> Just e) events

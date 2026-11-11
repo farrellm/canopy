@@ -787,7 +787,8 @@ position (regression 7).
 ### 4.5 Callbacks become events
 
 C callbacks are installed by the binding, never by users, and each does exactly one thing: append a
-constructor to an `IORef`'d buffer owned by that terminal. `feed` drains it:
+constructor to an `IORef`'d buffer owned by that terminal, or, for a prompt mark, a copy to a list
+in C (below, D18). `feed` drains both:
 
 ```haskell
 feed :: Ghostty :> es => Terminal s -> ByteString -> Eff es [TerminalEvent]
@@ -850,8 +851,19 @@ the `RENDER_HOLD` callback, because by the time the write returns the bytes afte
 have been processed, and `vt_write_until` cannot stop at a CSI. The event comes in order, but the
 frame it points at is gone by then. Answered in §4.3: the callback is C, captures into each render
 state of the terminal, and then calls the Haskell callback, which only appends, as every other does.
-The terminal's `USERDATA` is one C struct (`GveffUserdata`): the two answer strings, first, and the
-render states a hold captures into.
+The terminal's `USERDATA` is one C struct (`GveffUserdata`): the two answer strings, first, the
+render states a hold captures into, and the prompt marks.
+
+**A prompt mark is copied in C** (D18). A call from C into Haskell makes a Haskell thread, and in a
+stream of marks that was most of a mark's cost (§12.3). So `SEMANTIC_PROMPT` is C: it copies the
+event, its command and error strings too, onto a list in the `USERDATA`, and no Haskell runs. A drain
+takes the Haskell buffer, then the C list (`takeMarks`), and resolves both as before. That order is
+the stream's because the feed stops after every OSC: a mark ends its stop, so nothing the Haskell
+callbacks append comes after it. A write that did not stop at each OSC would need the marks
+sequenced against the buffer, and no other call produces marks: `resize`, `reset` and `paste` cannot.
+A mark C cannot copy for want of memory is dropped and recorded, and the drain throws `OutOfMemory`
+after the write, as it throws a Haskell callback's exception. A drain with no marks makes one
+`unsafe` call and allocates nothing.
 
 ### 4.6 Concurrency
 
@@ -2077,6 +2089,15 @@ linear in the stops and the same in 4 KiB writes. A REPL block has four marks, s
 child-throughput budget's (§12.1) path, but the per-stop cost is the first place to look if a
 stream of marks ever is.
 
+It was looked at (2026-11-10, `perf` with DWARF call graphs): libghostty's parsing was about 16% of
+the time. The rest was the runtime: the collector about 25%, and the mark callback about 22%,
+because each call from C into Haskell makes a Haskell thread (its 1 KiB stack was half a stop's
+allocation, as `+RTS -ki` showed). Pausing the thread for each stop's `safe` call was about 9%, and
+the non-threaded scheduler's poll on each callback about 5%. With the mark copied in C instead (D18,
+§4.5): 80–85 ms and 94 MB, about 1.3 KB a stop, against 160–170 ms and 161 MB; on the threaded
+runtime 86 ms against 115–123. What is left is mostly the `safe` call and the two cursor reads a
+mark resolves, each an `alloca`, which a slot as the cell reads use would remove.
+
 **Rendering**, the same suite's `Render` group: the same terminal life with a screen fed and a
 render state opened, then one frame of every cell copied out (plain, SGR-coloured and wide/combining
 screens), one frame's cursor and colours, and 24 frames of one new line each, the steady state of a
@@ -2213,6 +2234,7 @@ input; a per-session toggle hides them.
 | D15 | The runtime check is exact: the linked library is the pinned release, with every optional feature (`==1.0.0` in `pkgconfig-depends` too), though 1.x makes a newer minor memory-safe (relaxation is D-deferred-11) | §3.1, §3.4 |
 | D16 | The public effectful API follows upstream's renames at a pin bump (`ModeKey` after the `GHOSTTY_MODE_*` names, `CursorSgrStyle`), as §4.4's naming rule already requires | §4.4 |
 | D17 | The release build of libghostty-vt targets the baseline CPU (`build-libghostty.sh --release`, `-Dcpu=baseline`), since releases link it statically | §3.1 |
+| D18 | `SEMANTIC_PROMPT` is a C callback that copies the mark into the `USERDATA`, taken after the Haskell buffer at each OSC stop, since a call into Haskell per mark was most of a mark's cost | §4.5, §12.3 |
 
 ### 15.2 Deferred
 

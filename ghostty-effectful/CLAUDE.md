@@ -31,7 +31,9 @@ events instead of callbacks. No export may expose a pointer.
   (title, cursor) is a `Pending` entry resolved between writes. A query's answer is configuration
   (`TerminalConfig`, and a `Set…` option named for the callback's row); ENQ and XTVERSION answer in
   C (`cbits/gveff_terminal.c`, with the terminal's `USERDATA` struct), since they return a struct by
-  value. Any operation whose C call can run a callback returns the events it caused, as `feed`,
+  value. `SEMANTIC_PROMPT` is C too (D18): it copies each mark into the `USERDATA`, and a drain
+  takes them after the Haskell buffer (`takeMarks`), which is the stream's order only because the
+  feed stops after every OSC. Any operation whose C call can run a callback returns the events it caused, as `feed`,
   `resize` and `reset` do (`Internal.Feed`, which can read the terminal's keys); `setT`'s cannot,
   and a test holds that. Every struct a callback receives is frozen (no `size`), so it is read whole.
 - **Render states and frames** (§4.3, `Internal.Render`, public `Render`): a render state is its

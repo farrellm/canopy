@@ -19,11 +19,14 @@
 -- owns. @RENDER_HOLD@ is C too: when a hold begins it captures the frame into
 -- every render state attached to the terminal, which is a C call the header
 -- asks for inside the callback (DESIGN.md §4.3), and then calls the Haskell
--- callback that appends the event.
+-- callback that appends the event. @SEMANTIC_PROMPT@ is C as well, so that a
+-- mark runs no Haskell (DESIGN.md §4.5, D18): it copies the mark into the
+-- @USERDATA@, and 'takeMarks' takes the copies after the write stops.
 module Ghostty.Effectful.Internal.Callbacks
   ( -- * Pending events
     Pending (..),
     drain,
+    takeMarks,
     resolveOnto,
     joinWrites,
 
@@ -46,10 +49,10 @@ module Ghostty.Effectful.Internal.Callbacks
   )
 where
 
-import Control.Exception (catch, mask_, onException, throwIO)
+import Control.Exception (catch, finally, handle, mask_, onException, throwIO)
 import Data.ByteString qualified as BS
 import Data.ByteString.Unsafe qualified as BSU
-import Foreign.C.Types (CBool (..), CInt (..), CSize)
+import Foreign.C.Types (CBool (..), CInt (..), CSize (..))
 import Foreign.Marshal.Alloc (free, mallocBytes)
 import Foreign.Marshal.Array (peekArray)
 import Foreign.Marshal.Utils (copyBytes, fromBool, toBool, with)
@@ -213,7 +216,7 @@ installCallbacks h buf answers enq xtv = do
         wrapped (mkGhosttyTerminalDesktopNotificationFn (onNotification buf)) GhosttyTerminalOptDesktopNotification
         wrapped (mkGhosttyTerminalProgressReportFn (onProgress buf)) GhosttyTerminalOptProgressReport
         wrapped (mkGhosttyTerminalProgramStatusFn (onProgramStatus buf)) GhosttyTerminalOptProgramStatus
-        wrapped (mkGhosttyTerminalSemanticPromptFn (onSemanticPrompt buf)) GhosttyTerminalOptSemanticPrompt
+        setPtr GhosttyTerminalOptSemanticPrompt (castFunPtrToPtr gveffSemanticPrompt)
         wrapped (mkGhosttyTerminalResetFn (\_ _ -> push buf (Ready Reset))) GhosttyTerminalOptReset
         gveffSetHoldNotify ud =<< register (mkGhosttyTerminalRenderHoldFn (onRenderHold buf ud))
         setPtr GhosttyTerminalOptRenderHold (castFunPtrToPtr gveffRenderHold)
@@ -289,6 +292,32 @@ foreign import capi "gveff_terminal.h &gveff_xtversion"
 -- | The render-hold callback, in C: it captures, then calls the notifier.
 foreign import capi "gveff_terminal.h &gveff_render_hold"
   gveffRenderHold :: GhosttyTerminalRenderHoldFn
+
+-- | The prompt-mark callback, in C: it copies the mark onto the
+-- @USERDATA@'s marks, which 'takeMarks' takes.
+foreign import capi "gveff_terminal.h &gveff_semantic_prompt"
+  gveffSemanticPrompt :: GhosttyTerminalSemanticPromptFn
+
+-- | Whether there are marks, or a failed copy, to take.
+foreign import capi unsafe "gveff_terminal.h gveff_marks_pending"
+  gveffMarksPending :: Ptr GveffUserdata -> IO CBool
+
+-- | The marks since the last clear.
+foreign import capi unsafe "gveff_terminal.h gveff_marks"
+  gveffMarks :: Ptr GveffUserdata -> IO (Ptr GhosttyTerminalSemanticPrompt)
+
+-- | How many marks there are.
+foreign import capi unsafe "gveff_terminal.h gveff_mark_count"
+  gveffMarkCount :: Ptr GveffUserdata -> IO CSize
+
+-- | Free the marks' strings and empty the list.
+foreign import capi unsafe "gveff_terminal.h gveff_marks_clear"
+  gveffMarksClear :: Ptr GveffUserdata -> IO ()
+
+-- | The first mark that could not be copied since the last call, or
+-- success; and reset it.
+foreign import capi unsafe "gveff_terminal.h gveff_marks_failure"
+  gveffMarksFailure :: Ptr GveffUserdata -> IO GhosttyResult
 
 -- | A zeroed @USERDATA@, or null. @unsafe@, as is every call below: none
 -- calls back into Haskell, and each is a few loads and stores.
@@ -512,29 +541,50 @@ onProgramStatus buf _ _ rp = sheltered buf () $ do
           <*> stringText r.message
       push buf (Ready (ProgramStatus report))
 
--- | @SEMANTIC_PROMPT@: the mark now, the cursor after the write.
-onSemanticPrompt :: IORef [Pending] -> GhosttyTerminal -> Ptr () -> Ptr GhosttyTerminalSemanticPrompt -> IO ()
-onSemanticPrompt buf _ _ ep = sheltered buf () $ do
-  e <- peek ep
-  case e.kind of
-    GhosttySemanticPromptPromptStart -> case e.promptKind of
-      GhosttySemanticPromptPromptPrimary -> mark (PromptStart PrimaryPrompt)
-      GhosttySemanticPromptPromptRight -> mark (PromptStart RightPrompt)
-      GhosttySemanticPromptPromptContinuation -> mark (PromptStart ContinuationPrompt)
-      GhosttySemanticPromptPromptSecondary -> mark (PromptStart SecondaryPrompt)
-      GhosttySemanticPromptPromptKindUnknown n -> push buf (Unnamed site ghosttySemanticPromptPromptKindEnum n)
-    GhosttySemanticPromptInputStart -> mark InputStart
-    GhosttySemanticPromptOutputStart -> mark . OutputStart =<< stringText e.command
-    GhosttySemanticPromptCommandEnd -> do
-      err <- stringText e.error
-      mark (CommandEnd (e.exitCode <$ guard (toBool e.hasExitCode)) err)
-    -- The header says INVALID is never reported, so it is no more named
-    -- than an unknown value.
-    GhosttySemanticPromptInvalid -> push buf (Unnamed site ghosttySemanticPromptKindEnum 0)
-    GhosttySemanticPromptKindUnknown n -> push buf (Unnamed site ghosttySemanticPromptKindEnum n)
+-- | The prompt marks the C callback copied since the last call, oldest
+-- first, as entries to resolve (the mark now, the cursor after the write),
+-- and empty the list. A mark that could not be copied is a 'Failed' entry,
+-- after the rest; so is an exception converting one. The feed stops after
+-- every OSC, so these follow what the Haskell callbacks appended in the
+-- same stop ('drain').
+takeMarks :: Installed -> IO [Pending]
+takeMarks i = do
+  -- One call, allocating nothing, when there is nothing: every drain asks.
+  pending <- toBool <$> gveffMarksPending i.userdata
+  if not pending
+    then pure []
+    else do
+      n <- gveffMarkCount i.userdata
+      p <- gveffMarks i.userdata
+      ms <- (traverse markPending =<< peekArray (fromIntegral n) p) `finally` gveffMarksClear i.userdata
+      (ms <>) <$> failed
+  where
+    failed =
+      gveffMarksFailure i.userdata <&> \r -> case resultCode r of
+        ResultSuccess -> []
+        other -> [Failed (toException (resultError (CallSite "gveff_semantic_prompt") other))]
+
+-- | @SEMANTIC_PROMPT@'s event, copied by the C callback, as an entry.
+markPending :: GhosttyTerminalSemanticPrompt -> IO Pending
+markPending e = handle (pure . Failed) $ case e.kind of
+  GhosttySemanticPromptPromptStart -> case e.promptKind of
+    GhosttySemanticPromptPromptPrimary -> mark (PromptStart PrimaryPrompt)
+    GhosttySemanticPromptPromptRight -> mark (PromptStart RightPrompt)
+    GhosttySemanticPromptPromptContinuation -> mark (PromptStart ContinuationPrompt)
+    GhosttySemanticPromptPromptSecondary -> mark (PromptStart SecondaryPrompt)
+    GhosttySemanticPromptPromptKindUnknown n -> pure (Unnamed site ghosttySemanticPromptPromptKindEnum n)
+  GhosttySemanticPromptInputStart -> mark InputStart
+  GhosttySemanticPromptOutputStart -> mark . OutputStart =<< stringText e.command
+  GhosttySemanticPromptCommandEnd -> do
+    err <- stringText e.error
+    mark (CommandEnd (e.exitCode <$ guard (toBool e.hasExitCode)) err)
+  -- The header says INVALID is never reported, so it is no more named
+  -- than an unknown value.
+  GhosttySemanticPromptInvalid -> pure (Unnamed site ghosttySemanticPromptKindEnum 0)
+  GhosttySemanticPromptKindUnknown n -> pure (Unnamed site ghosttySemanticPromptKindEnum n)
   where
     site = CallSite "GhosttyTerminalSemanticPromptFn"
-    mark = push buf . PromptPending
+    mark = pure . PromptPending
 
 -- | @UNKNOWN_SEQUENCE@.
 onUnknownSequence :: IORef [Pending] -> GhosttyTerminal -> Ptr () -> Ptr GhosttyTerminalUnknownSequence -> IO ()

@@ -15,7 +15,15 @@
  * that appends the event. A capture that fails is recorded in `failure` for
  * `notify` to report. None of this runs Haskell beyond `notify`.
  *
- * Every function here is called between writes, except the two callbacks, so
+ * SEMANTIC_PROMPT is C so that a mark costs no Haskell call: a call from C
+ * into Haskell makes a Haskell thread, which was most of a mark's cost
+ * (DESIGN.md §12.3). It copies the event, its strings too, onto `marks`,
+ * which Haskell takes after the write stops. The feed stops after every OSC
+ * (§4.5), so a mark is the last event of its stop, and Haskell puts it after
+ * what its own callbacks appended. A copy that cannot be made is recorded in
+ * `mark_failure`.
+ *
+ * Every function here is called between writes, except the callbacks, so
  * nothing here locks: libghostty-vt's handles are used from one thread (§4.6).
  */
 #ifndef GVEFF_TERMINAL_H
@@ -47,12 +55,16 @@ typedef struct {
   size_t count;
   size_t capacity;
   GhosttyResult failure;
+  GhosttyTerminalSemanticPrompt *marks;
+  size_t mark_count;
+  size_t mark_capacity;
+  GhosttyResult mark_failure;
 } GveffUserdata;
 
 /* A zeroed USERDATA, or NULL if it cannot be allocated. */
 GveffUserdata *gveff_userdata_new(void);
 
-/* Free the USERDATA and its capture list, not the answers' bytes, which are
+/* Free the USERDATA, its capture list and its marks, not the answers' bytes, which are
  * Haskell's. NULL is ignored. */
 void gveff_userdata_free(GveffUserdata *ud);
 
@@ -83,9 +95,27 @@ void gveff_capture_framing(GveffUserdata *ud, GhosttyRenderState state, bool fra
  * GHOSTTY_SUCCESS; and reset it. */
 GhosttyResult gveff_capture_failure(GveffUserdata *ud);
 
+/* Whether there are marks, or a mark that could not be copied: whether
+ * Haskell has anything to take. */
+bool gveff_marks_pending(const GveffUserdata *ud);
+
+/* The marks since they were last cleared, oldest first, and their number.
+ * They and their strings are owned by the USERDATA until gveff_marks_clear. */
+GhosttyTerminalSemanticPrompt *gveff_marks(GveffUserdata *ud);
+size_t gveff_mark_count(const GveffUserdata *ud);
+
+/* Free the marks' strings and empty the list. */
+void gveff_marks_clear(GveffUserdata *ud);
+
+/* The first mark that could not be copied since this was last called, or
+ * GHOSTTY_SUCCESS; and reset it. */
+GhosttyResult gveff_marks_failure(GveffUserdata *ud);
+
 /* The callbacks. */
 GhosttyString gveff_enquiry(GhosttyTerminal terminal, void *userdata);
 GhosttyString gveff_xtversion(GhosttyTerminal terminal, void *userdata);
 void gveff_render_hold(GhosttyTerminal terminal, void *userdata, bool held);
+void gveff_semantic_prompt(GhosttyTerminal terminal, void *userdata,
+                           const GhosttyTerminalSemanticPrompt *event);
 
 #endif
