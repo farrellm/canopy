@@ -25,7 +25,7 @@ import Ghostty.Effectful.Event (TerminalEvent)
 import Ghostty.Effectful.Internal.Callbacks (Answers (..), Pending, drain, joinWrites, resolveOnto, takeMarks)
 import Ghostty.Effectful.Internal.Convert (withSize)
 import Ghostty.Effectful.Internal.Error (expectSuccess, succeedsUnless)
-import Ghostty.Effectful.Internal.Keys (getData)
+import Ghostty.Effectful.Internal.Keys (cursorAt, getData)
 import Ghostty.Effectful.Internal.Size (CellPixels (..), GridSize (..), fromExtent)
 import Ghostty.Effectful.Internal.Terminal (Terminal (..), wrote)
 import Ghostty.FFI.Terminal
@@ -69,7 +69,7 @@ resetTerminal t = do
 
 -- | The events buffered since the last drain, resolved.
 drainEvents :: Terminal s -> IO [TerminalEvent]
-drainEvents t = joinWrites . reverse <$> (resolveOnto (getData t.handle) [] =<< drained t)
+drainEvents t = joinWrites . reverse <$> (resolveOnto (getData t.handle) (cursorAt t) [] =<< drained t)
 
 -- | What the callbacks appended since the last drain, oldest first: the
 -- Haskell callbacks' buffer, then the C callback's prompt marks, each the
@@ -112,12 +112,16 @@ feedTerminal t bytes = do
 
     -- Resolve what the callbacks buffered onto the events so far; if that
     -- throws, the first exception is kept and the drained entries dropped.
+    -- Nothing drained, as after most stops, skips the resolve and its
+    -- 'try', which would allocate their closures for nothing.
     resolved :: Resolved -> IO Resolved
-    resolved (Resolved failure events) = do
-      ps <- drained t
-      try (resolveOnto (getData t.handle) events ps) <&> \case
-        Right events' -> Resolved failure events'
-        Left e -> Resolved (failure <|> Just e) events
+    resolved r@(Resolved failure events) =
+      drained t >>= \case
+        [] -> pure r
+        ps ->
+          try (resolveOnto (getData t.handle) (cursorAt t) events ps) <&> \case
+            Right events' -> Resolved failure events'
+            Left e -> Resolved (failure <|> Just e) events
 
     boundary = let GhosttyTerminalBoundary b = GhosttyTerminalBoundaryOscEnd in fromIntegral b
 

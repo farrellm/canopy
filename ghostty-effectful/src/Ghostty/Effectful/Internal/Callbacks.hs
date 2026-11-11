@@ -125,18 +125,18 @@ drain buf = do
   pure (reverse ps)
 
 -- | Turn drained entries into events, newest first onto the given ones,
--- reading what they need from the terminal (through the given read), which
--- is between writes now. Throws what a callback recorded.
-resolveOnto :: (forall a. TerminalData a -> IO a) -> [TerminalEvent] -> [Pending] -> IO [TerminalEvent]
-resolveOnto getData = foldlM (\acc p -> (: acc) <$> event p)
+-- reading what they need from the terminal (through the given reads: any
+-- key, and the cursor), which is between writes now. Throws what a callback
+-- recorded.
+resolveOnto :: (forall a. TerminalData a -> IO a) -> IO (Word16, Word16) -> [TerminalEvent] -> [Pending] -> IO [TerminalEvent]
+resolveOnto getData cursor = foldlM (\acc p -> (: acc) <$> event p)
   where
     event = \case
       Ready e -> pure e
       TitlePending -> TitleChanged <$> getData Title
       PwdPending -> PwdChanged <$> getData Pwd
       PromptPending step -> do
-        x <- getData CursorX
-        y <- getData CursorY
+        (x, y) <- cursor
         pure (SemanticPrompt PromptMark {step, cursor = Point {col = x, row = fromIntegral y}})
       Unnamed site e n -> unknownEnum site e n
       Failed e -> throwIO e

@@ -45,6 +45,7 @@ where
 import Control.Exception (mask_, onException)
 import Data.IntMap.Strict qualified as IntMap
 import Foreign.C.Types (CSize)
+import Foreign.ForeignPtr (ForeignPtr, mallocForeignPtr)
 import Foreign.Marshal.Utils (toBool, with)
 import Foreign.Ptr (castPtr)
 import Ghostty.Effectful.Error (CallSite (..), ResultCode (..))
@@ -110,7 +111,12 @@ data Terminal s = Terminal
     -- read when this was one value describes the terminal only while it
     -- still is. Every operation that writes, resizes, resets, sets an
     -- option or scrolls the viewport counts ('wrote').
-    writes :: IORef Word64
+    writes :: IORef Word64,
+    -- | memory a prompt mark's two cursor reads reuse
+    -- ('Ghostty.Effectful.Internal.Keys.cursorAt'), so a mark allocates no
+    -- out-parameter of its own: each 'Foreign.Marshal.Alloc.alloca' is a
+    -- pinned allocation (DESIGN.md §12.3). Collected with the record.
+    cursorSlot :: ForeignPtr Word16
   }
 
 -- | A tracked reference to a cell of a terminal in the region @s@: it
@@ -198,7 +204,8 @@ openTerminal liveRefs cfg = do
     installCallbacks handle events answers cfg.enquiry (encodeUtf8 cfg.xtversion)
       `onException` ghosttyTerminalFree handle
   writes <- newIORef 0
-  pure Terminal {handle, refs, nextRef, events, answers, installed, liveRefs, writes}
+  cursorSlot <- mallocForeignPtr
+  pure Terminal {handle, refs, nextRef, events, answers, installed, liveRefs, writes, cursorSlot}
 
 -- | Count a call that changed the terminal (§4.3: a frame's hyperlinks are
 -- read from the terminal only while it has not changed since).
@@ -218,7 +225,8 @@ forgetRegion t =
       answers = t.answers,
       installed = t.installed,
       liveRefs = t.liveRefs,
-      writes = t.writes
+      writes = t.writes,
+      cursorSlot = t.cursorSlot
     }
 
 -- | Free every tracked reference still registered, taking their number off

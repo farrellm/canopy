@@ -13,6 +13,7 @@ module Ghostty.Effectful.Internal.Keys
 
     -- * Calls
     getData,
+    cursorAt,
     setOption,
   )
 where
@@ -23,11 +24,12 @@ import Foreign.Marshal.Array (withArray)
 import Foreign.Marshal.Utils (fromBool, maybeWith, toBool, with)
 import Foreign.Ptr (Ptr, castPtr)
 import Foreign.Storable (Storable (..))
+import GHC.ForeignPtr (unsafeWithForeignPtr)
 import Ghostty.Effectful.Color (Palette, paletteColors)
 import Ghostty.Effectful.Error (CallSite, ResultCode (..))
 import Ghostty.Effectful.Internal.Callbacks (Answers (..), captureRelease, setEnquiryAnswer, setXtversionAnswer)
 import Ghostty.Effectful.Internal.Convert (enumSite, flagBits, fromKittyFlagBits, fromRgb, fromStyle, modeCode, readPalette, stringText, toCursorStyle, toRgb, unknownEnum, withSize, withString)
-import Ghostty.Effectful.Internal.Error (expectSuccess, optionalVia, orInvariant)
+import Ghostty.Effectful.Internal.Error (expectSuccess, optionalAtWith, optionalVia, orInvariant)
 import Ghostty.Effectful.Internal.Terminal (Terminal (..), wrote)
 import Ghostty.Effectful.Mode (ModeKey (..))
 import Ghostty.Effectful.Style (Style)
@@ -191,6 +193,21 @@ getData h key = case key of
 -- whichever key it read (about 400 bytes a read, which the cursor reads
 -- after every prompt mark would pay).
 data KeyRead = KeyRead GhosttyTerminal GhosttyTerminalData CallSite
+
+-- | 'CursorX' and 'CursorY', read into the terminal's slot rather than
+-- each into an 'Foreign.Marshal.Alloc.alloca' of its own: they are read
+-- after every prompt mark ('Ghostty.Effectful.Internal.Callbacks.resolveOnto').
+cursorAt :: Terminal s -> IO (Word16, Word16)
+cursorAt t = unsafeWithForeignPtr t.cursorSlot $ \p ->
+  (,) <$> requiredAt p (keyRead CursorX) <*> requiredAt p (keyRead CursorY)
+  where
+    keyRead :: TerminalData a -> KeyRead
+    keyRead key = let k = dataKey key in KeyRead t.handle k (enumSite "ghostty_terminal_get" ghosttyTerminalDataEnum (coerce k))
+
+-- | 'required', into the given memory.
+requiredAt :: (Storable b) => Ptr b -> KeyRead -> IO b
+requiredAt p (KeyRead h k site) =
+  orInvariant site ResultNoValue =<< optionalAtWith p id ResultNoValue site (ghosttyTerminalGet h k . castPtr)
 
 -- | The read into memory set up by the caller; 'Nothing' on NO_VALUE.
 fetchWith :: (Storable b) => KeyRead -> (Ptr b -> IO ()) -> IO (Maybe b)

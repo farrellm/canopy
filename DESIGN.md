@@ -2095,8 +2095,10 @@ because each call from C into Haskell makes a Haskell thread (its 1 KiB stack wa
 allocation, as `+RTS -ki` showed). Pausing the thread for each stop's `safe` call was about 9%, and
 the non-threaded scheduler's poll on each callback about 5%. With the mark copied in C instead (D18,
 §4.5): 80–85 ms and 94 MB, about 1.3 KB a stop, against 160–170 ms and 161 MB; on the threaded
-runtime 86 ms against 115–123. What is left is mostly the `safe` call and the two cursor reads a
-mark resolves, each an `alloca`, which a slot as the cell reads use would remove.
+runtime 86 ms against 115–123. The two cursor reads a mark resolves now share one slot the terminal
+keeps (`Internal.Keys.cursorAt`), not an `alloca` each, and a stop that drained nothing skips the
+resolve and its `try` (2026-11-10): prompts 76 ms and 80 MB, about 1.1 KB a stop; plain text in
+4 KiB writes 103 KB, from 171 KB. What is left is mostly the `safe` call and the events kept.
 
 **Rendering**, the same suite's `Render` group: the same terminal life with a screen fed and a
 render state opened, then one frame of every cell copied out (plain, SGR-coloured and wide/combining
