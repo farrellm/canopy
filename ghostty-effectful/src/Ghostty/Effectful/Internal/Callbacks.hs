@@ -48,7 +48,7 @@ module Ghostty.Effectful.Internal.Callbacks
   )
 where
 
-import Control.Exception (catch, finally, handle, mask_, onException, throwIO)
+import Control.Exception (catch, handle, mask_, onException, throwIO)
 import Data.ByteString qualified as BS
 import Data.ByteString.Unsafe qualified as BSU
 import Foreign.C.Types (CBool (..), CInt (..), CSize (..))
@@ -537,8 +537,19 @@ takeMarks i = do
     else do
       n <- gveffMarkCount i.userdata
       p <- gveffMarks i.userdata
-      ms <- marksFrom p (fromIntegral n - 1) [] `finally` gveffMarksClear i.userdata
-      (ms <>) <$> failed
+      -- No 'finally' (a 'catch#' and its closures on every take): converting
+      -- throws nothing synchronously, since 'markPending' catches what its
+      -- string reads throw. An asynchronous exception before the clear
+      -- leaves the marks for the next take, and freeing the USERDATA frees
+      -- what is never taken.
+      ms <- marksFrom p (fromIntegral n - 1) []
+      gveffMarksClear i.userdata
+      r <- gveffMarksFailure i.userdata
+      -- Built now, not left as a thunk; nothing to append, as usual, when
+      -- every mark was copied.
+      pure $! case resultCode r of
+        ResultSuccess -> ms
+        other -> ms <> [Failed (toException (resultError (CallSite "gveff_semantic_prompt") other))]
   where
     -- Newest first onto the list, each struct read and converted in place:
     -- no list of copied structs, as 'peekArray' would build.
@@ -548,10 +559,6 @@ takeMarks i = do
       | otherwise = do
           m <- markPending =<< peekElemOff p k
           marksFrom p (k - 1) (m : acc)
-    failed =
-      gveffMarksFailure i.userdata <&> \r -> case resultCode r of
-        ResultSuccess -> []
-        other -> [Failed (toException (resultError (CallSite "gveff_semantic_prompt") other))]
 
 -- | @SEMANTIC_PROMPT@'s event, copied by the C callback, as an entry.
 markPending :: GhosttyTerminalSemanticPrompt -> IO Pending

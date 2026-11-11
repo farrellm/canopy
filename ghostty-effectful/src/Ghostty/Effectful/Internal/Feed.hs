@@ -97,7 +97,13 @@ resolveOnto t = foldlM (\acc p -> (: acc) <$> event p)
 -- Haskell callbacks' buffer, then the C callback's prompt marks, each the
 -- last event of its stop.
 drained :: Terminal s -> IO [Pending]
-drained t = (<>) <$> drain t.events <*> takeMarks t.installed
+drained t = do
+  hs <- drain t.events
+  ms <- takeMarks t.installed
+  -- Joined now, not left as a thunk; usually one of them is empty.
+  pure $! case hs of
+    [] -> ms
+    _ -> hs <> ms
 
 -- | Write VT to the terminal, stopping after each OSC
 -- (@GHOSTTY_TERMINAL_BOUNDARY_OSC_END@) to resolve the events so far, so a

@@ -863,7 +863,10 @@ callbacks append comes after it. A write that did not stop at each OSC would nee
 sequenced against the buffer, and no other call produces marks: `resize`, `reset` and `paste` cannot.
 A mark C cannot copy for want of memory is dropped and recorded, and the drain throws `OutOfMemory`
 after the write, as it throws a Haskell callback's exception. A drain with no marks makes one
-`unsafe` call and allocates nothing.
+`unsafe` call and allocates nothing. Taking the marks is not wrapped in `finally`: converting one
+throws nothing synchronously (a string that cannot be read is that mark's `Failed` entry), so only
+an asynchronous exception can interrupt it, and then the marks stay on the list for the next drain
+rather than being lost; freeing the `USERDATA` frees any never taken.
 
 ### 4.6 Concurrency
 
@@ -2105,7 +2108,9 @@ call sites are top-level constants, not a `KeyRead` and a site built for each re
 prompts 64 ms and 51 MB, about 720 bytes a stop. Resolving moved into `Internal.Feed`, which calls
 the reads directly rather than through closures passed in, catches into the `Resolved` it builds
 rather than `try` and a map, and converts the mark's row at once (2026-11-11): prompts 59 ms and
-44 MB, about 620 bytes a stop. What is left is mostly the `safe` call and the events kept.
+44 MB, about 620 bytes a stop. Taking the marks builds its result and the drain's at once, not as
+thunks of `<>`, and has no `finally` (§4.5) (2026-11-11): prompts 48 ms and 30 MB, about 420 bytes a
+stop. What is left is mostly the `safe` call and the events kept.
 
 **Rendering**, the same suite's `Render` group: the same terminal life with a screen fed and a
 render state opened, then one frame of every cell copied out (plain, SGR-coloured and wide/combining
