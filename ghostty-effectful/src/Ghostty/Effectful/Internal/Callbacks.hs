@@ -556,9 +556,17 @@ takeMarks i = do
     else do
       n <- gveffMarkCount i.userdata
       p <- gveffMarks i.userdata
-      ms <- (traverse markPending =<< peekArray (fromIntegral n) p) `finally` gveffMarksClear i.userdata
+      ms <- marksFrom p (fromIntegral n - 1) [] `finally` gveffMarksClear i.userdata
       (ms <>) <$> failed
   where
+    -- Newest first onto the list, each struct read and converted in place:
+    -- no list of copied structs, as 'peekArray' would build.
+    marksFrom :: Ptr GhosttyTerminalSemanticPrompt -> Int -> [Pending] -> IO [Pending]
+    marksFrom p k acc
+      | k < 0 = pure acc
+      | otherwise = do
+          m <- markPending =<< peekElemOff p k
+          marksFrom p (k - 1) (m : acc)
     failed =
       gveffMarksFailure i.userdata <&> \r -> case resultCode r of
         ResultSuccess -> []
@@ -566,7 +574,7 @@ takeMarks i = do
 
 -- | @SEMANTIC_PROMPT@'s event, copied by the C callback, as an entry.
 markPending :: GhosttyTerminalSemanticPrompt -> IO Pending
-markPending e = handle (pure . Failed) $ case e.kind of
+markPending e = case e.kind of
   GhosttySemanticPromptPromptStart -> case e.promptKind of
     GhosttySemanticPromptPromptPrimary -> mark (PromptStart PrimaryPrompt)
     GhosttySemanticPromptPromptRight -> mark (PromptStart RightPrompt)
@@ -574,8 +582,10 @@ markPending e = handle (pure . Failed) $ case e.kind of
     GhosttySemanticPromptPromptSecondary -> mark (PromptStart SecondaryPrompt)
     GhosttySemanticPromptPromptKindUnknown n -> pure (Unnamed site ghosttySemanticPromptPromptKindEnum n)
   GhosttySemanticPromptInputStart -> mark InputStart
-  GhosttySemanticPromptOutputStart -> mark . OutputStart =<< stringText e.command
-  GhosttySemanticPromptCommandEnd -> do
+  -- Only reading the strings can throw; the other entries are built
+  -- without running anything.
+  GhosttySemanticPromptOutputStart -> caught $ mark . OutputStart =<< stringText e.command
+  GhosttySemanticPromptCommandEnd -> caught $ do
     err <- stringText e.error
     mark (CommandEnd (e.exitCode <$ guard (toBool e.hasExitCode)) err)
   -- The header says INVALID is never reported, so it is no more named
@@ -585,6 +595,7 @@ markPending e = handle (pure . Failed) $ case e.kind of
   where
     site = CallSite "GhosttyTerminalSemanticPromptFn"
     mark = pure . PromptPending
+    caught = handle (pure . Failed)
 
 -- | @UNKNOWN_SEQUENCE@.
 onUnknownSequence :: IORef [Pending] -> GhosttyTerminal -> Ptr () -> Ptr GhosttyTerminalUnknownSequence -> IO ()
