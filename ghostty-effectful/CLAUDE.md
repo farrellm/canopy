@@ -13,8 +13,10 @@ events instead of callbacks. No export may expose a pointer.
   public modules re-export their types without constructors. Raw pointers appear only in `Internal`
   (§10.6).
 - **Results become `GhosttyError` through `Ghostty.Effectful.Internal.Error`** (`expectSuccess`,
-  `succeedsUnless`, `outVia`, `optionalVia`/`optionalViaWith`, `bytesVia`; never a hand-written
-  switch): out of
+  `succeedsUnless`, `outVia`, `optionalVia`, `bytesVia`; never a hand-written
+  switch). A run of reads in a loop uses their `…At` forms (`outAt`, `optionalAtWith`, `bytesAt`, `bytesAtWith`)
+  on memory made once for the run, as `Internal.Render.CellSlots` is, since each `alloca` is a pinned
+  allocation (§12.3). Out of
   memory is `OutOfMemory`, and a result the header says cannot happen for the arguments the types
   allow is `Invariant`. Marshalling shared between modules (strings, flags, palettes, enum call
   sites) is in `Internal.Convert`. Make the bad argument
@@ -26,11 +28,15 @@ events instead of callbacks. No export may expose a pointer.
   out goes in the test's `deferredData`/`deferredOptions` with its PLAN.md step.
 - **Callbacks only append** (§4.5, `Internal.Callbacks`): each body is `sheltered`, so an
   exception is recorded and thrown by the drain, never let into C. Anything needing the terminal
-  (title, cursor) is a `Pending` entry resolved between writes. A query's answer is configuration
+  (a title, a working directory, a mark's cursor) is read inside the callback, as the header asks. A query's answer is configuration
   (`TerminalConfig`, and a `Set…` option named for the callback's row); ENQ and XTVERSION answer in
   C (`cbits/gveff_terminal.c`, with the terminal's `USERDATA` struct), since they return a struct by
-  value. Any operation whose C call can run a callback returns the events it caused, as `feed`,
-  `resize` and `reset` do (`Internal.Feed`, which can read the terminal's keys); `setT`'s cannot,
+  value. `SEMANTIC_PROMPT` is C too (D18): it copies each mark into the `USERDATA`, with the cursor
+  read inside the callback and the count of Haskell entries before it (D20: `push` counts, and the take counts by it, so every
+  append goes through `push`, a test's through `pushPending`); `takeEvents` merges the marks into the Haskell buffer by those
+  counts, newest first, building the returned list in order in the same pass (D21). A title or working directory is read inside its callback too, so `feed` is one
+  `vt_write` and one take, with no stops. Any operation whose C call can run a callback returns the events it caused, as `feed`,
+  `resize` and `reset` do (`Internal.Feed`); `setT`'s cannot,
   and a test holds that. Every struct a callback receives is frozen (no `size`), so it is read whole.
 - **Render states and frames** (§4.3, `Internal.Render`, public `Render`): a render state is its
   own rank-2 region inside its terminal's; a frame (`withFrame`, tag `f`) is shorter still, and what

@@ -175,6 +175,11 @@ cellTests =
     testCase "a combining mark is part of its cell's text" $ do
       c <- rendered "e\204\129" firstCell
       c.text @?= "e\769",
+    -- 81 bytes: longer than the row's grapheme slot, so the copy retries
+    -- with a buffer of the size asked for (Internal.Error.firstTry).
+    testCase "a cell's text longer than the first try's buffer reads whole" $ do
+      c <- rendered ("e" <> mconcat (replicate 40 "\204\129")) firstCell
+      c.text @?= "e" <> T.replicate 40 "\769",
     testCase "a linked cell reads its URI while the terminal is the frame's" $ do
       r <- withFresh $ \t -> withRenderState t $ \rs -> do
         _ <- feed t "\ESC]8;;https://example.org\ESC\\L\ESC]8;;\ESC\\n"

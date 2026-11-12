@@ -7,12 +7,15 @@
 module Ghostty.Effectful.Internal.Convert
   ( -- * Enums
     unknownEnum,
+    unknownEnumError,
     enumName,
     enumSite,
+    getSite,
     oscTerminator,
 
     -- * Strings and flags
     stringText,
+    utf8Text,
     withString,
     emptyString,
     flagBits,
@@ -113,6 +116,7 @@ import Ghostty.FFI.Style
     pattern GhosttyStyleFlagOverline,
     pattern GhosttyStyleFlagStrikethrough,
   )
+import Ghostty.FFI.Terminal (GhosttyTerminalData (..), ghosttyTerminalDataEnum)
 import Ghostty.FFI.Types
   ( GhosttyCursorStyle,
     GhosttyResult,
@@ -128,7 +132,11 @@ import Ghostty.FFI.Types
 
 -- | Throw 'UnknownEnum' for a value of the described enum.
 unknownEnum :: CallSite -> CEnum -> CInt -> IO a
-unknownEnum site e n = throwIO (UnknownEnum site e.name (toInteger n))
+unknownEnum site e n = throwIO (unknownEnumError site e n)
+
+-- | The error 'unknownEnum' throws, for a caller that keeps it.
+unknownEnumError :: CallSite -> CEnum -> CInt -> GhosttyError
+unknownEnumError site e n = UnknownEnum site e.name (toInteger n)
 
 -- | The full C name of an enum's value (@GHOSTTY_TERMINAL_DATA_COLS@), or
 -- the number if the binding does not name it.
@@ -148,9 +156,25 @@ oscTerminator = \case
 enumSite :: Text -> CEnum -> CInt -> CallSite
 enumSite call e n = CallSite (call <> " " <> enumName e n)
 
+-- | The call site of @ghostty_terminal_get@ with the key.
+getSite :: GhosttyTerminalData -> CallSite
+getSite k = enumSite "ghostty_terminal_get" ghosttyTerminalDataEnum (coerce k)
+
 -- | A borrowed string, copied out and decoded leniently.
 stringText :: GhosttyString -> IO Text
 stringText s = decodeUtf8 <$> ghosttyStringBytes s
+
+-- | Borrowed UTF-8 bytes decoded now, so the memory can be reused when this
+-- returns: one copy, into the 'Text', and none for no bytes. (Copying into
+-- a 'ByteString' first is a pinned allocation and a second copy, and a
+-- lazy decode would keep it.)
+utf8Text :: Ptr Word8 -> Int -> IO Text
+utf8Text p n
+  | n <= 0 = pure mempty
+  | otherwise = do
+      bs <- BSU.unsafePackCStringLen (castPtr p, n)
+      pure $! decodeUtf8 bs
+{-# INLINE utf8Text #-}
 
 -- | Run with a borrowed 'GhosttyString' of the bytes, alive until the
 -- action returns. Empty bytes are 'emptyString'.

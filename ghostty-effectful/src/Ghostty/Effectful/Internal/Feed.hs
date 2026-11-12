@@ -1,12 +1,8 @@
-{-# LANGUAGE PatternSynonyms #-}
-
 -- | The calls whose C call can run a callback, each returning the events it
--- caused (DESIGN.md §4.5): writes, resizes and resets. Each
--- drains the terminal's buffer after its C call and resolves what the
--- callbacks appended, reading the terminal through
--- "Ghostty.Effectful.Internal.Keys". (They are here, not in
--- "Ghostty.Effectful.Internal.Terminal", because the keys need the terminal's
--- representation.)
+-- caused (DESIGN.md §4.5): writes, resizes and resets. Each drains what the
+-- callbacks appended after its C call, and turns it into events. (They are
+-- here, not in "Ghostty.Effectful.Internal.Terminal", because they need the
+-- terminal's representation and the callbacks' buffer together.)
 module Ghostty.Effectful.Internal.Feed
   ( feedTerminal,
     resizeTerminal,
@@ -15,30 +11,16 @@ module Ghostty.Effectful.Internal.Feed
   )
 where
 
-import Control.Exception (onException, throwIO, try)
+import Control.Exception (onException)
 import Data.ByteString.Unsafe qualified as BSU
-import Foreign.Marshal.Alloc (alloca)
-import Foreign.Ptr (Ptr, castPtr, plusPtr)
-import Foreign.Storable (peek, poke)
-import Ghostty.Effectful.Error (CallSite (..), ResultCode (..))
-import Ghostty.Effectful.Event (TerminalEvent)
-import Ghostty.Effectful.Internal.Callbacks (Answers (..), drain, joinWrites, resolveOnto)
-import Ghostty.Effectful.Internal.Convert (withSize)
-import Ghostty.Effectful.Internal.Error (expectSuccess, succeedsUnless)
-import Ghostty.Effectful.Internal.Keys (getData)
+import Foreign.Ptr (castPtr)
+import Ghostty.Effectful.Error (CallSite (..))
+import Ghostty.Effectful.Event (TerminalEvent (..))
+import Ghostty.Effectful.Internal.Callbacks (Answers (..), takeEvents)
+import Ghostty.Effectful.Internal.Error (expectSuccess)
 import Ghostty.Effectful.Internal.Size (CellPixels (..), GridSize (..), fromExtent)
 import Ghostty.Effectful.Internal.Terminal (Terminal (..), wrote)
-import Ghostty.FFI.Terminal
-  ( GhosttyTerminalBoundary (..),
-    GhosttyTerminalStringEnd (..),
-    GhosttyTerminalStringIntroducer (..),
-    GhosttyTerminalStringKind (..),
-    GhosttyTerminalWriteStop (..),
-    ghosttyTerminalReset,
-    ghosttyTerminalResize,
-    ghosttyTerminalVtWriteUntil,
-    pattern GhosttyTerminalBoundaryOscEnd,
-  )
+import Ghostty.FFI.Terminal (ghosttyTerminalReset, ghosttyTerminalResize, ghosttyTerminalVtWrite)
 
 -- | @ghostty_terminal_resize@, and the grid the size callback reports with
 -- it. Its one documented refusal, a zero extent or a null terminal, cannot
@@ -67,68 +49,22 @@ resetTerminal t = do
   ghosttyTerminalReset t.handle
   drainEvents t
 
--- | The events buffered since the last drain, resolved.
+-- | The events buffered since the last drain, oldest first, adjacent
+-- 'WritePty's joined; throws the first failure a callback recorded.
 drainEvents :: Terminal s -> IO [TerminalEvent]
-drainEvents t = joinWrites . reverse <$> (resolveOnto (getData t.handle) [] =<< drain t.events)
+drainEvents t = takeEvents t.installed
 
--- | Write VT to the terminal, stopping after each OSC
--- (@GHOSTTY_TERMINAL_BOUNDARY_OSC_END@) to resolve the events so far, so a
--- prompt mark's cursor is read right after the mark (DESIGN.md §4.5).
--- Events buffered before the write come first, and adjacent 'WritePty's are
--- joined across stops. Every byte is written even if resolving throws (a
--- callback's exception, an unnamed enum value): the first such exception is
--- thrown after the whole write, so the terminal never stops part-way through
--- the input.
+-- | Write VT to the terminal: one @ghostty_terminal_vt_write@, and one
+-- take. Every callback reads what it needs inside itself (a prompt mark's
+-- cursor, a new title or working directory), and each prompt mark records
+-- its place among the Haskell callbacks' entries, so the write need not
+-- stop at them (DESIGN.md §4.5, D20), and the take puts the whole write's
+-- events in order as it builds them (§12.3). Events buffered before the
+-- write come first, and adjacent 'WritePty's are joined. Every byte is
+-- written even if a callback failed (an exception, an unnamed enum value):
+-- the first failure is thrown after the write.
 feedTerminal :: Terminal s -> ByteString -> IO [TerminalEvent]
 feedTerminal t bytes = do
   wrote t
-  before <- resolved (Resolved Nothing [])
-  Resolved failure events <-
-    BSU.unsafeUseAsCStringLen bytes $ \(p, n) ->
-      alloca $ \stop -> go stop (castPtr p) n before
-  whenJust failure throwIO
-  pure (joinWrites (reverse events))
-  where
-    go :: Ptr GhosttyTerminalWriteStop -> Ptr Word8 -> Int -> Resolved -> IO Resolved
-    go stop p n acc
-      | n <= 0 = pure acc
-      | otherwise = do
-          poke stop emptyStop
-          r <- ghosttyTerminalVtWriteUntil t.handle p (fromIntegral n) boundary stop
-          acc' <- resolved acc
-          -- NO_VALUE: the input ended before a boundary.
-          stopped <- succeedsUnless ResultNoValue (CallSite "ghostty_terminal_vt_write_until") r
-          if stopped
-            then do
-              used <- fromIntegral . (.consumed) <$> peek stop
-              go stop (p `plusPtr` used) (n - used) acc'
-            else pure acc'
-
-    -- Resolve what the callbacks buffered onto the events so far; if that
-    -- throws, the first exception is kept and the drained entries dropped.
-    resolved :: Resolved -> IO Resolved
-    resolved (Resolved failure events) = do
-      ps <- drain t.events
-      try (resolveOnto (getData t.handle) events ps) <&> \case
-        Right events' -> Resolved failure events'
-        Left e -> Resolved (failure <|> Just e) events
-
-    boundary = let GhosttyTerminalBoundary b = GhosttyTerminalBoundaryOscEnd in fromIntegral b
-
-    -- GHOSTTY_INIT_SIZED: the size, and zeros.
-    emptyStop :: GhosttyTerminalWriteStop
-    emptyStop =
-      withSize $ \size ->
-        GhosttyTerminalWriteStop
-          { size,
-            consumed = 0,
-            reached = 0,
-            kind = GhosttyTerminalStringKind 0,
-            introducer = GhosttyTerminalStringIntroducer 0,
-            end = GhosttyTerminalStringEnd 0,
-            byte = 0
-          }
-
--- | A write's progress: the first exception resolving threw, and the events
--- resolved, newest first.
-data Resolved = Resolved !(Maybe SomeException) ![TerminalEvent]
+  BSU.unsafeUseAsCStringLen bytes $ \(p, n) -> ghosttyTerminalVtWrite t.handle (castPtr p) (fromIntegral n)
+  drainEvents t

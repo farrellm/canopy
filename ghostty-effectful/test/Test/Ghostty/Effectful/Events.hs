@@ -10,15 +10,17 @@ import Control.Exception (ErrorCall (..), MaskingState (..), getMaskingState)
 import Data.ByteString qualified as BS
 import Effectful.Exception (try)
 import Foreign.Ptr (castFunPtrToPtr, freeHaskellFunPtr, nullFunPtr)
+import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..))
 import Ghostty.Effectful.Event
-import Ghostty.Effectful.Internal.Callbacks (Pending (..), registerFunPtr)
+import Ghostty.Effectful.Internal.Callbacks (Pending (..), markFailed, pushPending, registerFunPtr)
 import Ghostty.Effectful.Internal.Size (Extent (..))
 import Ghostty.Effectful.Internal.Terminal (Terminal (..))
 import Ghostty.Effectful.Mode (ModeKey (..))
 import Ghostty.Effectful.Point (Point (..))
 import Ghostty.Effectful.Terminal
-import Ghostty.FFI.Terminal (ghosttyTerminalSet, pattern GhosttyTerminalOptBell)
+import Ghostty.FFI.Terminal (ghosttyTerminalSet, pattern GhosttyTerminalDataInvalid, pattern GhosttyTerminalOptBell)
 import Ghostty.FFI.Terminal.Callbacks (mkGhosttyTerminalBellFn)
+import Ghostty.FFI.Types (pattern GhosttyOutOfMemory)
 import Test.Ghostty.Effectful.Support (config, grid, withConfig, withFresh)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=))
@@ -60,7 +62,34 @@ tests =
                   ],
           testCase "a title is the title after the write that set it" $ do
             evs <- withFresh (`feed` "\ESC]2;one\a\ESC]0;two\ESC\\")
-            evs @?= [TitleChanged "one", TitleChanged "two"]
+            evs @?= [TitleChanged "one", TitleChanged "two"],
+          -- Each mark records how many Haskell entries came before it (D20):
+          -- marks before, between, and after the bells and titles.
+          testCase "marks around bells and titles in one write keep the stream's order" $ do
+            evs <-
+              withFresh
+                ( `feed`
+                    ( "\ESC]133;A\a$ "
+                        <> "\a\ESC]133;B\a"
+                        <> "ls\r\n\ESC]2;one\a"
+                        <> "\ESC]133;C\a"
+                        <> "\ESC]2;two\a"
+                        <> "out\r\n\ESC]133;D;0\a"
+                    )
+                )
+            evs
+              @?= [ mark (PromptStart PrimaryPrompt) 0 0,
+                    Bell,
+                    mark InputStart 2 0,
+                    TitleChanged "one",
+                    mark (OutputStart "") 0 1,
+                    TitleChanged "two",
+                    mark (CommandEnd (Just 0) "") 0 2
+                  ],
+          testCase "a bell between two runs of 300 marks stays between them" $ do
+            let marks = mconcat (replicate 300 "\ESC]133;A\a")
+            evs <- withFresh (`feed` (marks <> "\a" <> marks))
+            evs @?= replicate 300 (mark (PromptStart PrimaryPrompt) 0 0) <> [Bell] <> replicate 300 (mark (PromptStart PrimaryPrompt) 0 0)
         ],
       testGroup
         "queries"
@@ -120,7 +149,15 @@ tests =
             evs @?= ([WritePty "\ESC[48;24;80;480;800t"], [WritePty "\ESC[48;30;100;600;1000t"]),
           testCase "a reply is joined into one WritePty" $ do
             evs <- withFresh (`feed` "\ESC[6n\ESC[c\ESC[?2004$p")
-            evs @?= [WritePty "\ESC[1;1R\ESC[?62;22c\ESC[?2004;2$y"]
+            evs @?= [WritePty "\ESC[1;1R\ESC[?62;22c\ESC[?2004;2$y"],
+          testCase "a prompt mark between replies keeps them apart, in order" $ do
+            evs <- withFresh (`feed` "\ESC[6n\ESC]133;A\a\ESC[6n\ESC[c\ESC]133;B\a")
+            evs
+              @?= [ WritePty "\ESC[1;1R",
+                    mark (PromptStart PrimaryPrompt) 0 0,
+                    WritePty "\ESC[1;1R\ESC[?62;22c",
+                    mark InputStart 0 0
+                  ]
         ],
       testGroup
         "events"
@@ -132,6 +169,16 @@ tests =
                     mark (CommandEnd (Just 2) "") 0 0,
                     mark (CommandEnd Nothing "") 0 0
                   ],
+          testCase "an OSC 133 D mark's exit code, shared or not" $ do
+            evs <- withFresh (`feed` "\ESC]133;D;255\a\ESC]133;D;256\a\ESC]133;D;-1\a")
+            evs
+              @?= [ mark (CommandEnd (Just 255) "") 0 0,
+                    mark (CommandEnd (Just 256) "") 0 0,
+                    mark (CommandEnd (Just (-1)) "") 0 0
+                  ],
+          testCase "an OSC 133 D mark carries its error" $ do
+            evs <- withFresh (`feed` "\ESC]133;D;1;err=boom\a")
+            evs @?= [mark (CommandEnd (Just 1) "boom") 0 0],
           testCase "the working directory" $ do
             evs <- withFresh (`feed` "\ESC]7;file://host/tmp\a")
             evs @?= [PwdChanged "file://host/tmp"],
@@ -206,16 +253,57 @@ tests =
           testCase "regression 1: a failure mid-chunk still writes the rest" $ do
             (fp, (mid, before)) <- withFresh $ \t -> do
               -- a bell that records a failure, as a sheltered body would
-              fp <- liftIO (mkGhosttyTerminalBellFn (\_ _ -> modifyIORef' t.events (Failed (toException boom) :)))
+              fp <- liftIO (mkGhosttyTerminalBellFn (\_ _ -> pushPending t.installed (Failed (toException boom))))
               _ <- liftIO (ghosttyTerminalSet t.handle GhosttyTerminalOptBell (castFunPtrToPtr fp))
               a <- try @ErrorCall (feed t "\a\ESC]2;x\aabc")
               ax <- getT t CursorX
-              liftIO (modifyIORef' t.events (Failed (toException boom) :))
+              liftIO (pushPending t.installed (Failed (toException boom)))
               b <- try @ErrorCall (feed t "de")
               bx <- getT t CursorX
               pure (fp, ((void a, ax), (void b, bx)))
             freeHaskellFunPtr fp
             (mid, before) @?= ((Left boom, 3), (Left boom, 5)),
+          -- The same with prompt marks either side of two failures, which a
+          -- take places and converts in the same pass: the first failure is
+          -- thrown after the whole write, and the marks are taken all the
+          -- same, so the next write returns none of them.
+          testCase "regression 1, among marks: the first failure is thrown, and the marks are taken" $ do
+            (fp, (failed, x, next)) <- withFresh $ \t -> do
+              n <- newIORef (0 :: Int)
+              fp <- liftIO . mkGhosttyTerminalBellFn $ \_ _ -> do
+                k <- atomicModifyIORef' n (\k -> (k + 1, k))
+                pushPending t.installed (Failed (toException (ErrorCall (if k == 0 then "first" else "second"))))
+              _ <- liftIO (ghosttyTerminalSet t.handle GhosttyTerminalOptBell (castFunPtrToPtr fp))
+              a <- try @ErrorCall (feed t "\ESC]133;A\a\a\ESC]133;B\a\a\ESC]133;D;0\aabc")
+              ax <- getT t CursorX
+              b <- feed t "d"
+              pure (fp, (void a, ax, b))
+            freeHaskellFunPtr fp
+            (failed, x, next) @?= (Left (ErrorCall "first"), 3, []),
+          -- A mark C could not copy, or whose cursor it could not read, was
+          -- thrown after every failure in a Haskell callback, wherever it
+          -- was in the stream. C now records where it was, and takes no mark
+          -- after it. The bell stands in for the mark's failure, which
+          -- cannot be made to happen, by recording it as the C callback does.
+          testCase "regression 18: a mark's failure in C is thrown in stream order" $ do
+            let bells cBefore = withFresh $ \t -> do
+                  n <- newIORef (0 :: Int)
+                  let cFails = markFailed t.installed GhosttyOutOfMemory GhosttyTerminalDataInvalid
+                      hsFails = pushPending t.installed (Failed (toException (ErrorCall "haskell")))
+                  fp <- liftIO . mkGhosttyTerminalBellFn $ \_ _ -> do
+                    k <- atomicModifyIORef' n (\k -> (k + 1, k))
+                    if (k == 0) == cBefore then cFails else hsFails
+                  _ <- liftIO (ghosttyTerminalSet t.handle GhosttyTerminalOptBell (castFunPtrToPtr fp))
+                  a <- try @SomeException (feed t "\ESC]133;A\a\a\ESC]133;B\a\a\ESC]133;D;0\a")
+                  b <- feed t "\ESC]133;A\a"
+                  liftIO (freeHaskellFunPtr fp)
+                  pure (either (Just . show @Text) (const Nothing) a, b)
+            cFirst <- bells True
+            hsFirst <- bells False
+            (cFirst, hsFirst)
+              @?= ( (Just (show (OutOfMemory (CallSite "gveff_semantic_prompt"))), [mark (PromptStart PrimaryPrompt) 0 0]),
+                    (Just (show (ErrorCall "haskell")), [mark (PromptStart PrimaryPrompt) 0 0])
+                  ),
           -- Replies were joined only within one stop, so an OSC between two
           -- replies split one reply into two writes.
           testCase "regression 2: a reply split by an OSC stop is one write" $ do

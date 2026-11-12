@@ -15,14 +15,33 @@
  * that appends the event. A capture that fails is recorded in `failure` for
  * `notify` to report. None of this runs Haskell beyond `notify`.
  *
- * Every function here is called between writes, except the two callbacks, so
- * nothing here locks: libghostty-vt's handles are used from one thread (§4.6).
+ * SEMANTIC_PROMPT is C so that a mark costs no Haskell call: a call from C
+ * into Haskell makes a Haskell thread, which was most of a mark's cost
+ * (DESIGN.md §12.3). It copies the event, its strings too, onto `marks`,
+ * which Haskell takes after the write returns. It also reads the cursor inside the callback
+ * (D20): the header says the terminal has already updated its screen when
+ * the callback runs, and asks for the title and working directory to be read
+ * inside theirs, so a read inside a callback is the library's own pattern;
+ * only writing to the terminal from one is forbidden. And it records how many
+ * entries the Haskell callbacks had appended before it (`pushed`, which
+ * Haskell's `push` counts and its drain resets), so a drain can put each mark
+ * where the stream had it. So a write needs no stops: it is one vt_write.
+ * A copy that cannot be made, or a cursor that cannot be read, is recorded in
+ * `mark_failure` with the same count, so a drain knows which failure came
+ * first; the marks after it are not kept, since a failure drops the drain's
+ * events. Haskell's drain empties its buffer and zeroes `pushed` only after
+ * clearing the marks, so a drain an exception interrupts leaves both for the
+ * next, their counts still agreeing.
+ *
+ * Every function here is called between writes, except the callbacks; nothing
+ * here locks: libghostty-vt's handles are used from one thread (§4.6).
  */
 #ifndef GVEFF_TERMINAL_H
 #define GVEFF_TERMINAL_H
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <ghostty/vt.h>
 
 /* How many strings `answers` holds, and which is which. */
@@ -38,6 +57,22 @@ typedef struct {
   bool framing;
 } GveffCapture;
 
+/* A prompt mark C copied: the event, how many entries the Haskell callbacks
+ * had appended before it since the count was last reset, and the cursor read
+ * inside its callback (the column in the low 16 bits, the row in the high
+ * 16). */
+typedef struct {
+  GhosttyTerminalSemanticPrompt prompt;
+  size_t before;
+  uint32_t cursor;
+} GveffMark;
+
+/* GveffMark's size and its fields' offsets, for Haskell, which reads the
+ * marks in place. `prompt` is at 0. */
+#define GVEFF_MARK_SIZE sizeof(GveffMark)
+#define GVEFF_MARK_BEFORE offsetof(GveffMark, before)
+#define GVEFF_MARK_CURSOR offsetof(GveffMark, cursor)
+
 /* A terminal's USERDATA. `answers` is first, so a pointer to the struct is a
  * pointer to the array. */
 typedef struct {
@@ -47,12 +82,19 @@ typedef struct {
   size_t count;
   size_t capacity;
   GhosttyResult failure;
+  GveffMark *marks;
+  size_t mark_count;
+  size_t mark_capacity;
+  size_t pushed;
+  GhosttyResult mark_failure;
+  GhosttyTerminalData mark_failure_key;
+  size_t mark_failure_before;
 } GveffUserdata;
 
 /* A zeroed USERDATA, or NULL if it cannot be allocated. */
 GveffUserdata *gveff_userdata_new(void);
 
-/* Free the USERDATA and its capture list, not the answers' bytes, which are
+/* Free the USERDATA, its capture list and its marks, not the answers' bytes, which are
  * Haskell's. NULL is ignored. */
 void gveff_userdata_free(GveffUserdata *ud);
 
@@ -83,9 +125,40 @@ void gveff_capture_framing(GveffUserdata *ud, GhosttyRenderState state, bool fra
  * GHOSTTY_SUCCESS; and reset it. */
 GhosttyResult gveff_capture_failure(GveffUserdata *ud);
 
+/* Whether there are marks, or a mark that could not be copied: whether
+ * Haskell has anything to take. */
+bool gveff_marks_pending(const GveffUserdata *ud);
+
+/* The marks since they were last cleared, oldest first, and their number.
+ * They and their strings are owned by the USERDATA until gveff_marks_clear. */
+GveffMark *gveff_marks(GveffUserdata *ud);
+size_t gveff_mark_count(const GveffUserdata *ud);
+
+/* Free the marks' strings, empty the list, and forget the failure. */
+void gveff_marks_clear(GveffUserdata *ud);
+
+/* The count Haskell's `push` adds one to, and its drain resets. */
+size_t *gveff_pushed(GveffUserdata *ud);
+
+/* The first mark since the clear that could not be copied, or whose cursor
+ * could not be read, or GHOSTTY_SUCCESS. No mark is taken after it. */
+GhosttyResult gveff_marks_failure(const GveffUserdata *ud);
+
+/* The key whose read failed, or GHOSTTY_TERMINAL_DATA_INVALID for a copy. */
+GhosttyTerminalData gveff_marks_failure_key(const GveffUserdata *ud);
+
+/* How many Haskell entries came before the failure, as a mark's `before`. */
+size_t gveff_marks_failure_before(const GveffUserdata *ud);
+
+/* Record a mark's failure at this point in the stream, unless one is already
+ * recorded: what the callback does when a copy or a cursor read fails. */
+void gveff_mark_failed(GveffUserdata *ud, GhosttyResult result, GhosttyTerminalData key);
+
 /* The callbacks. */
 GhosttyString gveff_enquiry(GhosttyTerminal terminal, void *userdata);
 GhosttyString gveff_xtversion(GhosttyTerminal terminal, void *userdata);
 void gveff_render_hold(GhosttyTerminal terminal, void *userdata, bool held);
+void gveff_semantic_prompt(GhosttyTerminal terminal, void *userdata,
+                           const GhosttyTerminalSemanticPrompt *event);
 
 #endif

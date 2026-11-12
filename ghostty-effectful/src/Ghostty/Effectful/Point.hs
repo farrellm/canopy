@@ -23,12 +23,15 @@ data Coord
     History
   deriving stock (Eq, Show)
 
--- | A cell's position in the coordinate system @c@.
+-- | A cell's position in the coordinate system @c@. Its fields are strict
+-- and unpacked (DESIGN.md §10.7, §12.3): a point is always read whole from
+-- the library, and a stream of prompt marks keeps one per event alive for a
+-- whole 'Ghostty.Effectful.Terminal.feed'.
 data Point (c :: Coord) = Point
   { -- | the column
-    col :: Word16,
+    col :: {-# UNPACK #-} !Word16,
     -- | the row
-    row :: Word32
+    row :: {-# UNPACK #-} !Word32
   }
   deriving stock (Eq, Ord, Show)
 

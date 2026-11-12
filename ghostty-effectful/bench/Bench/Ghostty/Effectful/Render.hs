@@ -15,7 +15,7 @@ import Data.Vector qualified as V
 import Effectful (Eff, IOE, runEff)
 import Ghostty.Effectful (Ghostty, runGhostty)
 import Ghostty.Effectful.Cell (Cell)
-import Ghostty.Effectful.Render (FrameData (..), RenderState, allRows, cells, dirtyRows, getF, withFrame, withRenderState)
+import Ghostty.Effectful.Render (FrameData (..), RenderState, Row, allRows, cells, dirtyRows, getF, withFrame, withRenderState)
 import Ghostty.Effectful.Terminal (GridSize (..), Terminal, extent, feed, terminalConfig, withTerminal)
 import Test.Tasty.Bench (Benchmark, bench, bgroup, env, whnfIO)
 
@@ -50,7 +50,7 @@ rendered bytes k = ghostty $ do
 
 -- | One frame, every cell of every row copied out.
 everyCell :: Reader
-everyCell _ rs = withFrame rs $ \f -> sum <$> (traverse (fmap forced . cells) =<< allRows f)
+everyCell _ rs = withFrame rs (countRows <=< allRows)
 
 -- | One frame's cursor and colours (the palette, 256 entries, included).
 cursorAndColours :: Reader
@@ -64,10 +64,14 @@ cursorAndColours _ rs = withFrame rs $ \f -> do
 oneLineAtATime :: [ByteString] -> Reader
 oneLineAtATime ls t rs = do
   whole <- everyCell t rs
-  rest <- forM ls $ \l -> do
-    _ <- feed t l
-    withFrame rs $ \f -> sum <$> (traverse (fmap forced . cells) =<< dirtyRows f)
-  pure (whole + sum rest)
+  -- Counted as it goes: a lazy sum would keep every frame's cells alive
+  -- until the end, and the benchmark would measure the collector copying them.
+  foldlM (\ !acc l -> feed t l >> withFrame rs (fmap (acc +) . countRows <=< dirtyRows)) whole ls
+
+-- | The rows' cells copied out and counted, each row's forced before the
+-- next is read.
+countRows :: [Row s f] -> Eff '[Ghostty, IOE] Int
+countRows = foldlM (\ !acc r -> cells r <&> \v -> acc + forced v) 0
 
 -- | How many of the cells are equal to themselves: all of them, but
 -- comparing forces every field of each, which is the copy a view would

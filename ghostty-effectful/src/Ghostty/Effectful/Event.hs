@@ -6,7 +6,8 @@
 --
 -- The binding installs every callback itself. Each only appends to the
 -- terminal's buffer, and anything that needs the terminal (the new title,
--- the cursor at a prompt mark) is read between writes, never inside one.
+-- the cursor at a prompt mark) is read inside the callback, which only
+-- writing to the terminal must not be (DESIGN.md D20).
 module Ghostty.Effectful.Event
   ( -- * Events
     TerminalEvent (..),
@@ -48,16 +49,16 @@ data TerminalEvent
     WritePty ByteString
   | -- | BEL.
     Bell
-  | -- | The title changed (OSC 0, OSC 2); the title after the write that
-    -- changed it.
+  | -- | The title changed (OSC 0, OSC 2); the title as that change left
+    -- it, read inside its callback (DESIGN.md D20).
     TitleChanged Text
   | -- | The working directory changed (OSC 7, OSC 9, OSC 1337), as the
     -- program sent it: for OSC 7 a @file://@ URI, undecoded. Empty when it
     -- was cleared.
     PwdChanged Text
   | -- | A shell integration mark (OSC 133), with where the cursor was just
-    -- after it.
-    SemanticPrompt PromptMark
+    -- after it. Unpacked, so a mark event is one object (DESIGN.md §10.7).
+    SemanticPrompt {-# UNPACK #-} !PromptMark
   | -- | A clipboard write (OSC 52, OSC 1337, OSC 5522) the terminal's
     -- configuration accepted. An empty list clears the clipboard.
     ClipboardWrite ClipboardLocation [ClipboardContent]
@@ -86,9 +87,11 @@ data TerminalEvent
 -- | An OSC 133 mark and the cursor just after it.
 data PromptMark = PromptMark
   { -- | which mark
-    step :: PromptStep,
-    -- | the cursor, in the active area
-    cursor :: Point 'Active
+    step :: !PromptStep,
+    -- | the cursor, in the active area. Unpacked, as 'Point''s own fields
+    -- are (DESIGN.md §12.3): a stream of marks keeps one per event alive for
+    -- a whole 'Ghostty.Effectful.Terminal.feed'.
+    cursor :: {-# UNPACK #-} !(Point 'Active)
   }
   deriving stock (Eq, Show)
 

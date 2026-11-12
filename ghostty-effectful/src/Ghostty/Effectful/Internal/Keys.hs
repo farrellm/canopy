@@ -26,7 +26,7 @@ import Foreign.Storable (Storable (..))
 import Ghostty.Effectful.Color (Palette, paletteColors)
 import Ghostty.Effectful.Error (CallSite, ResultCode (..))
 import Ghostty.Effectful.Internal.Callbacks (Answers (..), captureRelease, setEnquiryAnswer, setXtversionAnswer)
-import Ghostty.Effectful.Internal.Convert (enumSite, flagBits, fromKittyFlagBits, fromRgb, fromStyle, modeCode, readPalette, stringText, toCursorStyle, toRgb, unknownEnum, withSize, withString)
+import Ghostty.Effectful.Internal.Convert (enumSite, flagBits, fromKittyFlagBits, fromRgb, fromStyle, getSite, modeCode, readPalette, stringText, toCursorStyle, toRgb, unknownEnum, withSize, withString)
 import Ghostty.Effectful.Internal.Error (expectSuccess, optionalVia, orInvariant)
 import Ghostty.Effectful.Internal.Terminal (Terminal (..), wrote)
 import Ghostty.Effectful.Mode (ModeKey (..))
@@ -181,7 +181,7 @@ getData h key = case key of
     fromMemoryUsage <$> (orInvariant site ResultNoValue =<< fetchInto r (withSize memoryUsage))
   where
     k = dataKey key
-    site = enumSite "ghostty_terminal_get" ghosttyTerminalDataEnum (coerce k)
+    site = getSite k
     r = KeyRead h k site
 
 -- | One @ghostty_terminal_get@ read: the terminal, the key, and where its

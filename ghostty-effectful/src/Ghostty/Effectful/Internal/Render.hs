@@ -54,27 +54,28 @@ where
 import Control.Exception (onException, throwIO)
 import Data.Vector qualified as V
 import Foreign.C.Types (CBool, CSize)
-import Foreign.Marshal.Alloc (alloca)
+import Foreign.Marshal.Alloc (alloca, allocaBytesAligned)
 import Foreign.Marshal.Utils (toBool, with)
-import Foreign.Ptr (Ptr, castPtr)
+import Foreign.Ptr (Ptr, castPtr, plusPtr)
 import Foreign.Storable (Storable (..))
 import Ghostty.Effectful.Cell (Cell (..), CellWidth (..), Hyperlink (..), SemanticContent (..))
 import Ghostty.Effectful.Color (Rgb)
 import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), ResultCode (..))
 import Ghostty.Effectful.Internal.Callbacks (Framing (..), captureAttach, captureDetach, captureFraming, captureHeld)
-import Ghostty.Effectful.Internal.Convert (emptyRef, enumSite, fromCursorStyle, fromPalette, fromRgb, fromStyle, readPalette, toPoint, unfoldWhileM, unknownEnum, withSize)
-import Ghostty.Effectful.Internal.Error (bytesVia, expectSuccess, newHandle, optionalViaWith, outVia)
+import Ghostty.Effectful.Internal.Convert (emptyRef, enumSite, fromCursorStyle, fromPalette, fromRgb, fromStyle, readPalette, toPoint, unfoldWhileM, unknownEnum, utf8Text, withSize)
+import Ghostty.Effectful.Internal.Error (bytesAtWith, bytesVia, expectSuccess, firstTry, newHandle, optionalAtWith, outAt, outVia)
 import Ghostty.Effectful.Internal.Terminal (Terminal (..), forgetRegion)
 import Ghostty.Effectful.Point (Coord (..), Point (..))
 import Ghostty.Effectful.Render.Keys
 import Ghostty.Effectful.Style (Style, defaultStyle)
-import Ghostty.FFI.Color (GhosttyColorRgb (..))
+import Ghostty.FFI.Color (GhosttyColorRgb (..), ghosttyColorRgbLayout)
 import Ghostty.FFI.GridRef (ghosttyGridRefHyperlinkUri)
+import Ghostty.FFI.Layout (CStruct (..))
 import Ghostty.FFI.Render
 import Ghostty.FFI.Screen
-import Ghostty.FFI.Style (ghosttyStyleDefault)
+import Ghostty.FFI.Style (GhosttyStyle, ghosttyStyleDefault, ghosttyStyleLayout)
 import Ghostty.FFI.Terminal (ghosttyTerminalGridRef)
-import Ghostty.FFI.Types (GhosttyBuffer (..), GhosttyResult, pattern GhosttyCursorStyleBar)
+import Ghostty.FFI.Types (GhosttyBuffer (..), GhosttyResult, ghosttyBufferLayout, pattern GhosttyCursorStyleBar)
 
 -- | A render state of one terminal, alive in the region @s@ that
 -- 'Ghostty.Effectful.Render.withRenderState' opens. Its role is nominal, as
@@ -484,38 +485,131 @@ copyCells row = do
   let live = not row.frame.info.held && now == row.frame.info.writes
   -- Collected as a list and then sized once: the row's width is not
   -- known up front, and an unfold into a vector would grow it by copying.
-  let go x acc =
-        ifM
-          (toBool <$> ghosttyRenderStateRowCellsNext rs.rowCells)
-          (copyCell rs live row.y x >>= \c -> go (x + 1) (c : acc))
-          (pure (V.fromListN (fromIntegral x) (reverse acc)))
-  go 0 []
+  withCellSlots $ \slots -> do
+    let go x acc =
+          ifM
+            (toBool <$> ghosttyRenderStateRowCellsNext rs.rowCells)
+            (copyCell slots rs live row.y x >>= \c -> go (x + 1) (c : acc))
+            (pure (V.fromListN (fromIntegral x) (reverse acc)))
+    go 0 []
+
+-- | The memory a row's cell reads write their values into, one slot for
+-- each type read, made once for the row and reused by every cell. Each
+-- read allocating its own ('outVia', 'bytesVia') was most of the per-cell
+-- cost: an 'alloca' is a pinned allocation, ten of them a cell.
+data CellSlots = CellSlots
+  { rawSlot :: !(Ptr GhosttyCell),
+    wideSlot :: !(Ptr GhosttyCellWide),
+    semanticSlot :: !(Ptr GhosttyCellSemanticContent),
+    flagSlot :: !(Ptr CBool),
+    styleSlot :: !(Ptr GhosttyStyle),
+    colorSlot :: !(Ptr GhosttyColorRgb),
+    bufferSlot :: !(Ptr GhosttyBuffer),
+    -- | 'firstTry' bytes, the text's first try; a longer grapheme cluster
+    -- gets a buffer of its own ('bytesAt')
+    graphemeSlot :: !(Ptr Word8)
+  }
+
+-- | Run with a row's slots, freed when it returns: one block, one pinned
+-- allocation, the slots at 'slotBlock''s offsets.
+withCellSlots :: (CellSlots -> IO a) -> IO a
+withCellSlots k =
+  allocaBytesAligned b.size b.align $ \p -> do
+    -- Each pointer made now: left lazy, every cell's reads enter a thunk
+    -- per slot.
+    let !wideSlot = p `plusPtr` b.wideAt
+        !semanticSlot = p `plusPtr` b.semanticAt
+        !flagSlot = p `plusPtr` b.flagAt
+        !styleSlot = p `plusPtr` b.styleAt
+        !colorSlot = p `plusPtr` b.colorAt
+        !bufferSlot = p `plusPtr` b.bufferAt
+        !graphemeSlot = p `plusPtr` b.graphemeAt
+    k CellSlots {rawSlot = castPtr p, wideSlot, semanticSlot, flagSlot, styleSlot, colorSlot, bufferSlot, graphemeSlot}
+  where
+    b = slotBlock
+-- Out of line, so the row's loop reads the slots from one record rather
+-- than capturing each pointer in its per-cell closures.
+{-# NOINLINE withCellSlots #-}
+
+-- | Where each of 'CellSlots'' slots sits in its one block, and the block's
+-- size and alignment. The raw cell is at 0.
+data SlotBlock = SlotBlock
+  { -- | 'wideSlot''s offset
+    wideAt :: !Int,
+    -- | 'semanticSlot''s offset
+    semanticAt :: !Int,
+    -- | 'flagSlot''s offset
+    flagAt :: !Int,
+    -- | 'styleSlot''s offset
+    styleAt :: !Int,
+    -- | 'colorSlot''s offset
+    colorAt :: !Int,
+    -- | 'bufferSlot''s offset
+    bufferAt :: !Int,
+    -- | 'graphemeSlot''s offset
+    graphemeAt :: !Int,
+    -- | the block's size
+    size :: !Int,
+    -- | the block's alignment, the largest slot's
+    align :: !Int
+  }
+
+-- | The slots laid out in order, each at the offset after the one before,
+-- rounded up to its alignment: from the types' 'Storable' sizes, and the
+-- structs' descriptors, which the layout test checks the instances against.
+-- The raw cell is first, at 0.
+slotBlock :: SlotBlock
+slotBlock = SlotBlock {wideAt, semanticAt, flagAt, styleAt, colorAt, bufferAt, graphemeAt, size, align}
+  where
+    rawEnd = sizeOf (0 :: GhosttyCell)
+    (wideAt, wideEnd) = place rawEnd (sizeOf (GhosttyCellWide 0)) (alignment (GhosttyCellWide 0))
+    (semanticAt, semanticEnd) = place wideEnd (sizeOf (GhosttyCellSemanticContent 0)) (alignment (GhosttyCellSemanticContent 0))
+    (flagAt, flagEnd) = place semanticEnd (sizeOf (0 :: CBool)) (alignment (0 :: CBool))
+    (styleAt, styleEnd) = place flagEnd ghosttyStyleLayout.size ghosttyStyleLayout.align
+    (colorAt, colorEnd) = place styleEnd ghosttyColorRgbLayout.size ghosttyColorRgbLayout.align
+    (bufferAt, bufferEnd) = place colorEnd ghosttyBufferLayout.size ghosttyBufferLayout.align
+    (graphemeAt, size) = place bufferEnd firstTry 1
+    align =
+      foldl'
+        max
+        (alignment (0 :: GhosttyCell))
+        [ alignment (GhosttyCellWide 0),
+          alignment (GhosttyCellSemanticContent 0),
+          alignment (0 :: CBool),
+          ghosttyStyleLayout.align,
+          ghosttyColorRgbLayout.align,
+          ghosttyBufferLayout.align
+        ]
+    -- a slot of size @n@ and alignment @a@ after @end@: its offset, and its
+    -- end
+    place end n a = let o = (end + a - 1) `div` a * a in (o, o + n)
+{-# NOINLINE slotBlock #-}
 
 -- | Copy the cell the cell iterator is on, at column @x@ of row @y@.
-copyCell :: RenderState s -> Bool -> Word16 -> Word16 -> IO Cell
-copyCell rs live y x = do
+copyCell :: CellSlots -> RenderState s -> Bool -> Word16 -> Word16 -> IO Cell
+copyCell slots rs live y x = do
   let cs = rs.rowCells
-  raw :: GhosttyCell <- cellsValue cs GhosttyRenderStateRowCellsDataRaw
+  raw <- cellsValue slots.rawSlot cs GhosttyRenderStateRowCellsDataRaw
   width <-
-    cellValue raw GhosttyCellDataWide >>= \case
+    cellValue slots.wideSlot raw GhosttyCellDataWide >>= \case
       GhosttyCellWideNarrow -> pure Narrow
       GhosttyCellWideWide -> pure Wide
       GhosttyCellWideSpacerTail -> pure SpacerTail
       GhosttyCellWideSpacerHead -> pure SpacerHead
       GhosttyCellWideUnknown n -> unknownEnum cellSite ghosttyCellWideEnum n
   semantic <-
-    cellValue raw GhosttyCellDataSemanticContent >>= \case
+    cellValue slots.semanticSlot raw GhosttyCellDataSemanticContent >>= \case
       GhosttyCellSemanticOutput -> pure ContentOutput
       GhosttyCellSemanticInput -> pure ContentInput
       GhosttyCellSemanticPrompt -> pure ContentPrompt
       GhosttyCellSemanticContentUnknown n -> unknownEnum cellSite ghosttyCellSemanticContentEnum n
-  protected <- toBool @CBool <$> cellValue raw GhosttyCellDataProtected
-  linked <- toBool @CBool <$> cellValue raw GhosttyCellDataHasHyperlink
-  styled <- toBool @CBool <$> cellsValue cs GhosttyRenderStateRowCellsDataHasStyling
-  style <- if styled then cellStyle cs else pure defaultStyle
-  text <- decodeUtf8 <$> cellGraphemes cs
-  foreground <- cellColor cs GhosttyRenderStateRowCellsDataFgColor
-  background <- cellColor cs GhosttyRenderStateRowCellsDataBgColor
+  protected <- toBool <$> cellValue slots.flagSlot raw GhosttyCellDataProtected
+  linked <- toBool <$> cellValue slots.flagSlot raw GhosttyCellDataHasHyperlink
+  styled <- toBool <$> cellsValue slots.flagSlot cs GhosttyRenderStateRowCellsDataHasStyling
+  style <- if styled then cellStyle slots.styleSlot cs else pure defaultStyle
+  text <- cellGraphemes slots cs
+  foreground <- cellColor slots.colorSlot cs GhosttyRenderStateRowCellsDataFgColor
+  background <- cellColor slots.colorSlot cs GhosttyRenderStateRowCellsDataBgColor
   hyperlink <-
     if linked
       then Just . Hyperlink <$> if live then Just . decodeUtf8 <$> linkUri rs x y else pure Nothing
@@ -538,17 +632,17 @@ cellSite = CallSite "ghostty_cell_get"
 cellsGet :: GhosttyRenderStateRowCells -> GhosttyRenderStateRowCellsData -> Ptr b -> IO GhosttyResult
 cellsGet cs d = ghosttyRenderStateRowCellsGet cs d . castPtr
 
--- | A value of the current cell.
-cellsValue :: (Storable b) => GhosttyRenderStateRowCells -> GhosttyRenderStateRowCellsData -> IO b
-cellsValue cs d = outVia (cellsSite d) (cellsGet cs d)
+-- | A value of the current cell, read into the slot.
+cellsValue :: (Storable b) => Ptr b -> GhosttyRenderStateRowCells -> GhosttyRenderStateRowCellsData -> IO b
+cellsValue slot cs d = outAt slot (cellsSite d) (cellsGet cs d)
 
--- | A value of a raw cell.
-cellValue :: (Storable b) => GhosttyCell -> GhosttyCellData -> IO b
-cellValue raw d = outVia cellSite (ghosttyCellGet raw d . castPtr)
+-- | A value of a raw cell, read into the slot.
+cellValue :: (Storable b) => Ptr b -> GhosttyCell -> GhosttyCellData -> IO b
+cellValue slot raw d = outAt slot cellSite (ghosttyCellGet raw d . castPtr)
 
--- | The current cell's style, read into a style set to the default first.
-cellStyle :: GhosttyRenderStateRowCells -> IO Style
-cellStyle cs = fromStyle site =<< outVia site (\p -> ghosttyStyleDefault p >> cellsGet cs d p)
+-- | The current cell's style, read into the slot set to the default first.
+cellStyle :: Ptr GhosttyStyle -> GhosttyRenderStateRowCells -> IO Style
+cellStyle slot cs = fromStyle site =<< outAt slot site (\p -> ghosttyStyleDefault p >> cellsGet cs d p)
   where
     d = GhosttyRenderStateRowCellsDataStyle
     site = cellsSite d
@@ -556,16 +650,17 @@ cellStyle cs = fromStyle site =<< outVia site (\p -> ghosttyStyleDefault p >> ce
 -- | One of the current cell's colours. The header's NO_VALUE is "none of
 -- its own: use the default" (INVALID_VALUE before libghostty-vt 1.0;
 -- regression 9).
-cellColor :: GhosttyRenderStateRowCells -> GhosttyRenderStateRowCellsData -> IO (Maybe Rgb)
-cellColor cs d = optionalViaWith fromRgb ResultNoValue (cellsSite d) (cellsGet cs d)
+cellColor :: Ptr GhosttyColorRgb -> GhosttyRenderStateRowCells -> GhosttyRenderStateRowCellsData -> IO (Maybe Rgb)
+cellColor slot cs d = optionalAtWith slot fromRgb ResultNoValue (cellsSite d) (cellsGet cs d)
 
 -- | The current cell's text, @GRAPHEMES_UTF8@, through a buffer struct that
--- reports the length.
-cellGraphemes :: GhosttyRenderStateRowCells -> IO ByteString
-cellGraphemes cs = bytesVia (cellsSite d) $ \buf cap ->
-  with GhosttyBuffer {ptr = buf, cap = fromIntegral cap, len = 0} $ \bp -> do
-    r <- cellsGet cs d bp
-    (r,) . fromIntegral . (.len) <$> peek bp
+-- reports the length, both in the row's slots, decoded from the slot.
+cellGraphemes :: CellSlots -> GhosttyRenderStateRowCells -> IO Text
+cellGraphemes slots cs = bytesAtWith utf8Text slots.graphemeSlot firstTry (cellsSite d) $ \buf cap -> do
+  let bp = slots.bufferSlot
+  poke bp GhosttyBuffer {ptr = buf, cap = fromIntegral cap, len = 0}
+  r <- cellsGet cs d bp
+  (r,) . fromIntegral . (.len) <$> peek bp
   where
     d = GhosttyRenderStateRowCellsDataGraphemesUtf8
 

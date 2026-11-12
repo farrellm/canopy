@@ -787,7 +787,8 @@ position (regression 7).
 ### 4.5 Callbacks become events
 
 C callbacks are installed by the binding, never by users, and each does exactly one thing: append a
-constructor to an `IORef`'d buffer owned by that terminal. `feed` drains it:
+constructor to an `IORef`'d buffer owned by that terminal, or, for a prompt mark, a copy to a list
+in C (below, D18). `feed` drains both:
 
 ```haskell
 feed :: Ghostty :> es => Terminal s -> ByteString -> Eff es [TerminalEvent]
@@ -797,7 +798,7 @@ data TerminalEvent                     -- Ghostty.Effectful.Event
   | Bell
   | TitleChanged Text
   | PwdChanged Text
-  | SemanticPrompt PromptMark          -- OSC 133: A/B/C/D with parameters (§7.3), and the cursor
+  | SemanticPrompt !PromptMark         -- OSC 133: A/B/C/D with parameters (§7.3), and the cursor
   | ClipboardWrite ClipboardLocation [ClipboardContent]
   | Notification Text Text
   | Progress ProgressReport
@@ -809,21 +810,26 @@ data TerminalEvent                     -- Ghostty.Effectful.Event
 ```
 
 Events come back in the order the bytes produced them, which matters: a `SemanticPrompt C` must be
-seen at the right point in the stream so that the output range it opens starts at the right row. To
-get that, `feed` writes with `ghostty_terminal_vt_write_until(…, GHOSTTY_TERMINAL_BOUNDARY_OSC_END,
-…)`, which stops right after each OSC terminator and reports how much it consumed. After each stop,
-the buffer is drained and resolved: a `SemanticPrompt` gets `CURSOR_X`/`CURSOR_Y`, and a title or
-working-directory change gets the new value (their callbacks carry none). Then the write continues
-with the rest of the chunk. The header forbids calling `vt_write` from inside a callback, which this
-never does: the terminal is read between writes, not inside them. (Checked, M1.6: an OSC ended by
-`ESC \` is dispatched at the `ESC`, where `vt_write_until` stops, so its mark's cursor is right too;
-and the same stream split at every byte gives the same events.) Adjacent `WritePty`s are joined, so
-one reply is one write: across stops, and with any events buffered before the write.
+seen at the right point in the stream so that the output range it opens starts at the right row,
+with the cursor just after the mark. **Each callback reads what it needs inside itself** (D20): a
+prompt mark's cursor (`CURSOR_X`/`CURSOR_Y`, read by the C callback), and a title or working
+directory change's new value (their callbacks carry none, and the header asks for the read inside
+them). That is the library's own pattern: the header says to read the title and working directory
+"inside the callback", and that the terminal has already updated its screen when the mark callback
+runs. It forbids only writing to the terminal from inside a callback, which this never does. So
+`feed` need not stop anywhere: it is one `ghostty_terminal_vt_write` over the chunk, and one take of
+what the callbacks left (D21). (Until D20 it wrote with
+`vt_write_until(…, BOUNDARY_OSC_END, …)` and read the cursor after each stop, which needed a stop per
+OSC. Checked before the change, in C: over 63,000 marks, ended by BEL and by `ESC \`, some mid-line,
+the cursor read inside the callback equalled the one read after the stop for every mark. And the
+same stream split at every byte gives the same events.) Adjacent `WritePty`s are joined, so one
+reply is one write, with any events buffered before the write too: those are the oldest of the
+take's entries.
 
 A callback must not let an exception into C, so each body is guarded: an exception is recorded in
 the buffer and thrown by the drain, after the write. So is a C enum value the binding does not name
-(`UnknownEnum`, §4.7), which a callback cannot throw. A failure while resolving one stop's events does
-not stop the write: every byte is written, so the terminal never falls behind the program's output,
+(`UnknownEnum`, §4.7), which a callback cannot throw. A failure in a callback
+does not stop the write: every byte is written, so the terminal never falls behind the program's output,
 and the first failure is thrown after. `resize` and `reset` call callbacks too (the end of a render
 hold, mode 2048's in-band size report), so they return `[TerminalEvent]` as `feed` does. `setT`
 returns `()`: the header says setting a mode never invokes a callback, not even the end of a render
@@ -850,8 +856,31 @@ the `RENDER_HOLD` callback, because by the time the write returns the bytes afte
 have been processed, and `vt_write_until` cannot stop at a CSI. The event comes in order, but the
 frame it points at is gone by then. Answered in §4.3: the callback is C, captures into each render
 state of the terminal, and then calls the Haskell callback, which only appends, as every other does.
-The terminal's `USERDATA` is one C struct (`GveffUserdata`): the two answer strings, first, and the
-render states a hold captures into.
+The terminal's `USERDATA` is one C struct (`GveffUserdata`): the two answer strings, first, the
+render states a hold captures into, and the prompt marks.
+
+**A prompt mark is copied in C** (D18). A call from C into Haskell makes a Haskell thread, and in a
+stream of marks that was most of a mark's cost (§12.3). So `SEMANTIC_PROMPT` is C: it copies the
+event, its command and error strings too, onto a list in the `USERDATA`, and no Haskell runs. A drain
+takes the Haskell buffer and the C list (`takeEvents`) and turns both into events in one pass,
+newest first as the buffer is kept, so the list it builds is the one returned, oldest first and with
+its replies joined (D21). **Each mark records its
+place** (D20): `push` counts the Haskell entries in a field of the `USERDATA` (`pushed`), the C
+callback stores that count with each mark, and the drain resets it, so a drain puts each mark after
+exactly the Haskell entries that came before it in the stream. No other call produces marks:
+`resize`, `reset` and `paste` cannot.
+A mark C cannot copy for want of memory, or whose cursor it cannot read, is dropped and recorded
+with the count, as a mark's place is, and C takes no mark after it, since a failure drops the
+drain's events. So the drain throws the first failure in the stream, a Haskell callback's or C's,
+after the write: it walks only what came before C's, and throws C's if nothing there failed. A drain
+with no marks makes one `unsafe` call and allocates nothing. Taking the marks is not wrapped in
+`finally`: converting one throws nothing synchronously (a string that cannot be read is kept as the
+take's failure, and an empty one, as nearly all are, is not read), so only an asynchronous exception
+can interrupt it. The drain clears the marks first and then empties the buffer and zeroes `pushed`,
+so an interruption before the clear leaves both for the next drain, their counts still agreeing, and
+one between the two loses only that drain's marks; freeing the `USERDATA` frees any never taken. The
+drain's count of Haskell entries is `pushed`, not the buffer's length, so every append goes through
+`push`.
 
 ### 4.6 Concurrency
 
@@ -1964,6 +1993,14 @@ cassini.
 `StrictData` in every model module (`Tendril.**` T0–T4, `Canopy.App.Model`, `Canopy.Session.**`): a
 long-running interactive program that accumulates thunks in its state leaks, and the leak is found
 by users, not the compiler. Lazy fields are opted into with `~` where a structure is genuinely lazy.
+`ghostty-effectful`'s `Point` and `PromptMark` are strict and unpacked too, for size rather than
+leaks: both are always read whole from the library, and a write of many prompt marks keeps one of
+each per event alive until `feed` returns (§12.3). For the same reason `SemanticPrompt` unpacks its
+`PromptMark`, so a mark event is one object. A caller that passes the mark on as a value of its own
+rebuilds it, a short-lived 24 bytes, rather than every event a feed keeps carrying the box.
+`Rgb` is strict and unpacked, its three channels one word: it is always built whole from a read, and
+a frame keeps one for every coloured cell and style (§12.3). `Cell` is not: strict, it measured
+72 bytes a cell more (2026-11-12), so its fields stay lazy.
 
 ---
 
@@ -2077,6 +2114,94 @@ linear in the stops and the same in 4 KiB writes. A REPL block has four marks, s
 child-throughput budget's (§12.1) path, but the per-stop cost is the first place to look if a
 stream of marks ever is.
 
+It was looked at (2026-11-10, `perf` with DWARF call graphs): libghostty's parsing was about 16% of
+the time. The rest was the runtime: the collector about 25%, and the mark callback about 22%,
+because each call from C into Haskell makes a Haskell thread (its 1 KiB stack was half a stop's
+allocation, as `+RTS -ki` showed). Pausing the thread for each stop's `safe` call was about 9%, and
+the non-threaded scheduler's poll on each callback about 5%. With the mark copied in C instead (D18,
+§4.5): 80–85 ms and 94 MB, about 1.3 KB a stop, against 160–170 ms and 161 MB; on the threaded
+runtime 86 ms against 115–123. The two cursor reads a mark resolves now share one slot the terminal
+keeps (`Internal.Keys.cursorAt`), not an `alloca` each, and a stop that drained nothing skips the
+resolve and its `try` (2026-11-10): prompts 76 ms and 80 MB, about 1.1 KB a stop; plain text in
+4 KiB writes 103 KB, from 171 KB. Taking the marks reads each copied struct in place and converts
+it, not through a list of copies (`peekArray`), and only a mark with strings to read is guarded by
+`handle` (2026-11-11): prompts 66 ms and 60 MB, about 850 bytes a stop. The cursor reads' keys and
+call sites are top-level constants, not a `KeyRead` and a site built for each read (2026-11-11):
+prompts 64 ms and 51 MB, about 720 bytes a stop. Resolving moved into `Internal.Feed`, which calls
+the reads directly rather than through closures passed in, catches into the `Resolved` it builds
+rather than `try` and a map, and converts the mark's row at once (2026-11-11): prompts 59 ms and
+44 MB, about 620 bytes a stop. Taking the marks builds its result and the drain's at once, not as
+thunks of `<>`, and has no `finally` (§4.5) (2026-11-11): prompts 48 ms and 30 MB, about 420 bytes a
+stop. Then `perf` put pausing the thread for each stop's `safe` call at 18.5% of the time
+(`threadPaused` walks the whole Haskell stack, so its cost grows with the caller's depth), and the
+loop over the stops moved into C (D19), one `safe` call for a run of marks, and C reads each mark's
+cursor, which retires the shared cursor slot and the constant call sites above (2026-11-11): prompts
+31–32 ms against 44–47 ms in alternating runs, and 19 MB, about 270 bytes a stop; the `safe` calls
+are 0.6% of the time. What is left is libghostty's parsing (44%) and the collector (37%), most of
+it the 71,000 events the benchmark keeps.
+
+The collector's share is the events one `feed` builds and keeps until it returns, not the rate of
+allocation: under `+RTS -A64m` the same run copies 1 MB, not 19, and takes 22 ms, not 37. So the
+events got smaller and fewer copies of the list are made (2026-11-11): `Point`'s fields and
+`PromptMark`'s cursor are strict and unpacked (§10.7), 120 bytes a mark event becoming 72, and the
+newest-first list the write builds is put in order and has its `WritePty` runs joined in one pass
+(`joinWritesNewestFirst`), not a `reverse` and a lazy join, each a list of its own. Prompts 22–23 ms
+and 12 MB, copying 9 MB, against 31–35 ms, 19 MB and 19 MB; plain text in 4 KiB writes 95 KB, from
+101 KB. A feed of one PTY read keeps far fewer events than this benchmark's 1 MiB write.
+
+What was left was mostly libghostty: 60% of the time, its largest part `vt_write_until` itself,
+whose every call sets up a 20 KiB frame before parsing. In C alone, the same 1 MiB of marks took
+14.2 ms as a call per OSC stop and 11.2 ms as one `vt_write`, the minimum of 12 runs each; plain
+text took the same either way. So the stops went (D20): each callback reads what it needs inside
+itself, and `feed` is `vt_write` in 64 KiB slices (2026-11-11). Prompts 19.7–21.8 ms against
+22.0–23.7 ms in alternating runs, allocation unchanged at 12 MB; plain text in 4 KiB writes 47 KB,
+from 95 KB, the C loop's per-feed out-parameter and its resolve gone. One `vt_write` of the whole
+1 MiB, unsliced, copied 11 MB rather than 9 and was slower than the slices: every mark of the write
+waited in C and was converted at once.
+
+The events themselves were then most of what was left (2026-11-11). A mark went through three
+lists: the drain's merged entries, each in a `Ready` box; those resolved onto the write's events;
+and the ordered, joined result. Now the drain turns each entry into its event as it places it,
+straight onto the write's events (`takeOnto`), so only the first and last lists remain. That alone
+was worse, 12.8 MB, until its STG showed why: the string-reading marks' `handle` and its
+continuation were closures capturing the whole progress, each mark's result was a thunk, and the
+loop's counter was boxed. A mark whose strings are empty, nearly all of them, now reads nothing and
+needs no `handle`; one with text goes to a separate function; and the loop is strict. Then
+`SemanticPrompt` unpacks its `PromptMark` (§10.7): a mark event is 24 bytes, from 40 (the
+cursor's two fields share a word). Prompts 16.4–17.3 ms against 19.8–20.8 ms in alternating runs,
+and 6.0 MB, from 11.5 MB. By ticky that is 84 bytes a mark: 60 as the take builds it (the event and
+its list cell, 48 bytes, and on a `D` mark its `CommandEnd` and a thunk for the exit code), and the
+joined list's cell. Plain text in 4 KiB writes 43 KB, from 47 KB.
+
+That joined list was a reversal: the take built the events newest first, so the order-and-join pass
+copied every one (2026-11-11). The take now walks the buffer and the marks newest first, the order
+the buffer is kept in, so consing each event in front leaves the list oldest first; it joins
+`WritePty` runs as it goes, and the list it builds is the one `feed` returns (D21). That needs one
+take per write, so the write is no longer sliced: one `vt_write` and one take. One unsliced write
+had been slower under D20 because the take then built two lists of the whole write's events at
+once; with one list it is not (15.5–15.9 ms against 15.6–18.3 ms in alternating runs). The tail the
+walk passes on had to be forced: left lazy, it was a thunk per mark, and the write allocated more
+than before. Prompts 4.3 MB, from 6.0 MB, copying 3.6 MB from 4.0, about 60 bytes a mark; plain
+text in 4 KiB writes 35 KB, from 43 KB, the drain before the write gone with the slices.
+
+What a mark still cost beyond its event and list cell was a `D` mark's step: a `CommandEnd` and a
+thunk for its exit code, on every one (2026-11-11). A `D` with no error text, nearly all of them,
+now takes a step built once and shared: one with no exit code, or one of 256 for the codes 0 to 255,
+which covers every code a Unix shell reports; any other code or error text builds its own. Its
+STG also showed the `D` event itself left a thunk, because choosing the shared step branches, and
+the benchmark, which only counts the events, never forced it; every caller would have paid the
+thunk and then the event. So the event is built when the mark is taken, and so are a joined reply's
+bytes. Prompts 3.4 MB, from 4.3 MB, 48 bytes a mark by ticky, the event and its list cell; copying
+1.3 MB, from 3.6 MB; 14.3–15.7 ms against 15.1–16.3 ms in alternating runs, much the same.
+
+So the benchmark now forces every event whole, as a caller reads it, by comparing each with itself,
+as the `Render` group compares cells; counting the list forced only its spine (2026-11-11). On the
+code before the shared steps it reports 4.6 MB for prompts, not 4.3: the thunks it could not see.
+On the code since, allocation is unchanged, so no event or field is left a thunk; the comparison
+adds about 3 ms to prompts' time. Its count is a strict fold over the writes, not `sum` over a list
+of lazy counts, which kept each write's events until the end: plain text in 4 KiB writes 31 KB, from
+35 KB.
+
 **Rendering**, the same suite's `Render` group: the same terminal life with a screen fed and a
 render state opened, then one frame of every cell copied out (plain, SGR-coloured and wide/combining
 screens), one frame's cursor and colours, and 24 frames of one new line each, the steady state of a
@@ -2085,6 +2210,31 @@ machine): a full 80×24 frame takes 1.5–1.9 ms and allocates 1.6–1.9 KB a ce
 inside a per-read or per-cell function are the cost to watch here. GHC binds each `Storable`
 specialisation of a local polymorphic helper as a closure, which the function allocates on every
 call. So the binding's readers are top level, and its small FFI read helpers are `INLINE`.
+
+The other cost is the out-parameter. Each `alloca` is a pinned allocation, which costs more than
+the read it serves, and a cell took ten. So a row's cell reads write into slots made once for the
+row, one per type read (`Internal.Render.CellSlots`, through `outAt`, `optionalAtWith` and
+`bytesAt`). Second figures (2026-11-10): a full frame takes 0.4–0.6 ms and allocates 400–600 bytes
+a cell. The readers count as they go: summed lazily, the 24-frame case kept every frame's cells
+alive to the end and measured the collector, at 100 ms where the reads take 12. Each new line
+scrolls the screen, so all 24 of its frames are fully dirty and read every row.
+
+The slots are one aligned block (`withCellSlots`, laid out once by `slotBlock` from the types'
+sizes and the structs' layout descriptors), not an `alloca` each: eight pinned allocations a row
+were 18 KB a full frame (2026-11-12; 24 frames 28.7 MB, from 29.2). The block's pointers are made
+before the record is built, and `withCellSlots` is out of line. Left lazy, every cell's reads
+entered a thunk per slot and the frame was 5–10% slower; inlined, GHC captured the seven addresses
+in the per-cell closures, 9 KB more a frame. Time is at parity or better (plain 0.42–0.48 ms
+against 0.44–0.53 over ten alternated rounds).
+
+A cell's text is decoded straight from its slot (`bytesAtWith utf8Text`), and an empty one, as
+most are, is the shared empty `Text`. It had been copied into a `ByteString` (a pinned allocation)
+and then into the `Text`, and left as a decode thunk holding that `ByteString` (2026-11-12): plain
+every cell 699 KB from 796, styled 990 KB from 1,150, unicode 529 KB from 773, 24 frames 24.7 MB
+from 28.7; time at parity or better. `Rgb`'s channels are strict and unpacked (§10.7)
+(2026-11-12): styled every cell 902 KB from 990, cursor and colours 65 KB from 88, 24 frames
+22.5 MB from 24.7, the rest unchanged. Making `Cell` strict as well cost 138 KB a full frame, and
+building the colour's `Just` strictly changed nothing; neither was kept.
 
 ---
 
@@ -2205,6 +2355,10 @@ input; a per-session toggle hides them.
 | D15 | The runtime check is exact: the linked library is the pinned release, with every optional feature (`==1.0.0` in `pkgconfig-depends` too), though 1.x makes a newer minor memory-safe (relaxation is D-deferred-11) | §3.1, §3.4 |
 | D16 | The public effectful API follows upstream's renames at a pin bump (`ModeKey` after the `GHOSTTY_MODE_*` names, `CursorSgrStyle`), as §4.4's naming rule already requires | §4.4 |
 | D17 | The release build of libghostty-vt targets the baseline CPU (`build-libghostty.sh --release`, `-Dcpu=baseline`), since releases link it statically | §3.1 |
+| D18 | `SEMANTIC_PROMPT` is a C callback that copies the mark into the `USERDATA`, since a call into Haskell per mark was most of a mark's cost; first taken after the Haskell buffer at each OSC stop, then sequenced around it by the C write loop (D19), now by the count it records (D20) | §4.5, §12.3 |
+| D19 | The loop over `vt_write_until`'s OSC stops is C (`gveff_write`): it reads each mark's cursor, and returns to Haskell only when a Haskell callback appended, 256 marks wait, or the input ends, sequencing the marks around the Haskell buffer; since pausing the thread for a `safe` call per stop was the largest cost left. Superseded by D20, which needs no stops | §4.5, §12.3 |
+| D20 | Callbacks read what they need inside themselves (a mark's cursor in C, a title or working directory in Haskell), as the header asks for the title and working directory, and each mark records how many Haskell entries came before it; so `feed` is `vt_write` with no stops. Each `vt_write_until` call per OSC cost the parser its setup. Its 64 KiB slices are superseded by D21 | §4.5, §12.3 |
+| D21 | `feed` is one `vt_write` and one take: the take walks the Haskell buffer and the marks newest first and builds the returned list in order, `WritePty` runs joined, rather than building it reversed and copying it in order; since a slice's take would leave a list to append | §4.5, §12.3 |
 
 ### 15.2 Deferred
 
