@@ -295,6 +295,7 @@ Written as changes land, not at release (DESIGN.md §2.9).
   `Storable` helpers that GHC allocated as closures on every call, an `fmap` over the colour
   reads, and an unfold into a vector. All three are fixed: the render path is at parity in time
   and 2–4% under in allocation. The same fix in `getData` takes the feed's prompts to 161 MB.
+- A row's cell slots are one aligned allocation, not eight: 18 KB less a full frame of cells.
 
 ### M0: infrastructure
 

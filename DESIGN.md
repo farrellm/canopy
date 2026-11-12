@@ -2211,6 +2211,14 @@ a cell. The readers count as they go: summed lazily, the 24-frame case kept ever
 alive to the end and measured the collector, at 100 ms where the reads take 12. Each new line
 scrolls the screen, so all 24 of its frames are fully dirty and read every row.
 
+The slots are one aligned block (`withCellSlots`, laid out once by `slotBlock` from the types'
+sizes and the structs' layout descriptors), not an `alloca` each: eight pinned allocations a row
+were 18 KB a full frame (2026-11-12; 24 frames 28.7 MB, from 29.2). The block's pointers are made
+before the record is built, and `withCellSlots` is out of line. Left lazy, every cell's reads
+entered a thunk per slot and the frame was 5–10% slower; inlined, GHC captured the seven addresses
+in the per-cell closures, 9 KB more a frame. Time is at parity or better (plain 0.42–0.48 ms
+against 0.44–0.53 over ten alternated rounds).
+
 ---
 
 ## 13. Milestones

@@ -54,9 +54,9 @@ where
 import Control.Exception (onException, throwIO)
 import Data.Vector qualified as V
 import Foreign.C.Types (CBool, CSize)
-import Foreign.Marshal.Alloc (alloca, allocaBytes)
+import Foreign.Marshal.Alloc (alloca, allocaBytesAligned)
 import Foreign.Marshal.Utils (toBool, with)
-import Foreign.Ptr (Ptr, castPtr)
+import Foreign.Ptr (Ptr, castPtr, plusPtr)
 import Foreign.Storable (Storable (..))
 import Ghostty.Effectful.Cell (Cell (..), CellWidth (..), Hyperlink (..), SemanticContent (..))
 import Ghostty.Effectful.Color (Rgb)
@@ -68,13 +68,14 @@ import Ghostty.Effectful.Internal.Terminal (Terminal (..), forgetRegion)
 import Ghostty.Effectful.Point (Coord (..), Point (..))
 import Ghostty.Effectful.Render.Keys
 import Ghostty.Effectful.Style (Style, defaultStyle)
-import Ghostty.FFI.Color (GhosttyColorRgb (..))
+import Ghostty.FFI.Color (GhosttyColorRgb (..), ghosttyColorRgbLayout)
 import Ghostty.FFI.GridRef (ghosttyGridRefHyperlinkUri)
+import Ghostty.FFI.Layout (CStruct (..))
 import Ghostty.FFI.Render
 import Ghostty.FFI.Screen
-import Ghostty.FFI.Style (GhosttyStyle, ghosttyStyleDefault)
+import Ghostty.FFI.Style (GhosttyStyle, ghosttyStyleDefault, ghosttyStyleLayout)
 import Ghostty.FFI.Terminal (ghosttyTerminalGridRef)
-import Ghostty.FFI.Types (GhosttyBuffer (..), GhosttyResult, pattern GhosttyCursorStyleBar)
+import Ghostty.FFI.Types (GhosttyBuffer (..), GhosttyResult, ghosttyBufferLayout, pattern GhosttyCursorStyleBar)
 
 -- | A render state of one terminal, alive in the region @s@ that
 -- 'Ghostty.Effectful.Render.withRenderState' opens. Its role is nominal, as
@@ -497,24 +498,94 @@ copyCells row = do
 -- read allocating its own ('outVia', 'bytesVia') was most of the per-cell
 -- cost: an 'alloca' is a pinned allocation, ten of them a cell.
 data CellSlots = CellSlots
-  { rawSlot :: Ptr GhosttyCell,
-    wideSlot :: Ptr GhosttyCellWide,
-    semanticSlot :: Ptr GhosttyCellSemanticContent,
-    flagSlot :: Ptr CBool,
-    styleSlot :: Ptr GhosttyStyle,
-    colorSlot :: Ptr GhosttyColorRgb,
-    bufferSlot :: Ptr GhosttyBuffer,
+  { rawSlot :: !(Ptr GhosttyCell),
+    wideSlot :: !(Ptr GhosttyCellWide),
+    semanticSlot :: !(Ptr GhosttyCellSemanticContent),
+    flagSlot :: !(Ptr CBool),
+    styleSlot :: !(Ptr GhosttyStyle),
+    colorSlot :: !(Ptr GhosttyColorRgb),
+    bufferSlot :: !(Ptr GhosttyBuffer),
     -- | 'graphemeCapacity' bytes, the text's first try
-    graphemeSlot :: Ptr Word8
+    graphemeSlot :: !(Ptr Word8)
   }
 
--- | Run with a row's slots, freed when it returns.
+-- | Run with a row's slots, freed when it returns: one block, one pinned
+-- allocation, the slots at 'slotBlock''s offsets.
 withCellSlots :: (CellSlots -> IO a) -> IO a
 withCellSlots k =
-  alloca $ \rawSlot -> alloca $ \wideSlot -> alloca $ \semanticSlot -> alloca $ \flagSlot ->
-    alloca $ \styleSlot -> alloca $ \colorSlot -> alloca $ \bufferSlot ->
-      allocaBytes graphemeCapacity $ \graphemeSlot ->
-        k CellSlots {rawSlot, wideSlot, semanticSlot, flagSlot, styleSlot, colorSlot, bufferSlot, graphemeSlot}
+  allocaBytesAligned b.size b.align $ \p -> do
+    -- Each pointer made now: left lazy, every cell's reads enter a thunk
+    -- per slot.
+    let !wideSlot = p `plusPtr` b.wideAt
+        !semanticSlot = p `plusPtr` b.semanticAt
+        !flagSlot = p `plusPtr` b.flagAt
+        !styleSlot = p `plusPtr` b.styleAt
+        !colorSlot = p `plusPtr` b.colorAt
+        !bufferSlot = p `plusPtr` b.bufferAt
+        !graphemeSlot = p `plusPtr` b.graphemeAt
+    k CellSlots {rawSlot = castPtr p, wideSlot, semanticSlot, flagSlot, styleSlot, colorSlot, bufferSlot, graphemeSlot}
+  where
+    b = slotBlock
+-- Out of line, so the row's loop reads the slots from one record rather
+-- than capturing each pointer in its per-cell closures.
+{-# NOINLINE withCellSlots #-}
+
+-- | Where each of 'CellSlots'' slots sits in its one block, and the block's
+-- size and alignment. The raw cell is at 0.
+data SlotBlock = SlotBlock
+  { -- | 'wideSlot''s offset
+    wideAt :: !Int,
+    -- | 'semanticSlot''s offset
+    semanticAt :: !Int,
+    -- | 'flagSlot''s offset
+    flagAt :: !Int,
+    -- | 'styleSlot''s offset
+    styleAt :: !Int,
+    -- | 'colorSlot''s offset
+    colorAt :: !Int,
+    -- | 'bufferSlot''s offset
+    bufferAt :: !Int,
+    -- | 'graphemeSlot''s offset
+    graphemeAt :: !Int,
+    -- | the block's size
+    size :: !Int,
+    -- | the block's alignment, the largest slot's
+    align :: !Int
+  }
+
+-- | The slots laid out in order, each at the offset after the one before,
+-- rounded up to its alignment: from the types' 'Storable' sizes, and the
+-- structs' descriptors, which the layout test checks the instances against.
+slotBlock :: SlotBlock
+slotBlock =
+  SlotBlock
+    { wideAt = at 1,
+      semanticAt = at 2,
+      flagAt = at 3,
+      styleAt = at 4,
+      colorAt = at 5,
+      bufferAt = at 6,
+      graphemeAt = at 7,
+      size = fromMaybe 0 (viaNonEmpty last ends),
+      align = foldl' max 1 (map snd shapes)
+    }
+  where
+    shapes =
+      [ (sizeOf (0 :: GhosttyCell), alignment (0 :: GhosttyCell)),
+        (sizeOf (GhosttyCellWide 0), alignment (GhosttyCellWide 0)),
+        (sizeOf (GhosttyCellSemanticContent 0), alignment (GhosttyCellSemanticContent 0)),
+        (sizeOf (0 :: CBool), alignment (0 :: CBool)),
+        (ghosttyStyleLayout.size, ghosttyStyleLayout.align),
+        (ghosttyColorRgbLayout.size, ghosttyColorRgbLayout.align),
+        (ghosttyBufferLayout.size, ghosttyBufferLayout.align),
+        (graphemeCapacity, 1)
+      ]
+    -- each slot's offset, and the end of the one before it
+    (offsets, ends) = unzip (go 0 shapes)
+    go _ [] = []
+    go end ((n, a) : rest) = let o = (end + a - 1) `div` a * a in (o, o + n) : go (o + n) rest
+    at i = fromMaybe 0 (offsets !!? i)
+{-# NOINLINE slotBlock #-}
 
 -- | The capacity of a cell's text's first try, which holds nearly every
 -- grapheme cluster; a longer one gets a buffer of its own ('bytesAt').
