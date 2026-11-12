@@ -18,11 +18,11 @@ import Data.Array (Array, elems, listArray, (!), (//))
 -- | A colour, eight bits a channel.
 data Rgb = Rgb
   { -- | red
-    red :: Word8,
+    red :: {-# UNPACK #-} !Word8,
     -- | green
-    green :: Word8,
+    green :: {-# UNPACK #-} !Word8,
     -- | blue
-    blue :: Word8
+    blue :: {-# UNPACK #-} !Word8
   }
   deriving stock (Eq, Ord, Show)
 

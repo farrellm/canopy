@@ -1998,6 +1998,9 @@ leaks: both are always read whole from the library, and a write of many prompt m
 each per event alive until `feed` returns (§12.3). For the same reason `SemanticPrompt` unpacks its
 `PromptMark`, so a mark event is one object. A caller that passes the mark on as a value of its own
 rebuilds it, a short-lived 24 bytes, rather than every event a feed keeps carrying the box.
+`Rgb` is strict and unpacked, its three channels one word: it is always built whole from a read, and
+a frame keeps one for every coloured cell and style (§12.3). `Cell` is not: strict, it measured
+72 bytes a cell more (2026-11-12), so its fields stay lazy.
 
 ---
 
@@ -2228,7 +2231,10 @@ A cell's text is decoded straight from its slot (`bytesAtWith utf8Text`), and an
 most are, is the shared empty `Text`. It had been copied into a `ByteString` (a pinned allocation)
 and then into the `Text`, and left as a decode thunk holding that `ByteString` (2026-11-12): plain
 every cell 699 KB from 796, styled 990 KB from 1,150, unicode 529 KB from 773, 24 frames 24.7 MB
-from 28.7; time at parity or better.
+from 28.7; time at parity or better. `Rgb`'s channels are strict and unpacked (§10.7)
+(2026-11-12): styled every cell 902 KB from 990, cursor and colours 65 KB from 88, 24 frames
+22.5 MB from 24.7, the rest unchanged. Making `Cell` strict as well cost 138 KB a full frame, and
+building the colour's `Just` strictly changed nothing; neither was kept.
 
 ---
 
