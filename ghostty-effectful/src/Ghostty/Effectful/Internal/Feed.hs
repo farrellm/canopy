@@ -11,12 +11,12 @@ module Ghostty.Effectful.Internal.Feed
   )
 where
 
-import Control.Exception (onException, throwIO)
+import Control.Exception (onException)
 import Data.ByteString.Unsafe qualified as BSU
 import Foreign.Ptr (castPtr)
 import Ghostty.Effectful.Error (CallSite (..))
 import Ghostty.Effectful.Event (TerminalEvent (..))
-import Ghostty.Effectful.Internal.Callbacks (Answers (..), Resolved (..), takeEvents)
+import Ghostty.Effectful.Internal.Callbacks (Answers (..), takeEvents)
 import Ghostty.Effectful.Internal.Error (expectSuccess)
 import Ghostty.Effectful.Internal.Size (CellPixels (..), GridSize (..), fromExtent)
 import Ghostty.Effectful.Internal.Terminal (Terminal (..), wrote)
@@ -52,10 +52,7 @@ resetTerminal t = do
 -- | The events buffered since the last drain, oldest first, adjacent
 -- 'WritePty's joined; throws the first failure a callback recorded.
 drainEvents :: Terminal s -> IO [TerminalEvent]
-drainEvents t = do
-  Resolved failure events <- takeEvents t.events t.installed
-  whenJust failure throwIO
-  pure events
+drainEvents t = takeEvents t.installed
 
 -- | Write VT to the terminal: one @ghostty_terminal_vt_write@, and one
 -- take. Every callback reads what it needs inside itself (a prompt mark's

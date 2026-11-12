@@ -63,7 +63,7 @@ import Ghostty.Effectful.Color (Rgb)
 import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), ResultCode (..))
 import Ghostty.Effectful.Internal.Callbacks (Framing (..), captureAttach, captureDetach, captureFraming, captureHeld)
 import Ghostty.Effectful.Internal.Convert (emptyRef, enumSite, fromCursorStyle, fromPalette, fromRgb, fromStyle, readPalette, toPoint, unfoldWhileM, unknownEnum, withSize)
-import Ghostty.Effectful.Internal.Error (bytesAt, bytesVia, expectSuccess, newHandle, optionalAtWith, outAt, outVia)
+import Ghostty.Effectful.Internal.Error (bytesAt, bytesVia, expectSuccess, firstTry, newHandle, optionalAtWith, outAt, outVia)
 import Ghostty.Effectful.Internal.Terminal (Terminal (..), forgetRegion)
 import Ghostty.Effectful.Point (Coord (..), Point (..))
 import Ghostty.Effectful.Render.Keys
@@ -505,7 +505,8 @@ data CellSlots = CellSlots
     styleSlot :: !(Ptr GhosttyStyle),
     colorSlot :: !(Ptr GhosttyColorRgb),
     bufferSlot :: !(Ptr GhosttyBuffer),
-    -- | 'graphemeCapacity' bytes, the text's first try
+    -- | 'firstTry' bytes, the text's first try; a longer grapheme cluster
+    -- gets a buffer of its own ('bytesAt')
     graphemeSlot :: !(Ptr Word8)
   }
 
@@ -578,7 +579,7 @@ slotBlock =
         (ghosttyStyleLayout.size, ghosttyStyleLayout.align),
         (ghosttyColorRgbLayout.size, ghosttyColorRgbLayout.align),
         (ghosttyBufferLayout.size, ghosttyBufferLayout.align),
-        (graphemeCapacity, 1)
+        (firstTry, 1)
       ]
     -- each slot's offset, and the end of the one before it
     (offsets, ends) = unzip (go 0 shapes)
@@ -586,11 +587,6 @@ slotBlock =
     go end ((n, a) : rest) = let o = (end + a - 1) `div` a * a in (o, o + n) : go (o + n) rest
     at i = fromMaybe 0 (offsets !!? i)
 {-# NOINLINE slotBlock #-}
-
--- | The capacity of a cell's text's first try, which holds nearly every
--- grapheme cluster; a longer one gets a buffer of its own ('bytesAt').
-graphemeCapacity :: Int
-graphemeCapacity = 64
 
 -- | Copy the cell the cell iterator is on, at column @x@ of row @y@.
 copyCell :: CellSlots -> RenderState s -> Bool -> Word16 -> Word16 -> IO Cell
@@ -663,7 +659,7 @@ cellColor slot cs d = optionalAtWith slot fromRgb ResultNoValue (cellsSite d) (c
 -- | The current cell's text, @GRAPHEMES_UTF8@, through a buffer struct that
 -- reports the length, both in the row's slots.
 cellGraphemes :: CellSlots -> GhosttyRenderStateRowCells -> IO ByteString
-cellGraphemes slots cs = bytesAt slots.graphemeSlot graphemeCapacity (cellsSite d) $ \buf cap -> do
+cellGraphemes slots cs = bytesAt slots.graphemeSlot firstTry (cellsSite d) $ \buf cap -> do
   let bp = slots.bufferSlot
   poke bp GhosttyBuffer {ptr = buf, cap = fromIntegral cap, len = 0}
   r <- cellsGet cs d bp

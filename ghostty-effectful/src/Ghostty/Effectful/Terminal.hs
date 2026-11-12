@@ -81,11 +81,10 @@ withTerminal cfg k =
 -- program's queries are 'Ghostty.Effectful.Event.WritePty' events, for the
 -- caller to write to its PTY.
 --
--- The write stops after each OSC, so that a prompt mark's cursor is read
--- right after the mark, and a title change's title right after the change.
--- If an earlier 'feed', 'resize' or 'reset' threw before returning its
--- events, what it left comes first. Every byte is written even if resolving an event throws; the
--- exception is thrown after the write.
+-- The bytes are one write; each callback reads what it needs (a prompt
+-- mark's cursor, a changed title) inside itself (DESIGN.md D20). Every byte
+-- is written even if a callback fails; the first failure is thrown after
+-- the write.
 feed :: (Ghostty :> es) => Terminal s -> ByteString -> Eff es [TerminalEvent]
 feed t bytes =
   ownedIO "feed" (feedTerminal t bytes)

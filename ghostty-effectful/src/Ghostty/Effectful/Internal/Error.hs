@@ -12,10 +12,10 @@ module Ghostty.Effectful.Internal.Error
     outVia,
     outAt,
     optionalVia,
-    optionalViaWith,
     optionalAtWith,
     bytesVia,
     bytesAt,
+    firstTry,
   )
 where
 
@@ -75,9 +75,8 @@ succeedsUnless refusal site r = case resultCode r of
   ResultSuccess -> pure True
   c | c == refusal -> pure False
   other -> throwIO (resultError site other)
--- Inlined, as 'outVia' is: out of line, a caller in a loop (the feed's
--- @vt_write_until@) builds its call site's thunk on every call, where
--- inlined it is built only on the error path.
+-- Inlined, as 'outVia' is: out of line, a caller builds its call site's
+-- thunk on every call, where inlined it is built only on the error path.
 {-# INLINE succeedsUnless #-}
 
 -- | A value the header says is there, or 'Invariant' with the result that
@@ -116,17 +115,12 @@ outAt out site call = do
 -- | 'outVia' for a call with one documented refusal besides running out of
 -- memory ('succeedsUnless'): 'Nothing' on that refusal.
 optionalVia :: (Storable b) => ResultCode -> CallSite -> (Ptr b -> IO GhosttyResult) -> IO (Maybe b)
-optionalVia = optionalViaWith id
+optionalVia refusal site call = alloca $ \out -> optionalAtWith out id refusal site call
 {-# INLINE optionalVia #-}
 
--- | 'optionalVia', the value converted as it is read. (An 'fmap' over
--- 'optionalVia''s result would build the 'Just' twice, which costs the
--- per-cell colour reads.)
-optionalViaWith :: (Storable b) => (b -> c) -> ResultCode -> CallSite -> (Ptr b -> IO GhosttyResult) -> IO (Maybe c)
-optionalViaWith convert refusal site call = alloca $ \out -> optionalAtWith out convert refusal site call
-{-# INLINE optionalViaWith #-}
-
--- | 'optionalViaWith' into memory the caller provides, as 'outAt' is.
+-- | 'optionalVia' into memory the caller provides, as 'outAt' is, the value
+-- converted as it is read. (An 'fmap' over the result would build the
+-- 'Just' twice, which costs the per-cell colour reads.)
 optionalAtWith :: (Storable b) => Ptr b -> (b -> c) -> ResultCode -> CallSite -> (Ptr b -> IO GhosttyResult) -> IO (Maybe c)
 optionalAtWith out convert refusal site call = do
   r <- call out
@@ -147,7 +141,7 @@ bytesVia :: CallSite -> (Ptr Word8 -> Int -> IO (GhosttyResult, Int)) -> IO Byte
 bytesVia site call = allocaBytes firstTry $ \buf -> bytesAt buf firstTry site call
 {-# INLINE bytesVia #-}
 
--- | The capacity of 'bytesVia''s first try.
+-- | The capacity of 'bytesVia''s first try, which nearly every string fits.
 firstTry :: Int
 firstTry = 64
 

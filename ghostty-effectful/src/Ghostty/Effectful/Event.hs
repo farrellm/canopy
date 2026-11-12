@@ -6,7 +6,8 @@
 --
 -- The binding installs every callback itself. Each only appends to the
 -- terminal's buffer, and anything that needs the terminal (the new title,
--- the cursor at a prompt mark) is read between writes, never inside one.
+-- the cursor at a prompt mark) is read inside the callback, which only
+-- writing to the terminal must not be (DESIGN.md D20).
 module Ghostty.Effectful.Event
   ( -- * Events
     TerminalEvent (..),

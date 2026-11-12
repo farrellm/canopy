@@ -253,11 +253,11 @@ tests =
           testCase "regression 1: a failure mid-chunk still writes the rest" $ do
             (fp, (mid, before)) <- withFresh $ \t -> do
               -- a bell that records a failure, as a sheltered body would
-              fp <- liftIO (mkGhosttyTerminalBellFn (\_ _ -> pushPending t.events t.installed (Failed (toException boom))))
+              fp <- liftIO (mkGhosttyTerminalBellFn (\_ _ -> pushPending t.installed (Failed (toException boom))))
               _ <- liftIO (ghosttyTerminalSet t.handle GhosttyTerminalOptBell (castFunPtrToPtr fp))
               a <- try @ErrorCall (feed t "\a\ESC]2;x\aabc")
               ax <- getT t CursorX
-              liftIO (pushPending t.events t.installed (Failed (toException boom)))
+              liftIO (pushPending t.installed (Failed (toException boom)))
               b <- try @ErrorCall (feed t "de")
               bx <- getT t CursorX
               pure (fp, ((void a, ax), (void b, bx)))
@@ -272,7 +272,7 @@ tests =
               n <- newIORef (0 :: Int)
               fp <- liftIO . mkGhosttyTerminalBellFn $ \_ _ -> do
                 k <- atomicModifyIORef' n (\k -> (k + 1, k))
-                pushPending t.events t.installed (Failed (toException (ErrorCall (if k == 0 then "first" else "second"))))
+                pushPending t.installed (Failed (toException (ErrorCall (if k == 0 then "first" else "second"))))
               _ <- liftIO (ghosttyTerminalSet t.handle GhosttyTerminalOptBell (castFunPtrToPtr fp))
               a <- try @ErrorCall (feed t "\ESC]133;A\a\a\ESC]133;B\a\a\ESC]133;D;0\aabc")
               ax <- getT t CursorX
@@ -289,7 +289,7 @@ tests =
             let bells cBefore = withFresh $ \t -> do
                   n <- newIORef (0 :: Int)
                   let cFails = markFailed t.installed GhosttyOutOfMemory GhosttyTerminalDataInvalid
-                      hsFails = pushPending t.events t.installed (Failed (toException (ErrorCall "haskell")))
+                      hsFails = pushPending t.installed (Failed (toException (ErrorCall "haskell")))
                   fp <- liftIO . mkGhosttyTerminalBellFn $ \_ _ -> do
                     k <- atomicModifyIORef' n (\k -> (k + 1, k))
                     if (k == 0) == cBefore then cFails else hsFails

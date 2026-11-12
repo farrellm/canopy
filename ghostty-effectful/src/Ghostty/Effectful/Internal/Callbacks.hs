@@ -11,8 +11,8 @@
 -- title change, the working directory after its change, a prompt mark's
 -- cursor) is read inside the callback, as the header asks; only writing to
 -- the terminal from one is forbidden (DESIGN.md §4.5, D20). A C enum value
--- the binding does not name is recorded the same way, and becomes
--- 'UnknownEnum' then. Every append goes through 'push', which also counts
+-- the binding does not name is recorded as an 'Unnamed' entry, and becomes
+-- 'UnknownEnum' when drained. Every append goes through 'push', which also counts
 -- it, so a prompt mark C copies knows its place.
 --
 -- @ENQUIRY@ and @XTVERSION@ return a struct by value, which no Haskell
@@ -27,7 +27,6 @@
 module Ghostty.Effectful.Internal.Callbacks
   ( -- * Pending events
     Pending (..),
-    Resolved (..),
     takeEvents,
     pushPending,
     markFailed,
@@ -106,8 +105,7 @@ import Ghostty.FFI.Terminal
 import Ghostty.FFI.Terminal.Callbacks
 import Ghostty.FFI.Types (GhosttyResult (..), GhosttyString (..), ghosttyStringBytes)
 
--- | What a callback appended: an event, or what will make one after the
--- write.
+-- | What a callback appended: an event, or a failure to throw when drained.
 data Pending
   = -- | an event as it is
     Ready TerminalEvent
@@ -140,9 +138,8 @@ data Installed = Installed
     funPtrs :: [FunPtr ()],
     -- | the @USERDATA@ the C callbacks answer from
     userdata :: Ptr GveffUserdata,
-    -- | the @USERDATA@'s count of buffered entries, which 'push' adds to
-    -- and 'takeEvents' resets
-    pushed :: Ptr CSize
+    -- | where the callbacks append, which 'takeEvents' takes and empties
+    sink :: Sink
   }
 
 -- | A terminal's @USERDATA@, @GveffUserdata@ in @include/gveff_terminal.h@:
@@ -151,11 +148,12 @@ data Installed = Installed
 data GveffUserdata
 
 -- | Install every callback but @CLIPBOARD_READ@ on a terminal, appending to
--- the buffer and answering from the answers, with ENQ and XTVERSION
+-- a new buffer and answering from the answers, with ENQ and XTVERSION
 -- answering the given bytes. If one cannot be installed, what was made is
 -- freed and the error thrown.
-installCallbacks :: GhosttyTerminal -> IORef [Pending] -> IORef Answers -> ByteString -> ByteString -> IO Installed
-installCallbacks h events answers enq xtv = do
+installCallbacks :: GhosttyTerminal -> IORef Answers -> ByteString -> ByteString -> IO Installed
+installCallbacks h answers enq xtv = do
+  events <- newIORef []
   made <- newIORef []
   let register :: IO (FunPtr a) -> IO (FunPtr a)
       register = registerFunPtr made
@@ -189,7 +187,7 @@ installCallbacks h events answers enq xtv = do
         setPtr GhosttyTerminalOptRenderHold (castFunPtrToPtr gveffRenderHold)
         wrapped (mkGhosttyTerminalUnknownSequenceFn (onUnknownSequence buf)) GhosttyTerminalOptUnknownSequence
         wrapped (mkGhosttyTerminalResizeWindowFn (onResizeWindow buf)) GhosttyTerminalOptResizeWindow
-  let installed = (\funPtrs -> Installed {funPtrs, userdata = ud, pushed}) <$> readIORef made
+  let installed = (\funPtrs -> Installed {funPtrs, userdata = ud, sink = buf}) <$> readIORef made
   install `onException` (releaseCallbacks =<< installed)
   installed
 
@@ -393,8 +391,8 @@ push sink p = do
 
 -- | Append to the buffer from outside a callback, counted as 'push' counts
 -- (for tests, which stand in for a callback).
-pushPending :: IORef [Pending] -> Installed -> Pending -> IO ()
-pushPending entries i = push Sink {entries, count = i.pushed}
+pushPending :: Installed -> Pending -> IO ()
+pushPending i = push i.sink
 
 -- | Record a prompt mark's failure at this point in the stream, as the C
 -- callback does when a copy or a cursor read fails (for tests, from inside
@@ -405,10 +403,11 @@ markFailed i = gveffMarkFailed i.userdata
 -- | Where the callbacks append: the terminal's buffer, and the
 -- @USERDATA@'s count of what is in it, which C reads for each prompt mark.
 data Sink = Sink
-  { -- | the buffer 'takeEvents' takes
-    entries :: IORef [Pending],
-    -- | the @USERDATA@'s @pushed@
-    count :: Ptr CSize
+  { -- | what the callbacks appended since the last take, newest first
+    entries :: !(IORef [Pending]),
+    -- | the @USERDATA@'s @pushed@, the number of entries, which 'push' adds
+    -- to and 'takeEvents' resets
+    count :: !(Ptr CSize)
   }
 
 -- | @TITLE_CHANGED@ and @PWD_CHANGED@: the new value, read inside the
@@ -565,7 +564,7 @@ onProgramStatus buf _ _ rp = sheltered buf () $ do
           <*> stringText r.message
       push buf (Ready (ProgramStatus report))
 
--- | What a take found: its first failure, and its events, oldest first.
+-- | What a walk found: its first failure, and its events, oldest first.
 data Resolved = Resolved !(Maybe SomeException) ![TerminalEvent]
 
 -- | Take what the callbacks appended since the last take, leaving the
@@ -579,27 +578,26 @@ data Resolved = Resolved !(Maybe SomeException) ![TerminalEvent]
 --
 -- A failure (an exception in a callback, an unnamed enum value, a mark
 -- that could not be copied or a cursor that could not be read) drops the
--- take's events, and the first in the stream is returned; it is not
--- thrown, so every take empties what it took. Nothing appended allocates
--- nothing.
-takeEvents :: IORef [Pending] -> Installed -> IO Resolved
-takeEvents buf i = do
+-- take's events, and the first in the stream is thrown, after the take has
+-- emptied what it took. Nothing appended allocates nothing.
+takeEvents :: Installed -> IO [TerminalEvent]
+takeEvents i = do
   -- A read then a write, not atomicModifyIORef': only the owner thread
   -- touches the buffer (DESIGN.md §4.6), and the callbacks that append to
   -- it run on that thread inside a C call, never between the two.
   hs <- readIORef buf
   -- 'push' counted every entry, so this is the buffer's length, and the
   -- count the marks' are against.
-  j <- fromIntegral <$> peek i.pushed
+  j <- fromIntegral <$> peek i.sink.count
   -- One call, allocating nothing, when there are no marks.
   pending <- toBool <$> gveffMarksPending i.userdata
   if not pending
     then case hs of
-      [] -> pure noEvents
+      [] -> pure []
       _ -> do
         r <- walk nullPtr nullPtr nullPtr (-1) j hs [] Nothing []
         emptied
-        pure $! settle r
+        finish r
     else do
       n <- fromIntegral <$> gveffMarkCount i.userdata
       p <- gveffMarks i.userdata
@@ -613,17 +611,18 @@ takeEvents buf i = do
       -- for the next take, their counts agreeing; one between the two loses
       -- only the marks. Freeing the USERDATA frees what is never taken.
       r <- case resultCode failure of
-        ResultSuccess -> settle <$!> walk p cs bs (n - 1) j hs [] Nothing []
+        ResultSuccess -> walk p cs bs (n - 1) j hs [] Nothing []
         c -> lateFailure p cs bs n j hs c =<< gveffMarksFailureBefore i.userdata
       gveffMarksClear i.userdata
       emptied
-      pure r
+      finish r
   where
-    emptied = writeIORef buf [] >> poke i.pushed 0
+    buf = i.sink.entries
+    emptied = writeIORef buf [] >> poke i.sink.count 0
     -- A failure drops the events.
-    settle = \case
-      r@(Resolved Nothing _) -> r
-      Resolved own _ -> Resolved own []
+    finish = \case
+      Resolved Nothing es -> pure es
+      Resolved (Just x) _ -> throwIO x
     -- C recorded a mark's failure after @at@ entries, and took no mark
     -- after it: the first failure is an earlier one among the entries and
     -- marks before it, if any, or it. Only those are walked; a failure
@@ -631,16 +630,12 @@ takeEvents buf i = do
     lateFailure p cs bs n j hs c at = do
       key <- gveffMarksFailureKey i.userdata
       let k = fromIntegral at
-          late
-            | key == GhosttyTerminalDataInvalid = toException (resultError (CallSite "gveff_semantic_prompt") c)
-            | otherwise = toException (resultError (getSite key) c)
+          site
+            | key == GhosttyTerminalDataInvalid = CallSite "gveff_semantic_prompt"
+            | otherwise = getSite key
+          late = toException (resultError site c)
       Resolved own _ <- walk p cs bs (n - 1) k (drop (j - k) hs) [] Nothing []
       pure $! Resolved (own <|> Just late) []
-
--- | A take that found nothing.
-noEvents :: Resolved
-noEvents = Resolved Nothing []
-{-# NOINLINE noEvents #-}
 
 -- | Place the entries @hs@ (newest first, @j@ of them) and marks @k@ down
 -- to 0 in front of the events after them, @out@, oldest first. Going

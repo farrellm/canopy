@@ -7,7 +7,7 @@
 -- CI gates every benchmark here on allocation (§2.8 step 8). Allocation is
 -- the Haskell side's only: what libghostty allocates is not counted, so a
 -- regression in the gate is one in the binding's own work per write, per
--- OSC stop and per event.
+-- mark and per event.
 module Bench.Ghostty.Effectful.Feed (benchmarks) where
 
 import Data.ByteString qualified as BS

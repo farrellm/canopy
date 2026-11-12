@@ -51,7 +51,6 @@ import Ghostty.Effectful.Error (CallSite (..), ResultCode (..))
 import Ghostty.Effectful.Internal.Callbacks
   ( Answers (..),
     Installed,
-    Pending,
     installCallbacks,
     releaseCallbacks,
   )
@@ -97,8 +96,6 @@ data Terminal s = Terminal
     refs :: IORef (IntMap GhosttyTrackedGridRef),
     -- | the next registry key
     nextRef :: IORef Int,
-    -- | what the callbacks appended since it was last drained, newest first
-    events :: IORef [Pending],
     -- | what the query callbacks answer with
     answers :: IORef Answers,
     -- | the callbacks, freed with the terminal
@@ -183,7 +180,6 @@ openTerminal liveRefs cfg = do
       ghosttyTerminalNew a out (fromExtent cfg.size.cols) (fromExtent cfg.size.rows)
   refs <- newIORef mempty
   nextRef <- newIORef 0
-  events <- newIORef []
   answers <-
     newIORef
       Answers
@@ -195,10 +191,10 @@ openTerminal liveRefs cfg = do
           pixels = noCellPixels
         }
   installed <-
-    installCallbacks handle events answers cfg.enquiry (encodeUtf8 cfg.xtversion)
+    installCallbacks handle answers cfg.enquiry (encodeUtf8 cfg.xtversion)
       `onException` ghosttyTerminalFree handle
   writes <- newIORef 0
-  pure Terminal {handle, refs, nextRef, events, answers, installed, liveRefs, writes}
+  pure Terminal {handle, refs, nextRef, answers, installed, liveRefs, writes}
 
 -- | Count a call that changed the terminal (§4.3: a frame's hyperlinks are
 -- read from the terminal only while it has not changed since).
@@ -214,7 +210,6 @@ forgetRegion t =
     { handle = t.handle,
       refs = t.refs,
       nextRef = t.nextRef,
-      events = t.events,
       answers = t.answers,
       installed = t.installed,
       liveRefs = t.liveRefs,
