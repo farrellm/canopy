@@ -35,7 +35,7 @@ jobs:
     name: Build, test, doctest, haddock
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       # 1: libghostty-vt at the pinned release (§3.1), cached by version. The
       # script fetches its own pinned Zig and the release's two tarballs.
@@ -43,7 +43,7 @@ jobs:
         run: echo "LIBGHOSTTY_VT_VERSION=$(tr -d '[:space:]' < ghostty-vt-ffi/LIBGHOSTTY_VT_VERSION)" >> "$GITHUB_ENV"
 
       - name: Restore libghostty-vt
-        uses: actions/cache@v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: _deps/ghostty/${{ env.LIBGHOSTTY_VT_VERSION }}
           key: libghostty-vt-${{ runner.os }}-${{ env.LIBGHOSTTY_VT_VERSION }}-${{ hashFiles('scripts/build-libghostty.sh') }}
@@ -65,7 +65,7 @@ jobs:
         run: cabal build all $CABAL_FLAGS --dry-run
 
       - name: Restore the cabal store
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         id: cache
         with:
           path: ${{ steps.setup.outputs.cabal-store }}
@@ -81,7 +81,7 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Save the cabal store
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         if: steps.cache.outputs.cache-hit != 'true'
         with:
           path: ${{ steps.setup.outputs.cabal-store }}
@@ -140,7 +140,7 @@ jobs:
       HLINT_VERSION: "3.10"
       ORMOLU_VERSION: "0.8.0.2"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Install hlint and ormolu
         run: |
