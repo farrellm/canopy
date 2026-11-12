@@ -20,8 +20,6 @@ void gveff_userdata_free(GveffUserdata *ud) {
   if (ud == NULL) return;
   gveff_marks_clear(ud);
   free(ud->marks);
-  free(ud->cursors);
-  free(ud->before);
   free(ud->captures);
   free(ud);
 }
@@ -109,20 +107,16 @@ bool gveff_marks_pending(const GveffUserdata *ud) {
   return ud->mark_count != 0 || ud->mark_failure != GHOSTTY_SUCCESS;
 }
 
-GhosttyTerminalSemanticPrompt *gveff_marks(GveffUserdata *ud) { return ud->marks; }
+GveffMark *gveff_marks(GveffUserdata *ud) { return ud->marks; }
 
 size_t gveff_mark_count(const GveffUserdata *ud) { return ud->mark_count; }
-
-uint32_t *gveff_mark_cursors(GveffUserdata *ud) { return ud->cursors; }
-
-size_t *gveff_marks_before(GveffUserdata *ud) { return ud->before; }
 
 size_t *gveff_pushed(GveffUserdata *ud) { return &ud->pushed; }
 
 void gveff_marks_clear(GveffUserdata *ud) {
   for (size_t i = 0; i < ud->mark_count; i++) {
-    free((void *)ud->marks[i].command.ptr);
-    free((void *)ud->marks[i].error.ptr);
+    free((void *)ud->marks[i].prompt.command.ptr);
+    free((void *)ud->marks[i].prompt.error.ptr);
   }
   ud->mark_count = 0;
   ud->mark_failure = GHOSTTY_SUCCESS;
@@ -167,15 +161,9 @@ void gveff_semantic_prompt(GhosttyTerminal terminal, void *userdata,
   if (ud->mark_failure != GHOSTTY_SUCCESS) return;
   if (ud->mark_count == ud->mark_capacity) {
     size_t capacity = ud->mark_capacity == 0 ? 4 : ud->mark_capacity * 2;
-    GhosttyTerminalSemanticPrompt *grown = realloc(ud->marks, capacity * sizeof *grown);
+    GveffMark *grown = realloc(ud->marks, capacity * sizeof *grown);
     if (grown == NULL) goto out_of_memory;
     ud->marks = grown;
-    uint32_t *cursors = realloc(ud->cursors, capacity * sizeof *cursors);
-    if (cursors == NULL) goto out_of_memory;
-    ud->cursors = cursors;
-    size_t *before = realloc(ud->before, capacity * sizeof *before);
-    if (before == NULL) goto out_of_memory;
-    ud->before = before;
     ud->mark_capacity = capacity;
   }
   /* The screen is updated before the callback, so this is the cursor just
@@ -197,9 +185,8 @@ void gveff_semantic_prompt(GhosttyTerminal terminal, void *userdata,
     free((void *)m.command.ptr);
     goto out_of_memory;
   }
-  ud->cursors[ud->mark_count] = (uint32_t)x | (uint32_t)y << 16;
-  ud->before[ud->mark_count] = ud->pushed;
-  ud->marks[ud->mark_count++] = m;
+  ud->marks[ud->mark_count++] =
+      (GveffMark){.prompt = m, .before = ud->pushed, .cursor = (uint32_t)x | (uint32_t)y << 16};
   return;
 out_of_memory:
   gveff_mark_failed(ud, GHOSTTY_OUT_OF_MEMORY, GHOSTTY_TERMINAL_DATA_INVALID);

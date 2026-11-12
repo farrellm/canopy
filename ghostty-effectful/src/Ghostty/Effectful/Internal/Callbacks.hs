@@ -59,7 +59,7 @@ import Foreign.C.Types (CBool (..), CInt (..), CSize (..))
 import Foreign.Marshal.Alloc (free, mallocBytes)
 import Foreign.Marshal.Array (peekArray)
 import Foreign.Marshal.Utils (copyBytes, fromBool, toBool, with)
-import Foreign.Ptr (FunPtr, Ptr, castFunPtr, castFunPtrToPtr, castPtr, freeHaskellFunPtr, nullPtr)
+import Foreign.Ptr (FunPtr, Ptr, castFunPtr, castFunPtrToPtr, castPtr, freeHaskellFunPtr, nullPtr, plusPtr)
 import Foreign.Storable (Storable (..))
 import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), ResultCode (..))
 import Ghostty.Effectful.Event
@@ -146,6 +146,10 @@ data Installed = Installed
 -- ENQ's reply and XTVERSION's name, first, as an array of two strings; then
 -- the render states that a hold captures into.
 data GveffUserdata
+
+-- | A prompt mark C copied, @GveffMark@ in @include/gveff_terminal.h@: the
+-- event, how many Haskell entries came before it, and its cursor.
+data GveffMark
 
 -- | Install every callback but @CLIPBOARD_READ@ on a terminal, appending to
 -- a new buffer and answering from the answers, with ENQ and XTVERSION
@@ -269,20 +273,23 @@ foreign import capi unsafe "gveff_terminal.h gveff_marks_pending"
 
 -- | The marks since the last clear.
 foreign import capi unsafe "gveff_terminal.h gveff_marks"
-  gveffMarks :: Ptr GveffUserdata -> IO (Ptr GhosttyTerminalSemanticPrompt)
+  gveffMarks :: Ptr GveffUserdata -> IO (Ptr GveffMark)
 
 -- | How many marks there are.
 foreign import capi unsafe "gveff_terminal.h gveff_mark_count"
   gveffMarkCount :: Ptr GveffUserdata -> IO CSize
 
--- | Each mark's cursor, parallel to the marks.
-foreign import capi unsafe "gveff_terminal.h gveff_mark_cursors"
-  gveffMarkCursors :: Ptr GveffUserdata -> IO (Ptr Word32)
+-- | @sizeof(GveffMark)@.
+foreign import capi "gveff_terminal.h value GVEFF_MARK_SIZE"
+  gveffMarkSize :: CSize
 
--- | For each mark, how many Haskell entries came before it, parallel to
--- the marks.
-foreign import capi unsafe "gveff_terminal.h gveff_marks_before"
-  gveffMarksBefore :: Ptr GveffUserdata -> IO (Ptr CSize)
+-- | @GveffMark@'s @before@'s offset.
+foreign import capi "gveff_terminal.h value GVEFF_MARK_BEFORE"
+  gveffMarkBefore :: CSize
+
+-- | @GveffMark@'s @cursor@'s offset.
+foreign import capi "gveff_terminal.h value GVEFF_MARK_CURSOR"
+  gveffMarkCursor :: CSize
 
 -- | The @USERDATA@'s count that 'push' adds one to.
 foreign import capi unsafe "gveff_terminal.h gveff_pushed"
@@ -598,14 +605,12 @@ takeEvents i = do
     then case hs of
       [] -> pure []
       _ -> do
-        r <- walk nullPtr nullPtr nullPtr (-1) j hs [] Nothing []
+        r <- walk nullPtr (-1) j hs [] Nothing []
         emptied
         finish r
     else do
       n <- fromIntegral <$> gveffMarkCount i.userdata
       p <- gveffMarks i.userdata
-      cs <- gveffMarkCursors i.userdata
-      bs <- gveffMarksBefore i.userdata
       failure <- gveffMarksFailure i.userdata
       -- No 'finally' (a 'catch#' and its closures on every take): the walk
       -- throws nothing synchronously, since 'markOnto' catches what its
@@ -614,8 +619,8 @@ takeEvents i = do
       -- for the next take, their counts agreeing; one between the two loses
       -- only the marks. Freeing the USERDATA frees what is never taken.
       r <- case resultCode failure of
-        ResultSuccess -> walk p cs bs (n - 1) j hs [] Nothing []
-        c -> lateFailure p cs bs n j hs c =<< gveffMarksFailureBefore i.userdata
+        ResultSuccess -> walk p (n - 1) j hs [] Nothing []
+        c -> lateFailure p n j hs c =<< gveffMarksFailureBefore i.userdata
       gveffMarksClear i.userdata
       emptied
       finish r
@@ -630,14 +635,14 @@ takeEvents i = do
     -- after it: the first failure is an earlier one among the entries and
     -- marks before it, if any, or it. Only those are walked; a failure
     -- drops the events anyway.
-    lateFailure p cs bs n j hs c at = do
+    lateFailure p n j hs c at = do
       key <- gveffMarksFailureKey i.userdata
       let k = fromIntegral at
           site
             | key == GhosttyTerminalDataInvalid = CallSite "gveff_semantic_prompt"
             | otherwise = getSite key
           late = toException (resultError site c)
-      Resolved own _ <- walk p cs bs (n - 1) k (drop (j - k) hs) [] Nothing []
+      Resolved own _ <- walk p (n - 1) k (drop (j - k) hs) [] Nothing []
       pure $! Resolved (own <|> Just late) []
 
 -- | Place the entries @hs@ (newest first, @j@ of them) and marks @k@ down
@@ -646,26 +651,37 @@ takeEvents i = do
 -- counted @j@ entries or more before it. @run@ is the bytes
 -- of the 'WritePty's just placed, oldest first, not yet joined; @own@ the
 -- oldest failure met so far.
-walk :: Ptr GhosttyTerminalSemanticPrompt -> Ptr Word32 -> Ptr CSize -> Int -> Int -> [Pending] -> [ByteString] -> Maybe SomeException -> [TerminalEvent] -> IO Resolved
-walk p cs bs !k !j hs !run !own !out
+walk :: Ptr GveffMark -> Int -> Int -> [Pending] -> [ByteString] -> Maybe SomeException -> [TerminalEvent] -> IO Resolved
+walk p !k !j hs !run !own !out
   | k >= 0 = do
-      before <- fromIntegral <$> peekElemOff bs k
+      let m = p `plusPtr` (k * markSize)
+      before <- fromIntegral <$> peekByteOff @CSize m markBeforeAt
       if before >= j
         then do
-          c <- peekElemOff cs k
-          e <- peekElemOff p k
+          c <- peekByteOff @Word32 m markCursorAt
+          e <- peek @GhosttyTerminalSemanticPrompt (castPtr m)
           let !after = joined run out
-          markOnto c e own after >>= \(Resolved own' out') -> walk p cs bs (k - 1) j hs [] own' out'
+          markOnto c e own after >>= \(Resolved own' out') -> walk p (k - 1) j hs [] own' out'
         else entry
   | otherwise = entry
   where
     entry = case hs of
       [] -> pure $! Resolved own (joined run out)
       h : rest -> case h of
-        Ready (WritePty b) -> walk p cs bs k (j - 1) rest (b : run) own out
-        Ready e -> let !after = joined run out in walk p cs bs k (j - 1) rest [] own (e : after)
-        Unnamed site en v -> walk p cs bs k (j - 1) rest run (Just (toException (unknownEnumError site en v))) out
-        Failed x -> walk p cs bs k (j - 1) rest run (Just x) out
+        Ready (WritePty b) -> walk p k (j - 1) rest (b : run) own out
+        Ready e -> let !after = joined run out in walk p k (j - 1) rest [] own (e : after)
+        Unnamed site en v -> walk p k (j - 1) rest run (Just (toException (unknownEnumError site en v))) out
+        Failed x -> walk p k (j - 1) rest run (Just x) out
+
+-- | @GveffMark@'s size, and its fields' offsets, from the header; the event
+-- is at 0.
+markSize, markBeforeAt, markCursorAt :: Int
+markSize = fromIntegral gveffMarkSize
+markBeforeAt = fromIntegral gveffMarkBefore
+markCursorAt = fromIntegral gveffMarkCursor
+{-# NOINLINE markSize #-}
+{-# NOINLINE markBeforeAt #-}
+{-# NOINLINE markCursorAt #-}
 
 -- | A run of 'WritePty's' bytes, oldest first, as one in front of the
 -- events after it.

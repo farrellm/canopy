@@ -57,6 +57,22 @@ typedef struct {
   bool framing;
 } GveffCapture;
 
+/* A prompt mark C copied: the event, how many entries the Haskell callbacks
+ * had appended before it since the count was last reset, and the cursor read
+ * inside its callback (the column in the low 16 bits, the row in the high
+ * 16). */
+typedef struct {
+  GhosttyTerminalSemanticPrompt prompt;
+  size_t before;
+  uint32_t cursor;
+} GveffMark;
+
+/* GveffMark's size and its fields' offsets, for Haskell, which reads the
+ * marks in place. `prompt` is at 0. */
+#define GVEFF_MARK_SIZE sizeof(GveffMark)
+#define GVEFF_MARK_BEFORE offsetof(GveffMark, before)
+#define GVEFF_MARK_CURSOR offsetof(GveffMark, cursor)
+
 /* A terminal's USERDATA. `answers` is first, so a pointer to the struct is a
  * pointer to the array. */
 typedef struct {
@@ -66,9 +82,7 @@ typedef struct {
   size_t count;
   size_t capacity;
   GhosttyResult failure;
-  GhosttyTerminalSemanticPrompt *marks;
-  uint32_t *cursors;
-  size_t *before;
+  GveffMark *marks;
   size_t mark_count;
   size_t mark_capacity;
   size_t pushed;
@@ -117,16 +131,8 @@ bool gveff_marks_pending(const GveffUserdata *ud);
 
 /* The marks since they were last cleared, oldest first, and their number.
  * They and their strings are owned by the USERDATA until gveff_marks_clear. */
-GhosttyTerminalSemanticPrompt *gveff_marks(GveffUserdata *ud);
+GveffMark *gveff_marks(GveffUserdata *ud);
 size_t gveff_mark_count(const GveffUserdata *ud);
-
-/* Each mark's cursor, read inside its callback: the column in the low 16
- * bits, the row in the high 16. Parallel to gveff_marks. */
-uint32_t *gveff_mark_cursors(GveffUserdata *ud);
-
-/* For each mark, how many entries the Haskell callbacks had appended before
- * it since the count was last reset. Parallel to gveff_marks. */
-size_t *gveff_marks_before(GveffUserdata *ud);
 
 /* Free the marks' strings, empty the list, and forget the failure. */
 void gveff_marks_clear(GveffUserdata *ud);
