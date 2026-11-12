@@ -557,35 +557,32 @@ data SlotBlock = SlotBlock
 -- | The slots laid out in order, each at the offset after the one before,
 -- rounded up to its alignment: from the types' 'Storable' sizes, and the
 -- structs' descriptors, which the layout test checks the instances against.
+-- The raw cell is first, at 0.
 slotBlock :: SlotBlock
-slotBlock =
-  SlotBlock
-    { wideAt = at 1,
-      semanticAt = at 2,
-      flagAt = at 3,
-      styleAt = at 4,
-      colorAt = at 5,
-      bufferAt = at 6,
-      graphemeAt = at 7,
-      size = fromMaybe 0 (viaNonEmpty last ends),
-      align = foldl' max 1 (map snd shapes)
-    }
+slotBlock = SlotBlock {wideAt, semanticAt, flagAt, styleAt, colorAt, bufferAt, graphemeAt, size, align}
   where
-    shapes =
-      [ (sizeOf (0 :: GhosttyCell), alignment (0 :: GhosttyCell)),
-        (sizeOf (GhosttyCellWide 0), alignment (GhosttyCellWide 0)),
-        (sizeOf (GhosttyCellSemanticContent 0), alignment (GhosttyCellSemanticContent 0)),
-        (sizeOf (0 :: CBool), alignment (0 :: CBool)),
-        (ghosttyStyleLayout.size, ghosttyStyleLayout.align),
-        (ghosttyColorRgbLayout.size, ghosttyColorRgbLayout.align),
-        (ghosttyBufferLayout.size, ghosttyBufferLayout.align),
-        (firstTry, 1)
-      ]
-    -- each slot's offset, and the end of the one before it
-    (offsets, ends) = unzip (go 0 shapes)
-    go _ [] = []
-    go end ((n, a) : rest) = let o = (end + a - 1) `div` a * a in (o, o + n) : go (o + n) rest
-    at i = fromMaybe 0 (offsets !!? i)
+    rawEnd = sizeOf (0 :: GhosttyCell)
+    (wideAt, wideEnd) = place rawEnd (sizeOf (GhosttyCellWide 0)) (alignment (GhosttyCellWide 0))
+    (semanticAt, semanticEnd) = place wideEnd (sizeOf (GhosttyCellSemanticContent 0)) (alignment (GhosttyCellSemanticContent 0))
+    (flagAt, flagEnd) = place semanticEnd (sizeOf (0 :: CBool)) (alignment (0 :: CBool))
+    (styleAt, styleEnd) = place flagEnd ghosttyStyleLayout.size ghosttyStyleLayout.align
+    (colorAt, colorEnd) = place styleEnd ghosttyColorRgbLayout.size ghosttyColorRgbLayout.align
+    (bufferAt, bufferEnd) = place colorEnd ghosttyBufferLayout.size ghosttyBufferLayout.align
+    (graphemeAt, size) = place bufferEnd firstTry 1
+    align =
+      foldl'
+        max
+        (alignment (0 :: GhosttyCell))
+        [ alignment (GhosttyCellWide 0),
+          alignment (GhosttyCellSemanticContent 0),
+          alignment (0 :: CBool),
+          ghosttyStyleLayout.align,
+          ghosttyColorRgbLayout.align,
+          ghosttyBufferLayout.align
+        ]
+    -- a slot of size @n@ and alignment @a@ after @end@: its offset, and its
+    -- end
+    place end n a = let o = (end + a - 1) `div` a * a in (o, o + n)
 {-# NOINLINE slotBlock #-}
 
 -- | Copy the cell the cell iterator is on, at column @x@ of row @y@.
