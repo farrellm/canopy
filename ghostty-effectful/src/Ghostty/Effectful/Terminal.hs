@@ -84,7 +84,8 @@ withTerminal cfg k =
 -- The bytes are one write; each callback reads what it needs (a prompt
 -- mark's cursor, a changed title) inside itself (DESIGN.md D20). Every byte
 -- is written even if a callback fails; the first failure is thrown after
--- the write.
+-- the write. If an earlier 'feed', 'resize' or 'reset' threw before
+-- returning its events, what it left comes first.
 feed :: (Ghostty :> es) => Terminal s -> ByteString -> Eff es [TerminalEvent]
 feed t bytes =
   ownedIO "feed" (feedTerminal t bytes)

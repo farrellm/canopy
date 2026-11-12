@@ -147,7 +147,7 @@ GhosttyResult gveff_marks_failure(const GveffUserdata *ud);
 /* The key whose read failed, or GHOSTTY_TERMINAL_DATA_INVALID for a copy. */
 GhosttyTerminalData gveff_marks_failure_key(const GveffUserdata *ud);
 
-/* How many Haskell entries came before the failure, as gveff_marks_before. */
+/* How many Haskell entries came before the failure, as a mark's `before`. */
 size_t gveff_marks_failure_before(const GveffUserdata *ud);
 
 /* Record a mark's failure at this point in the stream, unless one is already

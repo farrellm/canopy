@@ -49,8 +49,8 @@ data TerminalEvent
     WritePty ByteString
   | -- | BEL.
     Bell
-  | -- | The title changed (OSC 0, OSC 2); the title after the write that
-    -- changed it.
+  | -- | The title changed (OSC 0, OSC 2); the title as that change left
+    -- it, read inside its callback (DESIGN.md D20).
     TitleChanged Text
   | -- | The working directory changed (OSC 7, OSC 9, OSC 1337), as the
     -- program sent it: for OSC 7 a @file://@ URI, undecoded. Empty when it

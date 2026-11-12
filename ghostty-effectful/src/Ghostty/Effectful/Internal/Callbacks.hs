@@ -144,7 +144,7 @@ data Installed = Installed
 
 -- | A terminal's @USERDATA@, @GveffUserdata@ in @include/gveff_terminal.h@:
 -- ENQ's reply and XTVERSION's name, first, as an array of two strings; then
--- the render states that a hold captures into.
+-- the render states that a hold captures into, and the prompt marks.
 data GveffUserdata
 
 -- | A prompt mark C copied, @GveffMark@ in @include/gveff_terminal.h@: the
@@ -321,7 +321,8 @@ foreign import capi unsafe "gveff_terminal.h gveff_mark_failed"
 foreign import capi unsafe "gveff_terminal.h gveff_userdata_new"
   gveffUserdataNew :: IO (Ptr GveffUserdata)
 
--- | Free a @USERDATA@ and its capture list, not the answers' bytes.
+-- | Free a @USERDATA@, its capture list and its marks, not the answers'
+-- bytes.
 foreign import capi unsafe "gveff_terminal.h gveff_userdata_free"
   gveffUserdataFree :: Ptr GveffUserdata -> IO ()
 
