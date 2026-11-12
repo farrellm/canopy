@@ -64,7 +64,7 @@ import Foreign.Storable (Storable (..))
 import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), ResultCode (..))
 import Ghostty.Effectful.Event
 import Ghostty.Effectful.Internal.Convert (colorSchemeCode, emptyString, getSite, oscTerminator, stringText, unknownEnumError)
-import Ghostty.Effectful.Internal.Error (expectSuccess, outVia, resultCode, resultError)
+import Ghostty.Effectful.Internal.Error (expectSuccess, optionalVia, orInvariant, resultCode, resultError)
 import Ghostty.Effectful.Internal.Size (CellPixels (..), GridSize (..), extent, fromExtent)
 import Ghostty.Effectful.Point (Point (..))
 import Ghostty.Effectful.Terminal.Keys (ColorScheme (..), DeviceAttributes (..))
@@ -414,8 +414,11 @@ data Sink = Sink
 -- callback, as the header asks (DESIGN.md §4.5, D20).
 onText :: Sink -> (Text -> TerminalEvent) -> GhosttyTerminalData -> GhosttyTerminal -> Ptr () -> IO ()
 onText buf event key h _ = sheltered buf () $ do
-  -- A failed read throws, and 'sheltered' records it.
-  t <- stringText =<< outVia (getSite key) (ghosttyTerminalGet h key . castPtr)
+  -- A failed read throws, and 'sheltered' records it. The value is there
+  -- inside its own change's callback, so its absence is an 'Invariant', as
+  -- for every other required read ('Ghostty.Effectful.Internal.Keys').
+  let site = getSite key
+  t <- stringText =<< orInvariant site ResultNoValue =<< optionalVia ResultNoValue site (ghosttyTerminalGet h key . castPtr)
   push buf (Ready (event t))
 
 -- | Run a callback's body, recording any exception rather than letting it
