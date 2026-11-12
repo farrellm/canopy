@@ -12,7 +12,6 @@ GveffUserdata *gveff_userdata_new(void) {
   if (ud != NULL) {
     ud->failure = GHOSTTY_SUCCESS;
     ud->mark_failure = GHOSTTY_SUCCESS;
-    ud->cursor_failure = GHOSTTY_SUCCESS;
   }
   return ud;
 }
@@ -107,8 +106,7 @@ void gveff_render_hold(GhosttyTerminal terminal, void *userdata, bool held) {
 }
 
 bool gveff_marks_pending(const GveffUserdata *ud) {
-  return ud->mark_count != 0 || ud->mark_failure != GHOSTTY_SUCCESS ||
-         ud->cursor_failure != GHOSTTY_SUCCESS;
+  return ud->mark_count != 0 || ud->mark_failure != GHOSTTY_SUCCESS;
 }
 
 GhosttyTerminalSemanticPrompt *gveff_marks(GveffUserdata *ud) { return ud->marks; }
@@ -121,28 +119,28 @@ size_t *gveff_marks_before(GveffUserdata *ud) { return ud->before; }
 
 size_t *gveff_pushed(GveffUserdata *ud) { return &ud->pushed; }
 
-GhosttyResult gveff_cursor_failure(GveffUserdata *ud) {
-  GhosttyResult r = ud->cursor_failure;
-  ud->cursor_failure = GHOSTTY_SUCCESS;
-  return r;
-}
-
-GhosttyTerminalData gveff_cursor_failure_key(const GveffUserdata *ud) {
-  return ud->cursor_failure_key;
-}
-
 void gveff_marks_clear(GveffUserdata *ud) {
   for (size_t i = 0; i < ud->mark_count; i++) {
     free((void *)ud->marks[i].command.ptr);
     free((void *)ud->marks[i].error.ptr);
   }
   ud->mark_count = 0;
+  ud->mark_failure = GHOSTTY_SUCCESS;
 }
 
-GhosttyResult gveff_marks_failure(GveffUserdata *ud) {
-  GhosttyResult r = ud->mark_failure;
-  ud->mark_failure = GHOSTTY_SUCCESS;
-  return r;
+GhosttyResult gveff_marks_failure(const GveffUserdata *ud) { return ud->mark_failure; }
+
+GhosttyTerminalData gveff_marks_failure_key(const GveffUserdata *ud) {
+  return ud->mark_failure_key;
+}
+
+size_t gveff_marks_failure_before(const GveffUserdata *ud) { return ud->mark_failure_before; }
+
+void gveff_mark_failed(GveffUserdata *ud, GhosttyResult result, GhosttyTerminalData key) {
+  if (ud->mark_failure != GHOSTTY_SUCCESS) return;
+  ud->mark_failure = result;
+  ud->mark_failure_key = key;
+  ud->mark_failure_before = ud->pushed;
 }
 
 /* A copy of a borrowed string, or an empty one; false if it cannot be made. */
@@ -158,23 +156,15 @@ static bool copy_string(GhosttyString *s) {
   return true;
 }
 
-/* One cursor coordinate, or 0 with the first failure recorded. */
-static uint16_t cursor_at(GhosttyTerminal terminal, GveffUserdata *ud, GhosttyTerminalData key) {
-  uint16_t v = 0;
-  GhosttyResult r = ghostty_terminal_get(terminal, key, &v);
-  if (r != GHOSTTY_SUCCESS && ud->cursor_failure == GHOSTTY_SUCCESS) {
-    ud->cursor_failure = r;
-    ud->cursor_failure_key = key;
-  }
-  return r == GHOSTTY_SUCCESS ? v : 0;
-}
-
 /* Copy the event onto the marks, with the cursor and how many Haskell
- * entries came before it. A copy that cannot be made drops the mark and
- * records the failure, which Haskell throws after the write. */
+ * entries came before it. A copy that cannot be made, or a cursor that cannot
+ * be read, drops the mark and records the failure where the stream had it,
+ * which Haskell throws after the write. A failure drops the take's events, so
+ * the marks after it are not kept. */
 void gveff_semantic_prompt(GhosttyTerminal terminal, void *userdata,
                            const GhosttyTerminalSemanticPrompt *event) {
   GveffUserdata *ud = userdata;
+  if (ud->mark_failure != GHOSTTY_SUCCESS) return;
   if (ud->mark_count == ud->mark_capacity) {
     size_t capacity = ud->mark_capacity == 0 ? 4 : ud->mark_capacity * 2;
     GhosttyTerminalSemanticPrompt *grown = realloc(ud->marks, capacity * sizeof *grown);
@@ -188,20 +178,29 @@ void gveff_semantic_prompt(GhosttyTerminal terminal, void *userdata,
     ud->before = before;
     ud->mark_capacity = capacity;
   }
+  /* The screen is updated before the callback, so this is the cursor just
+   * after the mark (D20). */
+  uint16_t x = 0, y = 0;
+  GhosttyResult r = ghostty_terminal_get(terminal, GHOSTTY_TERMINAL_DATA_CURSOR_X, &x);
+  if (r != GHOSTTY_SUCCESS) {
+    gveff_mark_failed(ud, r, GHOSTTY_TERMINAL_DATA_CURSOR_X);
+    return;
+  }
+  r = ghostty_terminal_get(terminal, GHOSTTY_TERMINAL_DATA_CURSOR_Y, &y);
+  if (r != GHOSTTY_SUCCESS) {
+    gveff_mark_failed(ud, r, GHOSTTY_TERMINAL_DATA_CURSOR_Y);
+    return;
+  }
   GhosttyTerminalSemanticPrompt m = *event;
   if (!copy_string(&m.command)) goto out_of_memory;
   if (!copy_string(&m.error)) {
     free((void *)m.command.ptr);
     goto out_of_memory;
   }
-  /* The screen is updated before the callback, so this is the cursor just
-   * after the mark (D20). */
-  uint32_t x = cursor_at(terminal, ud, GHOSTTY_TERMINAL_DATA_CURSOR_X);
-  uint32_t y = cursor_at(terminal, ud, GHOSTTY_TERMINAL_DATA_CURSOR_Y);
-  ud->cursors[ud->mark_count] = x | y << 16;
+  ud->cursors[ud->mark_count] = (uint32_t)x | (uint32_t)y << 16;
   ud->before[ud->mark_count] = ud->pushed;
   ud->marks[ud->mark_count++] = m;
   return;
 out_of_memory:
-  if (ud->mark_failure == GHOSTTY_SUCCESS) ud->mark_failure = GHOSTTY_OUT_OF_MEMORY;
+  gveff_mark_failed(ud, GHOSTTY_OUT_OF_MEMORY, GHOSTTY_TERMINAL_DATA_INVALID);
 }

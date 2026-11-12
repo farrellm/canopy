@@ -295,6 +295,15 @@ Written as changes land, not at release (DESIGN.md §2.9).
   `Storable` helpers that GHC allocated as closures on every call, an `fmap` over the colour
   reads, and an unfold into a vector. All three are fixed: the render path is at parity in time
   and 2–4% under in allocation. The same fix in `getData` takes the feed's prompts to 161 MB.
+- Fixed: a prompt mark C could not copy, or whose cursor it could not read, was thrown after any
+  failure in a Haskell callback, wherever the two were in the stream (introduced with the C prompt
+  marks, D18, before this reached master). C now records the failure's place as it records a mark's,
+  and the drain throws whichever came first, which regression 18 checks. A drain interrupted by an
+  asynchronous exception between emptying the Haskell buffer and clearing the marks left marks whose
+  counts were against the emptied buffer, so the next drain placed them among its own entries; the
+  drain now clears the marks first, so an interruption leaves the two agreeing. No test can time an
+  exception into that gap. The regression-1 tests append through `pushPending`, counted, as every
+  callback does, and the second is named apart from the first.
 - A row's cell slots are one aligned allocation, not eight: 18 KB less a full frame of cells.
 
 ### M0: infrastructure

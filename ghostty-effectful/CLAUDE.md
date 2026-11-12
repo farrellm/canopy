@@ -32,8 +32,8 @@ events instead of callbacks. No export may expose a pointer.
   (`TerminalConfig`, and a `Set…` option named for the callback's row); ENQ and XTVERSION answer in
   C (`cbits/gveff_terminal.c`, with the terminal's `USERDATA` struct), since they return a struct by
   value. `SEMANTIC_PROMPT` is C too (D18): it copies each mark into the `USERDATA`, with the cursor
-  read inside the callback and the count of Haskell entries before it (D20: `push` counts, so every
-  append must go through `push`); `takeEvents` merges the marks into the Haskell buffer by those
+  read inside the callback and the count of Haskell entries before it (D20: `push` counts, and the take counts by it, so every
+  append goes through `push`, a test's through `pushPending`); `takeEvents` merges the marks into the Haskell buffer by those
   counts, newest first, building the returned list in order in the same pass (D21). A title or working directory is read inside its callback too, so `feed` is one
   `vt_write` and one take, with no stops. Any operation whose C call can run a callback returns the events it caused, as `feed`,
   `resize` and `reset` do (`Internal.Feed`); `setT`'s cannot,

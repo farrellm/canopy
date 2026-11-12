@@ -869,13 +869,18 @@ place** (D20): `push` counts the Haskell entries in a field of the `USERDATA` (`
 callback stores that count with each mark, and the drain resets it, so a drain puts each mark after
 exactly the Haskell entries that came before it in the stream. No other call produces marks:
 `resize`, `reset` and `paste` cannot.
-A mark C cannot copy for want of memory is dropped and recorded, and the drain throws `OutOfMemory`
-after the write, as it throws a Haskell callback's exception. A drain with no marks makes one
-`unsafe` call and allocates nothing. Taking the marks is not wrapped in `finally`: converting one
-throws nothing synchronously (a string that cannot be read is kept as the take's failure, and an
-empty one, as nearly all are, is not read), so only
-an asynchronous exception can interrupt it, and then the marks stay on the list for the next drain
-rather than being lost; freeing the `USERDATA` frees any never taken.
+A mark C cannot copy for want of memory, or whose cursor it cannot read, is dropped and recorded
+with the count, as a mark's place is, and C takes no mark after it, since a failure drops the
+drain's events. So the drain throws the first failure in the stream, a Haskell callback's or C's,
+after the write: it walks only what came before C's, and throws C's if nothing there failed. A drain
+with no marks makes one `unsafe` call and allocates nothing. Taking the marks is not wrapped in
+`finally`: converting one throws nothing synchronously (a string that cannot be read is kept as the
+take's failure, and an empty one, as nearly all are, is not read), so only an asynchronous exception
+can interrupt it. The drain clears the marks first and then empties the buffer and zeroes `pushed`,
+so an interruption before the clear leaves both for the next drain, their counts still agreeing, and
+one between the two loses only that drain's marks; freeing the `USERDATA` frees any never taken. The
+drain's count of Haskell entries is `pushed`, not the buffer's length, so every append goes through
+`push`.
 
 ### 4.6 Concurrency
 

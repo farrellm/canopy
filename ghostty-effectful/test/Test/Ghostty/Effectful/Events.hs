@@ -10,15 +10,17 @@ import Control.Exception (ErrorCall (..), MaskingState (..), getMaskingState)
 import Data.ByteString qualified as BS
 import Effectful.Exception (try)
 import Foreign.Ptr (castFunPtrToPtr, freeHaskellFunPtr, nullFunPtr)
+import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..))
 import Ghostty.Effectful.Event
-import Ghostty.Effectful.Internal.Callbacks (Pending (..), registerFunPtr)
+import Ghostty.Effectful.Internal.Callbacks (Pending (..), markFailed, pushPending, registerFunPtr)
 import Ghostty.Effectful.Internal.Size (Extent (..))
 import Ghostty.Effectful.Internal.Terminal (Terminal (..))
 import Ghostty.Effectful.Mode (ModeKey (..))
 import Ghostty.Effectful.Point (Point (..))
 import Ghostty.Effectful.Terminal
-import Ghostty.FFI.Terminal (ghosttyTerminalSet, pattern GhosttyTerminalOptBell)
+import Ghostty.FFI.Terminal (ghosttyTerminalSet, pattern GhosttyTerminalDataInvalid, pattern GhosttyTerminalOptBell)
 import Ghostty.FFI.Terminal.Callbacks (mkGhosttyTerminalBellFn)
+import Ghostty.FFI.Types (pattern GhosttyOutOfMemory)
 import Test.Ghostty.Effectful.Support (config, grid, withConfig, withFresh)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=))
@@ -251,11 +253,11 @@ tests =
           testCase "regression 1: a failure mid-chunk still writes the rest" $ do
             (fp, (mid, before)) <- withFresh $ \t -> do
               -- a bell that records a failure, as a sheltered body would
-              fp <- liftIO (mkGhosttyTerminalBellFn (\_ _ -> modifyIORef' t.events (Failed (toException boom) :)))
+              fp <- liftIO (mkGhosttyTerminalBellFn (\_ _ -> pushPending t.events t.installed (Failed (toException boom))))
               _ <- liftIO (ghosttyTerminalSet t.handle GhosttyTerminalOptBell (castFunPtrToPtr fp))
               a <- try @ErrorCall (feed t "\a\ESC]2;x\aabc")
               ax <- getT t CursorX
-              liftIO (modifyIORef' t.events (Failed (toException boom) :))
+              liftIO (pushPending t.events t.installed (Failed (toException boom)))
               b <- try @ErrorCall (feed t "de")
               bx <- getT t CursorX
               pure (fp, ((void a, ax), (void b, bx)))
@@ -265,12 +267,12 @@ tests =
           -- take places and converts in the same pass: the first failure is
           -- thrown after the whole write, and the marks are taken all the
           -- same, so the next write returns none of them.
-          testCase "regression 1: a failure among marks is the first, and takes the marks" $ do
+          testCase "regression 1, among marks: the first failure is thrown, and the marks are taken" $ do
             (fp, (failed, x, next)) <- withFresh $ \t -> do
               n <- newIORef (0 :: Int)
               fp <- liftIO . mkGhosttyTerminalBellFn $ \_ _ -> do
                 k <- atomicModifyIORef' n (\k -> (k + 1, k))
-                modifyIORef' t.events (Failed (toException (ErrorCall (if k == 0 then "first" else "second"))) :)
+                pushPending t.events t.installed (Failed (toException (ErrorCall (if k == 0 then "first" else "second"))))
               _ <- liftIO (ghosttyTerminalSet t.handle GhosttyTerminalOptBell (castFunPtrToPtr fp))
               a <- try @ErrorCall (feed t "\ESC]133;A\a\a\ESC]133;B\a\a\ESC]133;D;0\aabc")
               ax <- getT t CursorX
@@ -278,6 +280,30 @@ tests =
               pure (fp, (void a, ax, b))
             freeHaskellFunPtr fp
             (failed, x, next) @?= (Left (ErrorCall "first"), 3, []),
+          -- A mark C could not copy, or whose cursor it could not read, was
+          -- thrown after every failure in a Haskell callback, wherever it
+          -- was in the stream. C now records where it was, and takes no mark
+          -- after it. The bell stands in for the mark's failure, which
+          -- cannot be made to happen, by recording it as the C callback does.
+          testCase "regression 18: a mark's failure in C is thrown in stream order" $ do
+            let bells cBefore = withFresh $ \t -> do
+                  n <- newIORef (0 :: Int)
+                  let cFails = markFailed t.installed GhosttyOutOfMemory GhosttyTerminalDataInvalid
+                      hsFails = pushPending t.events t.installed (Failed (toException (ErrorCall "haskell")))
+                  fp <- liftIO . mkGhosttyTerminalBellFn $ \_ _ -> do
+                    k <- atomicModifyIORef' n (\k -> (k + 1, k))
+                    if (k == 0) == cBefore then cFails else hsFails
+                  _ <- liftIO (ghosttyTerminalSet t.handle GhosttyTerminalOptBell (castFunPtrToPtr fp))
+                  a <- try @SomeException (feed t "\ESC]133;A\a\a\ESC]133;B\a\a\ESC]133;D;0\a")
+                  b <- feed t "\ESC]133;A\a"
+                  liftIO (freeHaskellFunPtr fp)
+                  pure (either (Just . show @Text) (const Nothing) a, b)
+            cFirst <- bells True
+            hsFirst <- bells False
+            (cFirst, hsFirst)
+              @?= ( (Just (show (OutOfMemory (CallSite "gveff_semantic_prompt"))), [mark (PromptStart PrimaryPrompt) 0 0]),
+                    (Just (show (ErrorCall "haskell")), [mark (PromptStart PrimaryPrompt) 0 0])
+                  ),
           -- Replies were joined only within one stop, so an OSC between two
           -- replies split one reply into two writes.
           testCase "regression 2: a reply split by an OSC stop is one write" $ do

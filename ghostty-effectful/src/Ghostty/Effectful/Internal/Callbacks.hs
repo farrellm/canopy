@@ -29,6 +29,8 @@ module Ghostty.Effectful.Internal.Callbacks
     Pending (..),
     Resolved (..),
     takeEvents,
+    pushPending,
+    markFailed,
 
     -- * Answers
     Answers (..),
@@ -78,6 +80,7 @@ import Ghostty.FFI.Terminal
     GhosttyTerminalOption,
     ghosttyTerminalGet,
     ghosttyTerminalSet,
+    pattern GhosttyTerminalDataInvalid,
     pattern GhosttyTerminalDataPwd,
     pattern GhosttyTerminalDataTitle,
     pattern GhosttyTerminalOptBell,
@@ -262,7 +265,7 @@ foreign import capi "gveff_terminal.h &gveff_render_hold"
 foreign import capi "gveff_terminal.h &gveff_semantic_prompt"
   gveffSemanticPrompt :: GhosttyTerminalSemanticPromptFn
 
--- | Whether there are marks, or a failed copy, to take.
+-- | Whether there are marks, or a mark's failure, to take.
 foreign import capi unsafe "gveff_terminal.h gveff_marks_pending"
   gveffMarksPending :: Ptr GveffUserdata -> IO CBool
 
@@ -287,23 +290,26 @@ foreign import capi unsafe "gveff_terminal.h gveff_marks_before"
 foreign import capi unsafe "gveff_terminal.h gveff_pushed"
   gveffPushed :: Ptr GveffUserdata -> IO (Ptr CSize)
 
--- | The first cursor read that failed since the last call, or success; and
--- reset it.
-foreign import capi unsafe "gveff_terminal.h gveff_cursor_failure"
-  gveffCursorFailure :: Ptr GveffUserdata -> IO GhosttyResult
-
--- | The key of the last cursor read that failed.
-foreign import capi unsafe "gveff_terminal.h gveff_cursor_failure_key"
-  gveffCursorFailureKey :: Ptr GveffUserdata -> IO GhosttyTerminalData
-
--- | Free the marks' strings and empty the list.
+-- | Free the marks' strings, empty the list, and forget the failure.
 foreign import capi unsafe "gveff_terminal.h gveff_marks_clear"
   gveffMarksClear :: Ptr GveffUserdata -> IO ()
 
--- | The first mark that could not be copied since the last call, or
--- success; and reset it.
+-- | The first mark since the clear that could not be copied, or whose
+-- cursor could not be read, or success. No mark is taken after it.
 foreign import capi unsafe "gveff_terminal.h gveff_marks_failure"
   gveffMarksFailure :: Ptr GveffUserdata -> IO GhosttyResult
+
+-- | The key whose read failed, or @INVALID@ for a copy.
+foreign import capi unsafe "gveff_terminal.h gveff_marks_failure_key"
+  gveffMarksFailureKey :: Ptr GveffUserdata -> IO GhosttyTerminalData
+
+-- | How many Haskell entries came before the failure.
+foreign import capi unsafe "gveff_terminal.h gveff_marks_failure_before"
+  gveffMarksFailureBefore :: Ptr GveffUserdata -> IO CSize
+
+-- | Record a mark's failure here in the stream, unless one is recorded.
+foreign import capi unsafe "gveff_terminal.h gveff_mark_failed"
+  gveffMarkFailed :: Ptr GveffUserdata -> GhosttyResult -> GhosttyTerminalData -> IO ()
 
 -- | A zeroed @USERDATA@, or null. @unsafe@, as is every call below: none
 -- calls back into Haskell, and each is a few loads and stores.
@@ -384,6 +390,17 @@ push sink p = do
   modifyIORef' sink.entries (p :)
   n <- peek sink.count
   poke sink.count (n + 1)
+
+-- | Append to the buffer from outside a callback, counted as 'push' counts
+-- (for tests, which stand in for a callback).
+pushPending :: IORef [Pending] -> Installed -> Pending -> IO ()
+pushPending entries i = push Sink {entries, count = i.pushed}
+
+-- | Record a prompt mark's failure at this point in the stream, as the C
+-- callback does when a copy or a cursor read fails (for tests, from inside
+-- a callback, since neither can be made to fail).
+markFailed :: Installed -> GhosttyResult -> GhosttyTerminalData -> IO ()
+markFailed i = gveffMarkFailed i.userdata
 
 -- | Where the callbacks append: the terminal's buffer, and the
 -- @USERDATA@'s count of what is in it, which C reads for each prompt mark.
@@ -571,41 +588,54 @@ takeEvents buf i = do
   -- touches the buffer (DESIGN.md §4.6), and the callbacks that append to
   -- it run on that thread inside a C call, never between the two.
   hs <- readIORef buf
-  writeIORef buf []
-  poke i.pushed 0
+  -- 'push' counted every entry, so this is the buffer's length, and the
+  -- count the marks' are against.
+  j <- fromIntegral <$> peek i.pushed
   -- One call, allocating nothing, when there are no marks.
   pending <- toBool <$> gveffMarksPending i.userdata
   if not pending
     then case hs of
       [] -> pure noEvents
-      _ -> settle <$!> walk nullPtr nullPtr nullPtr (-1) (length hs) hs [] Nothing []
+      _ -> do
+        r <- walk nullPtr nullPtr nullPtr (-1) j hs [] Nothing []
+        emptied
+        pure $! settle r
     else do
       n <- fromIntegral <$> gveffMarkCount i.userdata
       p <- gveffMarks i.userdata
       cs <- gveffMarkCursors i.userdata
       bs <- gveffMarksBefore i.userdata
+      failure <- gveffMarksFailure i.userdata
       -- No 'finally' (a 'catch#' and its closures on every take): the walk
       -- throws nothing synchronously, since 'markOnto' catches what its
-      -- string reads throw. An asynchronous exception before the clear
-      -- leaves the marks for the next take, and freeing the USERDATA frees
-      -- what is never taken.
-      Resolved own out <- walk p cs bs (n - 1) (length hs) hs [] Nothing []
+      -- string reads throw. The marks are cleared before the buffer is
+      -- emptied, so an asynchronous exception before the clear leaves both
+      -- for the next take, their counts agreeing; one between the two loses
+      -- only the marks. Freeing the USERDATA frees what is never taken.
+      r <- case resultCode failure of
+        ResultSuccess -> settle <$!> walk p cs bs (n - 1) j hs [] Nothing []
+        c -> lateFailure p cs bs n j hs c =<< gveffMarksFailureBefore i.userdata
       gveffMarksClear i.userdata
-      copied <- gveffMarksFailure i.userdata
-      cursor <- gveffCursorFailure i.userdata
-      case (resultCode copied, resultCode cursor) of
-        (ResultSuccess, ResultSuccess) -> pure $! settle (Resolved own out)
-        (c, rc) -> do
-          key <- gveffCursorFailureKey i.userdata
-          let late
-                | c /= ResultSuccess = toException (resultError (CallSite "gveff_semantic_prompt") c)
-                | otherwise = toException (resultError (getSite key) rc)
-          pure $! settle (Resolved (own <|> Just late) out)
+      emptied
+      pure r
   where
+    emptied = writeIORef buf [] >> poke i.pushed 0
     -- A failure drops the events.
     settle = \case
       r@(Resolved Nothing _) -> r
       Resolved own _ -> Resolved own []
+    -- C recorded a mark's failure after @at@ entries, and took no mark
+    -- after it: the first failure is an earlier one among the entries and
+    -- marks before it, if any, or it. Only those are walked; a failure
+    -- drops the events anyway.
+    lateFailure p cs bs n j hs c at = do
+      key <- gveffMarksFailureKey i.userdata
+      let k = fromIntegral at
+          late
+            | key == GhosttyTerminalDataInvalid = toException (resultError (CallSite "gveff_semantic_prompt") c)
+            | otherwise = toException (resultError (getSite key) c)
+      Resolved own _ <- walk p cs bs (n - 1) k (drop (j - k) hs) [] Nothing []
+      pure $! Resolved (own <|> Just late) []
 
 -- | A take that found nothing.
 noEvents :: Resolved
@@ -615,8 +645,7 @@ noEvents = Resolved Nothing []
 -- | Place the entries @hs@ (newest first, @j@ of them) and marks @k@ down
 -- to 0 in front of the events after them, @out@, oldest first. Going
 -- backwards through the stream, a mark is the newest thing left if C
--- counted @j@ entries or more before it; one counted past the buffer's
--- end (an interrupted take's) is newer than all of it. @run@ is the bytes
+-- counted @j@ entries or more before it. @run@ is the bytes
 -- of the 'WritePty's just placed, oldest first, not yet joined; @own@ the
 -- oldest failure met so far.
 walk :: Ptr GhosttyTerminalSemanticPrompt -> Ptr Word32 -> Ptr CSize -> Int -> Int -> [Pending] -> [ByteString] -> Maybe SomeException -> [TerminalEvent] -> IO Resolved

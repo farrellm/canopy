@@ -18,8 +18,7 @@
  * SEMANTIC_PROMPT is C so that a mark costs no Haskell call: a call from C
  * into Haskell makes a Haskell thread, which was most of a mark's cost
  * (DESIGN.md §12.3). It copies the event, its strings too, onto `marks`,
- * which Haskell takes after the write returns. A copy that cannot be made is
- * recorded in `mark_failure`. It also reads the cursor inside the callback
+ * which Haskell takes after the write returns. It also reads the cursor inside the callback
  * (D20): the header says the terminal has already updated its screen when
  * the callback runs, and asks for the title and working directory to be read
  * inside theirs, so a read inside a callback is the library's own pattern;
@@ -27,6 +26,12 @@
  * entries the Haskell callbacks had appended before it (`pushed`, which
  * Haskell's `push` counts and its drain resets), so a drain can put each mark
  * where the stream had it. So a write needs no stops: it is one vt_write.
+ * A copy that cannot be made, or a cursor that cannot be read, is recorded in
+ * `mark_failure` with the same count, so a drain knows which failure came
+ * first; the marks after it are not kept, since a failure drops the drain's
+ * events. Haskell's drain empties its buffer and zeroes `pushed` only after
+ * clearing the marks, so a drain an exception interrupts leaves both for the
+ * next, their counts still agreeing.
  *
  * Every function here is called between writes, except the callbacks; nothing
  * here locks: libghostty-vt's handles are used from one thread (§4.6).
@@ -66,10 +71,10 @@ typedef struct {
   size_t *before;
   size_t mark_count;
   size_t mark_capacity;
-  GhosttyResult mark_failure;
   size_t pushed;
-  GhosttyResult cursor_failure;
-  GhosttyTerminalData cursor_failure_key;
+  GhosttyResult mark_failure;
+  GhosttyTerminalData mark_failure_key;
+  size_t mark_failure_before;
 } GveffUserdata;
 
 /* A zeroed USERDATA, or NULL if it cannot be allocated. */
@@ -123,22 +128,25 @@ uint32_t *gveff_mark_cursors(GveffUserdata *ud);
  * it since the count was last reset. Parallel to gveff_marks. */
 size_t *gveff_marks_before(GveffUserdata *ud);
 
-/* Free the marks' strings and empty the list. */
+/* Free the marks' strings, empty the list, and forget the failure. */
 void gveff_marks_clear(GveffUserdata *ud);
 
 /* The count Haskell's `push` adds one to, and its drain resets. */
 size_t *gveff_pushed(GveffUserdata *ud);
 
-/* The first cursor read that failed since this was last called, or success;
- * and reset it. */
-GhosttyResult gveff_cursor_failure(GveffUserdata *ud);
+/* The first mark since the clear that could not be copied, or whose cursor
+ * could not be read, or GHOSTTY_SUCCESS. No mark is taken after it. */
+GhosttyResult gveff_marks_failure(const GveffUserdata *ud);
 
-/* The key that failed read, which a reset leaves. */
-GhosttyTerminalData gveff_cursor_failure_key(const GveffUserdata *ud);
+/* The key whose read failed, or GHOSTTY_TERMINAL_DATA_INVALID for a copy. */
+GhosttyTerminalData gveff_marks_failure_key(const GveffUserdata *ud);
 
-/* The first mark that could not be copied since this was last called, or
- * GHOSTTY_SUCCESS; and reset it. */
-GhosttyResult gveff_marks_failure(GveffUserdata *ud);
+/* How many Haskell entries came before the failure, as gveff_marks_before. */
+size_t gveff_marks_failure_before(const GveffUserdata *ud);
+
+/* Record a mark's failure at this point in the stream, unless one is already
+ * recorded: what the callback does when a copy or a cursor read fails. */
+void gveff_mark_failed(GveffUserdata *ud, GhosttyResult result, GhosttyTerminalData key);
 
 /* The callbacks. */
 GhosttyString gveff_enquiry(GhosttyTerminal terminal, void *userdata);
