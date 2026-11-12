@@ -10,6 +10,7 @@ module Ghostty.Effectful.Internal.Convert
     unknownEnumError,
     enumName,
     enumSite,
+    getSite,
     oscTerminator,
 
     -- * Strings and flags
@@ -114,6 +115,7 @@ import Ghostty.FFI.Style
     pattern GhosttyStyleFlagOverline,
     pattern GhosttyStyleFlagStrikethrough,
   )
+import Ghostty.FFI.Terminal (GhosttyTerminalData (..), ghosttyTerminalDataEnum)
 import Ghostty.FFI.Types
   ( GhosttyCursorStyle,
     GhosttyResult,
@@ -152,6 +154,10 @@ oscTerminator = \case
 -- @ghostty_terminal_get GHOSTTY_TERMINAL_DATA_COLS@.
 enumSite :: Text -> CEnum -> CInt -> CallSite
 enumSite call e n = CallSite (call <> " " <> enumName e n)
+
+-- | The call site of @ghostty_terminal_get@ with the key.
+getSite :: GhosttyTerminalData -> CallSite
+getSite k = enumSite "ghostty_terminal_get" ghosttyTerminalDataEnum (coerce k)
 
 -- | A borrowed string, copied out and decoded leniently.
 stringText :: GhosttyString -> IO Text

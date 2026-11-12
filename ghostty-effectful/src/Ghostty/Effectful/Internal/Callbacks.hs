@@ -55,15 +55,15 @@ import Data.ByteString qualified as BS
 import Data.ByteString.Unsafe qualified as BSU
 import Data.Vector qualified as V
 import Foreign.C.Types (CBool (..), CInt (..), CSize (..))
-import Foreign.Marshal.Alloc (alloca, free, mallocBytes)
+import Foreign.Marshal.Alloc (free, mallocBytes)
 import Foreign.Marshal.Array (peekArray)
 import Foreign.Marshal.Utils (copyBytes, fromBool, toBool, with)
 import Foreign.Ptr (FunPtr, Ptr, castFunPtr, castFunPtrToPtr, castPtr, freeHaskellFunPtr, nullPtr)
 import Foreign.Storable (Storable (..))
 import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), ResultCode (..))
 import Ghostty.Effectful.Event
-import Ghostty.Effectful.Internal.Convert (colorSchemeCode, emptyString, enumSite, oscTerminator, stringText, unknownEnumError)
-import Ghostty.Effectful.Internal.Error (expectSuccess, resultCode, resultError)
+import Ghostty.Effectful.Internal.Convert (colorSchemeCode, emptyString, getSite, oscTerminator, stringText, unknownEnumError)
+import Ghostty.Effectful.Internal.Error (expectSuccess, outVia, resultCode, resultError)
 import Ghostty.Effectful.Internal.Size (CellPixels (..), GridSize (..), extent, fromExtent)
 import Ghostty.Effectful.Point (Point (..))
 import Ghostty.Effectful.Terminal.Keys (ColorScheme (..), DeviceAttributes (..))
@@ -76,7 +76,6 @@ import Ghostty.FFI.Terminal
   ( GhosttyTerminal (..),
     GhosttyTerminalData (..),
     GhosttyTerminalOption,
-    ghosttyTerminalDataEnum,
     ghosttyTerminalGet,
     ghosttyTerminalSet,
     pattern GhosttyTerminalDataPwd,
@@ -399,14 +398,9 @@ data Sink = Sink
 -- callback, as the header asks (DESIGN.md §4.5, D20).
 onText :: Sink -> (Text -> TerminalEvent) -> GhosttyTerminalData -> GhosttyTerminal -> Ptr () -> IO ()
 onText buf event key h _ = sheltered buf () $ do
-  r <- alloca $ \sp -> do
-    res <- ghosttyTerminalGet h key (castPtr sp)
-    case resultCode res of
-      ResultSuccess -> Right <$> (stringText =<< peek sp)
-      c -> pure (Left c)
-  case r of
-    Right t -> push buf (Ready (event t))
-    Left c -> push buf (Failed (toException (readError (enumSite "ghostty_terminal_get" ghosttyTerminalDataEnum (coerce key)) c)))
+  -- A failed read throws, and 'sheltered' records it.
+  t <- stringText =<< outVia (getSite key) (ghosttyTerminalGet h key . castPtr)
+  push buf (Ready (event t))
 
 -- | Run a callback's body, recording any exception rather than letting it
 -- into C, and returning the given value then.
@@ -605,7 +599,7 @@ takeEvents buf i = do
           key <- gveffCursorFailureKey i.userdata
           let late
                 | c /= ResultSuccess = toException (resultError (CallSite "gveff_semantic_prompt") c)
-                | otherwise = toException (readError (enumSite "ghostty_terminal_get" ghosttyTerminalDataEnum (coerce key)) rc)
+                | otherwise = toException (resultError (getSite key) rc)
           pure $! settle (Resolved (own <|> Just late) out)
   where
     -- A failure drops the events.
@@ -654,13 +648,6 @@ joined run out = case run of
   [b] -> WritePty b : out
   _ -> (WritePty $! BS.concat run) : out
 {-# INLINE joined #-}
-
--- | A key read that must have a value: NO_VALUE is the library's broken
--- promise, anything else its own error.
-readError :: CallSite -> ResultCode -> GhosttyError
-readError site c
-  | c == ResultNoValue = Invariant site c
-  | otherwise = resultError site c
 
 -- | @SEMANTIC_PROMPT@'s event, copied by the C callback, with the cursor C
 -- read inside it (the column in the low 16 bits, the row in the high),

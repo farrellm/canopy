@@ -26,7 +26,7 @@ import Foreign.Storable (Storable (..))
 import Ghostty.Effectful.Color (Palette, paletteColors)
 import Ghostty.Effectful.Error (CallSite, ResultCode (..))
 import Ghostty.Effectful.Internal.Callbacks (Answers (..), captureRelease, setEnquiryAnswer, setXtversionAnswer)
-import Ghostty.Effectful.Internal.Convert (enumSite, flagBits, fromKittyFlagBits, fromRgb, fromStyle, modeCode, readPalette, stringText, toCursorStyle, toRgb, unknownEnum, withSize, withString)
+import Ghostty.Effectful.Internal.Convert (enumSite, flagBits, fromKittyFlagBits, fromRgb, fromStyle, getSite, modeCode, readPalette, stringText, toCursorStyle, toRgb, unknownEnum, withSize, withString)
 import Ghostty.Effectful.Internal.Error (expectSuccess, optionalVia, orInvariant)
 import Ghostty.Effectful.Internal.Terminal (Terminal (..), wrote)
 import Ghostty.Effectful.Mode (ModeKey (..))
@@ -191,10 +191,6 @@ getData h key = case key of
 -- whichever key it read (about 400 bytes a read, which the cursor reads
 -- after every prompt mark would pay).
 data KeyRead = KeyRead GhosttyTerminal GhosttyTerminalData CallSite
-
--- | The call site of @ghostty_terminal_get@ with the key.
-getSite :: GhosttyTerminalData -> CallSite
-getSite k = enumSite "ghostty_terminal_get" ghosttyTerminalDataEnum (coerce k)
 
 -- | The read into memory set up by the caller; 'Nothing' on NO_VALUE.
 fetchWith :: (Storable b) => KeyRead -> (Ptr b -> IO ()) -> IO (Maybe b)

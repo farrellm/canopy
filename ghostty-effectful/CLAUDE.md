@@ -36,7 +36,7 @@ events instead of callbacks. No export may expose a pointer.
   append must go through `push`); `takeEvents` merges the marks into the Haskell buffer by those
   counts, newest first, building the returned list in order in the same pass (D21). A title or working directory is read inside its callback too, so `feed` is one
   `vt_write` and one take, with no stops. Any operation whose C call can run a callback returns the events it caused, as `feed`,
-  `resize` and `reset` do (`Internal.Feed`, which can read the terminal's keys); `setT`'s cannot,
+  `resize` and `reset` do (`Internal.Feed`); `setT`'s cannot,
   and a test holds that. Every struct a callback receives is frozen (no `size`), so it is read whole.
 - **Render states and frames** (§4.3, `Internal.Render`, public `Render`): a render state is its
   own rank-2 region inside its terminal's; a frame (`withFrame`, tag `f`) is shorter still, and what
