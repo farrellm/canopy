@@ -305,6 +305,9 @@ Written as changes land, not at release (DESIGN.md §2.9).
   exception into that gap. The regression-1 tests append through `pushPending`, counted, as every
   callback does, and the second is named apart from the first.
 - A row's cell slots are one aligned allocation, not eight: 18 KB less a full frame of cells.
+- Renovate keeps the CI's GitHub Actions current (`.github/renovate.json`, DESIGN.md §2.8, D22):
+  digest-pinned, one grouped PR a week, minor, patch and digest updates merged once CI passes.
+  Toolchain versions, Hackage bounds and the libghostty-vt, tree-sitter and Zig pins stay manual.
 
 ### M0: infrastructure
 

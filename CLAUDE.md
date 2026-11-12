@@ -24,6 +24,7 @@ two disagree, the design is the intent and the code is behind. Conventions are c
 | `scripts/` | `build-libghostty.sh`, `vendor-tree-sitter.sh`, `gen-ts-shims.py`, `gen-ghostty-ffi.py`, `check-ghostty-coverage.py`, `check-ghostty-signatures.py`, `check-ghostty-safety.py`, `check-common-stanzas.sh`, `check-haddock.py`, `check-layout-rows.py`, `check-allocation.py`. |
 | `_deps/` | Gitignored output of `build-libghostty.sh`: the Zig, the release tarballs unpacked, and the built library. |
 | `.github/workflows/ci.yml` | CI, §2.8 steps 1–8. |
+| `.github/renovate.json` | Renovate, for the workflow's actions only (§2.8, D22). |
 
 ## Rules
 
