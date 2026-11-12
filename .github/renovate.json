@@ -1,0 +1,19 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "DESIGN.md §2.8, D22: Renovate moves the CI's actions and nothing else.",
+  "extends": ["config:recommended", "helpers:pinGitHubActionDigests", ":semanticCommitsDisabled"],
+  "enabledManagers": ["github-actions"],
+  "schedule": ["before 6am on monday"],
+  "packageRules": [
+    {
+      "groupName": "github actions",
+      "matchManagers": ["github-actions"]
+    },
+    {
+      "description": "Digest-pinned and gated by CI; majors still wait for review",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["minor", "patch", "digest", "pinDigest"],
+      "automerge": true
+    }
+  ]
+}

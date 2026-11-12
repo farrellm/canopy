@@ -327,6 +327,15 @@ The rules, by module name across all packages:
 A nightly job runs `canopy-e2e` against real REPLs and language servers (§11.5), which a CI runner
 cannot be relied on to have at pinned versions.
 
+**Renovate moves the actions and nothing else** (`.github/renovate.json`, D22). The workflow's
+actions are pinned to digests and grouped into one PR a week. Minor, patch and digest updates merge
+once CI passes; a major waits for review. Everything else is a decision, not an update: the
+toolchain versions in the workflow's `env` follow cassini (D10), and an ormolu or hlint bump changes
+what passes. Hackage dependencies already resolve to the newest version their `^>=` bounds admit,
+since nothing freezes the plan, so only the breaking majors are left to propose. The libghostty-vt,
+tree-sitter and Zig pins move only with the regeneration they require (§3.1, §5A), which a hosted
+Renovate cannot run.
+
 ### 2.9 Documentation surfaces
 
 cassini's rule 1, minus its research corpus: `DESIGN.md` for decisions, each directory's `CLAUDE.md`
@@ -2359,6 +2368,7 @@ input; a per-session toggle hides them.
 | D19 | The loop over `vt_write_until`'s OSC stops is C (`gveff_write`): it reads each mark's cursor, and returns to Haskell only when a Haskell callback appended, 256 marks wait, or the input ends, sequencing the marks around the Haskell buffer; since pausing the thread for a `safe` call per stop was the largest cost left. Superseded by D20, which needs no stops | §4.5, §12.3 |
 | D20 | Callbacks read what they need inside themselves (a mark's cursor in C, a title or working directory in Haskell), as the header asks for the title and working directory, and each mark records how many Haskell entries came before it; so `feed` is `vt_write` with no stops. Each `vt_write_until` call per OSC cost the parser its setup. Its 64 KiB slices are superseded by D21 | §4.5, §12.3 |
 | D21 | `feed` is one `vt_write` and one take: the take walks the Haskell buffer and the marks newest first and builds the returned list in order, `WritePty` runs joined, rather than building it reversed and copying it in order; since a slice's take would leave a list to append | §4.5, §12.3 |
+| D22 | Renovate updates the CI's GitHub Actions only (digest-pinned, grouped, minor/patch/digest automerged); toolchain versions, Hackage bounds and the C pins move by hand | §2.8 |
 
 ### 15.2 Deferred
 
