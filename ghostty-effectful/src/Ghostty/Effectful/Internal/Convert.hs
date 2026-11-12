@@ -15,6 +15,7 @@ module Ghostty.Effectful.Internal.Convert
 
     -- * Strings and flags
     stringText,
+    utf8Text,
     withString,
     emptyString,
     flagBits,
@@ -162,6 +163,18 @@ getSite k = enumSite "ghostty_terminal_get" ghosttyTerminalDataEnum (coerce k)
 -- | A borrowed string, copied out and decoded leniently.
 stringText :: GhosttyString -> IO Text
 stringText s = decodeUtf8 <$> ghosttyStringBytes s
+
+-- | Borrowed UTF-8 bytes decoded now, so the memory can be reused when this
+-- returns: one copy, into the 'Text', and none for no bytes. (Copying into
+-- a 'ByteString' first is a pinned allocation and a second copy, and a
+-- lazy decode would keep it.)
+utf8Text :: Ptr Word8 -> Int -> IO Text
+utf8Text p n
+  | n <= 0 = pure mempty
+  | otherwise = do
+      bs <- BSU.unsafePackCStringLen (castPtr p, n)
+      pure $! decodeUtf8 bs
+{-# INLINE utf8Text #-}
 
 -- | Run with a borrowed 'GhosttyString' of the bytes, alive until the
 -- action returns. Empty bytes are 'emptyString'.

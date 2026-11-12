@@ -2224,6 +2224,12 @@ entered a thunk per slot and the frame was 5–10% slower; inlined, GHC captured
 in the per-cell closures, 9 KB more a frame. Time is at parity or better (plain 0.42–0.48 ms
 against 0.44–0.53 over ten alternated rounds).
 
+A cell's text is decoded straight from its slot (`bytesAtWith utf8Text`), and an empty one, as
+most are, is the shared empty `Text`. It had been copied into a `ByteString` (a pinned allocation)
+and then into the `Text`, and left as a decode thunk holding that `ByteString` (2026-11-12): plain
+every cell 699 KB from 796, styled 990 KB from 1,150, unicode 529 KB from 773, 24 frames 24.7 MB
+from 28.7; time at parity or better.
+
 ---
 
 ## 13. Milestones

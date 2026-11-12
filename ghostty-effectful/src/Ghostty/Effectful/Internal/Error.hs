@@ -15,6 +15,7 @@ module Ghostty.Effectful.Internal.Error
     optionalAtWith,
     bytesVia,
     bytesAt,
+    bytesAtWith,
     firstTry,
   )
 where
@@ -148,14 +149,21 @@ firstTry = 64
 -- | 'bytesVia', its first try into a buffer of the given capacity the
 -- caller provides, as 'outAt''s is.
 bytesAt :: Ptr Word8 -> Int -> CallSite -> (Ptr Word8 -> Int -> IO (GhosttyResult, Int)) -> IO ByteString
-bytesAt buf0 cap0 site call = attempt buf0 cap0 >>= either (retry . max 1) pure
+bytesAt = bytesAtWith (\buf n -> BS.packCStringLen (castPtr buf, n))
+{-# INLINE bytesAt #-}
+
+-- | 'bytesAt', the bytes converted by the given reader while they are in
+-- the buffer, which may be the caller's or one freed on return: the
+-- reader must not keep the pointer (it decodes or copies).
+bytesAtWith :: (Ptr Word8 -> Int -> IO a) -> Ptr Word8 -> Int -> CallSite -> (Ptr Word8 -> Int -> IO (GhosttyResult, Int)) -> IO a
+bytesAtWith readBytes buf0 cap0 site call = attempt buf0 cap0 >>= either (retry . max 1) pure
   where
     retry cap = allocaBytes cap (`attempt` cap) >>= either (const outOfSpace) pure
     attempt buf cap = do
       (r, n) <- call buf cap
       case resultCode r of
-        ResultSuccess -> Right <$> BS.packCStringLen (castPtr buf, n)
+        ResultSuccess -> Right <$> readBytes buf n
         ResultOutOfSpace -> pure (Left n)
         other -> throwIO (resultError site other)
     outOfSpace = throwIO (Invariant site ResultOutOfSpace)
-{-# INLINE bytesAt #-}
+{-# INLINE bytesAtWith #-}

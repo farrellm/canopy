@@ -62,8 +62,8 @@ import Ghostty.Effectful.Cell (Cell (..), CellWidth (..), Hyperlink (..), Semant
 import Ghostty.Effectful.Color (Rgb)
 import Ghostty.Effectful.Error (CallSite (..), GhosttyError (..), ResultCode (..))
 import Ghostty.Effectful.Internal.Callbacks (Framing (..), captureAttach, captureDetach, captureFraming, captureHeld)
-import Ghostty.Effectful.Internal.Convert (emptyRef, enumSite, fromCursorStyle, fromPalette, fromRgb, fromStyle, readPalette, toPoint, unfoldWhileM, unknownEnum, withSize)
-import Ghostty.Effectful.Internal.Error (bytesAt, bytesVia, expectSuccess, firstTry, newHandle, optionalAtWith, outAt, outVia)
+import Ghostty.Effectful.Internal.Convert (emptyRef, enumSite, fromCursorStyle, fromPalette, fromRgb, fromStyle, readPalette, toPoint, unfoldWhileM, unknownEnum, utf8Text, withSize)
+import Ghostty.Effectful.Internal.Error (bytesAtWith, bytesVia, expectSuccess, firstTry, newHandle, optionalAtWith, outAt, outVia)
 import Ghostty.Effectful.Internal.Terminal (Terminal (..), forgetRegion)
 import Ghostty.Effectful.Point (Coord (..), Point (..))
 import Ghostty.Effectful.Render.Keys
@@ -607,7 +607,7 @@ copyCell slots rs live y x = do
   linked <- toBool <$> cellValue slots.flagSlot raw GhosttyCellDataHasHyperlink
   styled <- toBool <$> cellsValue slots.flagSlot cs GhosttyRenderStateRowCellsDataHasStyling
   style <- if styled then cellStyle slots.styleSlot cs else pure defaultStyle
-  text <- decodeUtf8 <$> cellGraphemes slots cs
+  text <- cellGraphemes slots cs
   foreground <- cellColor slots.colorSlot cs GhosttyRenderStateRowCellsDataFgColor
   background <- cellColor slots.colorSlot cs GhosttyRenderStateRowCellsDataBgColor
   hyperlink <-
@@ -654,9 +654,9 @@ cellColor :: Ptr GhosttyColorRgb -> GhosttyRenderStateRowCells -> GhosttyRenderS
 cellColor slot cs d = optionalAtWith slot fromRgb ResultNoValue (cellsSite d) (cellsGet cs d)
 
 -- | The current cell's text, @GRAPHEMES_UTF8@, through a buffer struct that
--- reports the length, both in the row's slots.
-cellGraphemes :: CellSlots -> GhosttyRenderStateRowCells -> IO ByteString
-cellGraphemes slots cs = bytesAt slots.graphemeSlot firstTry (cellsSite d) $ \buf cap -> do
+-- reports the length, both in the row's slots, decoded from the slot.
+cellGraphemes :: CellSlots -> GhosttyRenderStateRowCells -> IO Text
+cellGraphemes slots cs = bytesAtWith utf8Text slots.graphemeSlot firstTry (cellsSite d) $ \buf cap -> do
   let bp = slots.bufferSlot
   poke bp GhosttyBuffer {ptr = buf, cap = fromIntegral cap, len = 0}
   r <- cellsGet cs d bp
