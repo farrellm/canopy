@@ -16,22 +16,36 @@
       within: [Ghostty.FFI.**, Ghostty.Effectful.**, Test.Ghostty.**]
 
     # 2. Tendril does not see ghostty: only canopy, tests and benchmarks do.
-    #    Test.** is tendril's test-only oracle edge (§1.3).
+    #    Test.** is tendril's test-only oracle edge (§1.3). Canopy's pure core
+    #    (rule 4's five modules) is not in the list either: hlint unions the
+    #    allow-lists of rules that match one module, so canopy's subtrees are
+    #    spelled out without the core, and the second rule gives the core the
+    #    plain-value modules alone (D25). A new top-level Canopy.* subtree that
+    #    needs ghostty is added here; a new plain-value module, below.
     - name: Ghostty.Effectful.**
-      within: [Ghostty.Effectful.**, Canopy.**, Test.**, Bench.**]
+      within: [Ghostty.Effectful.**, Canopy, Canopy.App.Run, Canopy.App.Interpret,
+               Canopy.Child.**, Canopy.Cli, Canopy.Config.**, Canopy.Intel.**,
+               Canopy.Lsp.**, Canopy.Optics, Canopy.Profile.**, Canopy.Serve,
+               Canopy.Session.**, Canopy.Syntax.**, Canopy.Units, Canopy.Watch,
+               Test.**, Bench.**]
+    - name: [Ghostty.Effectful.Cell, Ghostty.Effectful.Color, Ghostty.Effectful.Event,
+             Ghostty.Effectful.Input, Ghostty.Effectful.Mode, Ghostty.Effectful.Point,
+             Ghostty.Effectful.Style]
+      within: [Canopy.App.Model, Canopy.App.Update, Canopy.App.Event,
+               Canopy.App.Command, Canopy.App.View]
 
     # 3. The PTY shim is private to the PTY module.
     - name: Canopy.Ffi.**
       within: [Canopy.Ffi.**, Canopy.Child.Pty]
 
-    # 4. The pure core (Canopy.App.Model, .Update, .Event, .Command) does no IO:
+    # 4. The pure core (Canopy.App.Model, .Update, .Event, .Command, .View) does no IO:
     #    these are allowed everywhere *except* there. hlint has only allow-lists,
     #    so "everywhere else" is spelled out; a new top-level Canopy.* subtree
     #    that needs one of them is added here. The core may import
     #    TreeSitter.Tree, .Node and .Query, which are pure (§5B.2).
     - name: [Canopy.Child.**, Canopy.Lsp.Transport, Canopy.Syntax.GrammarStore,
              TreeSitter.Parse, Effectful.Concurrent.**]
-      within: [Canopy, Canopy.App.Run, Canopy.App.Interpret, Canopy.App.View,
+      within: [Canopy, Canopy.App.Run, Canopy.App.Interpret,
                Canopy.Child.**, Canopy.Cli, Canopy.Config.**, Canopy.Intel.**,
                Canopy.Lsp.**, Canopy.Optics, Canopy.Profile.**, Canopy.Serve,
                Canopy.Session.**, Canopy.Syntax.**, Canopy.Units, Canopy.Watch,
