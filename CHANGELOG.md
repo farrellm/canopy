@@ -22,6 +22,29 @@ Written as changes land, not at release (DESIGN.md §2.9).
   out canopy's subtrees without the core. Fixtures `GhosttyTerminalFromUpdate`,
   `GhosttyRenderFromView`, `ChildFromView` (reported) and `GhosttyCellFromView`,
   `GhosttyEventFromEvent`, `GhosttyTerminalFromInterpret` (allowed).
+- DESIGN.md D27–D32 and D-deferred-12, and PLAN.md, from the rest of that review:
+  - Built-in profiles' highlight queries are their grammar repositories' own at the pin, and
+    canopy writes the indent and text-object ones; Helix's collection is loadable, never vendored
+    (D27, §9.1). CI builds the pinned grammars from M4.9, which now adds the pins table.
+  - No write blocks the owner thread: each child and language server has a writer thread (D28,
+    §1.4, §6.3). The spawn resets signal dispositions and the mask, since GHC's runtime ignores
+    `SIGPIPE` and the child would inherit that (§6.2).
+  - `tree-sitter-effectful`: each loaded grammar has a type of its own, an edited tree carries its
+    edited source, the pure queries take no deadline and report an exceeded limit, and reads that
+    hold C memory use `unsafePerformIO` under `bracket` (D29, §5B).
+  - Every type parameter that carries a guarantee has a nominal role, in place of an hlint ban on
+    `coerce` (D30, §10.1). A `Supports` token is for one server session (§10.3).
+  - `Paging Primary` keeps the inline display and starts only after the quiet timer, so haskeline
+    going raw before its prompt does not flip the host's screen; the host's modes follow the
+    child's while it pages (D31, §8.6).
+  - A hidden query in flight is a state, and a block has a status (D32, §6.4, §7.3, §9.3).
+  - §4.6's static argument is the loop's signature, not the concrete row.
+  - PLAN.md: M4's exit moves from M4.12 to M4.16, with goldens; D-deferred-10 is answered at M3.10
+    and confirmed at M4.9, so canopy has one regex engine; a throughput spike at M3.6; steps for
+    profile detection, themes, result references, node and julia in the nightly e2e, and a release
+    build (M7.3); an HLS probe opens M5.
+  - Stale text: the introduction, §2.8 step 1, §2.1's dependency table, §8.5's cleaning rule,
+    PLAN.md's header and M1.6's note, and the root `CLAUDE.md`.
 
 ### M1: ghostty
 

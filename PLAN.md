@@ -1,10 +1,12 @@
 # Canopy — Implementation plan
 
-The milestones of DESIGN.md §13, broken into steps. **Each step is one CR**: it builds with
+The milestones of DESIGN.md §13, broken into steps. **Each step is one CR** (M6.13 and M6.14 are
+lists of them): it builds with
 `-Werror`, passes every CI step, adds its `CHANGELOG.md` line, and updates `DESIGN.md` in the same
 commit if it changes a decision (§2.9). Section references (§) are to DESIGN.md.
 
-M0 is done (PR #1), and M1 (PRs #2–#13). Steps are numbered `M<n>.<k>`
+M0 is done (PR #1), and M1 (PRs #2–#13; the performance work of D18–D21 followed in PR #30). Steps
+are numbered `M<n>.<k>`
 and are in dependency order within a milestone.
 
 ## Tracks
@@ -102,7 +104,8 @@ Exit: formatter goldens; every typed key exercised (§13).
 - Every callback is installed but `CLIPBOARD_READ` (reads answered empty). Whether clipboard writes
   are accepted is a seventh answer (`SetClipboardWrite`), since the header needs a reply before the
   callback returns. `resize` and `reset` return the events they cause. ENQ and XTVERSION answer in
-  C. Capturing a render hold's frame is left to M1.7 (DESIGN.md §4.5). **Done.**
+  C. Capturing a render hold's frame is left to M1.7 (DESIGN.md §4.5). **Done.** (Since D20 and D21
+  `feed` is one `vt_write` with no stops, and each callback reads what it needs inside itself.)
 
 ### M1.7 Render frames
 
@@ -185,8 +188,8 @@ Exit: decoder roundtrip and render-diff properties pass; `tendril-demo` usable a
 
 - `Tendril.Text.Units` (`Offset (u :: Unit)`, no `Num`), `.Buffer` over `text-rope`, `.Grapheme`
   (UAX #29), `.Width`. `StrictData` (§10.7).
-- hlint rule banning `coerce` on unit types outside `Tendril.Text.Units` / `Canopy.Units` (§10.1),
-  with fixtures.
+- `type role Offset nominal`, and a test that coercing one unit into another does not type-check
+  (§10.1, D30). The same for every later type with a parameter that carries a guarantee.
 - Tests: UCD `GraphemeBreakTest.txt` conformance; unit conversions round-trip.
 - First QuickCheck suite: restore the fixed `QUICKCHECK_SEED` / `--quickcheck-replay` in CI.
 
@@ -272,7 +275,8 @@ Exit: decoder roundtrip and render-diff properties pass; `tendril-demo` usable a
 
 ## M3 — canopy, generic
 
-Exit: rlwrap parity and better — output while typing, progress bars, `help()` pager, Ctrl-C.
+Exit: rlwrap parity and better — output while typing, progress bars, `help()` pager, Ctrl-C; §12.1's
+budgets met, or each miss recorded (§13).
 
 ### M3.1 C0 vocabulary
 
@@ -284,29 +288,36 @@ Exit: rlwrap parity and better — output while typing, progress bars, `help()` 
 - `cbits/` shim + `Canopy.Ffi.Pty` + `Canopy.Child.Pty`: `posix_openpt`, `posix_spawn` with
   `POSIX_SPAWN_SETSID`, winsize, `tcgetattr` from the master (§6.2).
 - A side-channel pipe when the launch asks for one: its read end is the child's fd 3 (§6.2, §7.5).
+- The spawn resets signal dispositions and the mask (`SETSIGDEF`, `SETSIGMASK`), sets the working
+  directory with `addchdir_np`, and opens the master `O_CLOEXEC` (§6.2).
 - Tests: child is session leader with a controlling tty; termios changes visible from the master;
-  the child reads a frame from fd 3.
+  the child reads a frame from fd 3; the child has `SIGPIPE` at its default, an empty mask and the
+  launch's working directory.
 
 ### M3.3 Child effect and fake REPL
 
-- `Child` effect (`Send`, `SendUnechoed`, `Submit`); `runChildPty`, `runChildScripted` (§6.3).
+- `Child` effect (`Send`, `SendUnechoed`, `Submit`); `runChildPty`, `runChildScripted` (§6.3). A
+  reader and a writer thread for each child: no write on the owner's thread (D28).
 - `canopy-fake-repl` test executable: echo REPL emitting OSC 133, reading its inputs from the
   terminal or, with a flag, from fd 3 (§11.4).
-- Test: real PTY path against the fake REPL.
+- Tests: real PTY path against the fake REPL; a submission larger than the PTY's buffer, sent
+  while the child is writing, does not deadlock.
 
 ### M3.4 App core and shell
 
 - `Canopy.App.Event`, `.Command`, `.Model`, `.Update` (pure), `ChildState` with its `InputFocus`
   (§6.4). The model holds no region-tagged value (D25): tracked refs stay in `Canopy.App.Interpret`.
-- `Canopy.App.Run`: feeder threads on one bounded STM queue; event loop in a row with `Ghostty` and
-  without `Concurrent` (§4.6). `Canopy.App.Interpret`, `Canopy.Cli`.
+- `Canopy.App.Run`: feeder threads on one bounded STM queue; the event loop written against a row
+  with neither `Concurrent` nor `IOE` (§4.6). `Canopy.App.Interpret`, `Canopy.Cli`.
 - hlint rule: no wildcard `_ ->` in `Canopy.App.Update` (§10.4), with fixtures. (§2.6's rules 2 and
   4 for the core and the view, and their fixtures, landed with D25.)
 - Test: `update` on hand-written event sequences.
 
 ### M3.5 Profiles and OSC 133 framing
 
-- `Canopy.Profile` type (§7.1) and `Canopy.Profile.Builtin.Generic`.
+- `Canopy.Profile` type (§7.1) and `Canopy.Profile.Builtin.Generic`; `Detector`s, and choosing a
+  profile from the command and the project in `Canopy.Cli`.
+- A block's status, from `D` or a profile's recogniser, `Unknown` otherwise (§7.3, D32).
 - `Canopy.Session.Frame`, `.Block`, `.Store`, `.Transcript`: the commit watermark, one tracked ref;
   a block's content captured as it is committed (§7.3, D23). `C` and `D` are taken from a child that
   sends them and derived otherwise; deriving `C` from the echo is finished in M3.8.
@@ -322,6 +333,8 @@ Exit: rlwrap parity and better — output while typing, progress bars, `help()` 
 - Frame coalescing (~8 ms) and `RenderHold` suppression (§12.2).
 - Property: a block's `UNWRAP` capture, fed to a fresh terminal, gives back its cells; and a flood
   of newlines loses no row. Resolves §14.2's two capture checks.
+- A throughput spike: 100 MB through the fake REPL, against §12.1's budget, reported in the CR. A
+  large miss changes the design here, before the rest of M3 is built on it.
 - Screen goldens: output while typing; a `\r` progress bar animates in place and is committed once.
 
 ### M3.7 Submission, queueing and input focus
@@ -352,8 +365,10 @@ Exit: rlwrap parity and better — output while typing, progress bars, `help()` 
 
 ### M3.10 Regex and sentinel framing
 
-- `PromptRegex` matched on child-terminal rows; `Sentinel` (§7.3). Choose the regex library and record
-  it in DESIGN.md.
+- `PromptRegex` matched on child-terminal rows; `Sentinel` (§7.3).
+- **Answer D-deferred-10**, so that canopy has one regex engine: compile every `#match?` pattern in
+  Helix's and nvim-treesitter's queries for the built-in languages with each candidate (the patterns
+  need no grammar), and record the choice in DESIGN.md §15. M4.9 confirms it.
 - Exact-block features unavailable for `PromptRegex` profiles by type (§14.4).
 
 ### M3.11 Interrupts, exit, resize
@@ -363,8 +378,13 @@ Exit: rlwrap parity and better — output while typing, progress bars, `help()` 
 
 ### M3.12 Passthrough
 
-- `Paging`: host alternate screen, child render state mirrored, host input decoded by tendril and
-  re-encoded by libghostty from the child's modes; escape chord (§8.6).
+- `Paging Alternate`: host alternate screen, child render state mirrored, host input decoded by
+  tendril and re-encoded by libghostty from the child's modes; escape chord (§8.6).
+- The host's modes follow the child's while it pages (mouse tracking, focus, bracketed paste, kitty
+  keyboard flags, cursor style and visibility), and are restored on leaving.
+- `Paging Primary` (D31): raw mode on the primary screen passes input through and keeps the inline
+  display; it starts only after the quiet timer. Test: haskeline going raw before its prompt does
+  not start it.
 - Paste into a full-screen child through the safety check; `Rejected` asks (§8.5).
 
 ### M3.13 Transcript view
@@ -383,7 +403,8 @@ Exit: rlwrap parity and better — output while typing, progress bars, `help()` 
 
 ### M3.15 Benchmarks and e2e harness
 
-- Keystroke-to-frame and child-throughput benchmarks against §12.1's budgets.
+- Keystroke-to-frame and child-throughput benchmarks against §12.1's budgets: each met, or its miss
+  recorded there with its cause.
 - `canopy-e2e` with the host side attached to a headless libghostty terminal (§11.5); nightly
   workflow with pinned ghci and python. Scenarios: output while typing, progress bar, `help()` pager,
   Ctrl-C. **M3 exit.**
@@ -393,7 +414,8 @@ Exit: rlwrap parity and better — output while typing, progress bars, `help()` 
 
 ## M4 — tree-sitter
 
-Exit: §5B.7 passes; built-in profiles' grammars bind and their queries compile under `Strict`.
+Exit: §5B.7 passes; built-in profiles' grammars bind and their queries compile under `Strict`;
+highlighting, completeness and indentation goldens for the built-in profiles (§13).
 
 ### M4.1 `tree-sitter-ffi` complete
 
@@ -414,6 +436,8 @@ Exit: §5B.7 passes; built-in profiles' grammars bind and their queries compile 
 
 - `Tree g`, `Node g` (ForeignPtr-kept), `TreeSitter.Internal.Pure` with its purity argument in the
   header (§5B.2); every node read and `toSExpr`; `nodeText`.
+- Reads that hold C memory use `unsafePerformIO` under `bracket`, the others
+  `unsafeDupablePerformIO` (D29). Nominal roles on `Language`, `Tree` and `Node` (D30).
 - Unsafety-audit `grep` updated (§10.6).
 
 ### M4.4 Parse effect
@@ -423,30 +447,38 @@ Exit: §5B.7 passes; built-in profiles' grammars bind and their queries compile 
 
 ### M4.5 Edits and incremental parsing
 
-- `EditedTree`, `edit` (copy-then-edit), `splice`, incremental `parse`, `changedRanges`.
-- Properties: incremental equals fresh; persistence; `splice` agrees with naive points (§5B.7).
+- `EditedTree` carrying its edited source, `edit` (copy-then-edit) over `splice`s, `parse` from a
+  `Source`, `changedRanges` (§5B.2, §5B.3, D29).
+- Properties: incremental equals fresh; persistence; `edit`'s points agree with naive ones, and its
+  text is the old one with the splices applied (§5B.7).
 
 ### M4.6 Concurrency stress test
 
 - Reads of one `Tree` from every capability under `-threaded +RTS -N` while another thread edits
-  copies, checked against a single-threaded baseline (§5B.7). Backs §14.2's purity row.
+  copies, checked against a single-threaded baseline, with every cursor made freed (§5B.7). Backs
+  §14.2's purity row.
 
 ### M4.7 Grammars
 
-- `loadGrammar` (dlopen, ABI range, `LoadError`), `deriveGrammar` TH with `addDependentFile`,
+- `loadGrammar` (dlopen, ABI range, `LoadError`, a fresh `'Dynamic d` for each load, D29),
+  `deriveGrammar` TH with `addDependentFile`,
   `bindGrammar`, `kindOf`, `fieldOf` (§5B.4).
 - Tests on json; `bindGrammar` fails with the right names on a modified `node-types.json`.
 
 ### M4.8 Queries
 
-- `Query g c`, `Capture`, `compileQuery`, `QueryError` with line/column, pure `matches`/`captures`
-  (§5B.5).
+- `Query g c`, `Capture`, `compileQuery`, `QueryError` with line/column; pure `matches`/`captures`
+  that take no deadline and return `Found`, with `matchesWithin`/`capturesWithin` in `Parse` for a
+  budget (§5B.5, D29).
 
 ### M4.9 Predicates
 
 - All listed predicates and directives, decoded at compile time; `PredicatePolicy`.
-- **Answer D-deferred-10** by running Helix's and nvim-treesitter's queries for the built-in languages
-  through each candidate engine; record in DESIGN.md §15.
+- **Confirm D-deferred-10's answer** (M3.10) by running Helix's and nvim-treesitter's queries for
+  the built-in languages and counting mismatches; record in DESIGN.md §15.
+- That needs the built-in grammars, so this step adds `canopy/grammars/pins.toml`,
+  `scripts/build-grammars.sh` and CI's cached grammar build (§2.8 step 1). They are data and a
+  script, so the binding half still needs nothing of canopy's code.
 - Nightly cross-check against the `tree-sitter query` CLI where installed.
 
 ### M4.10 Highlighter and benchmark
@@ -456,14 +488,17 @@ Exit: §5B.7 passes; built-in profiles' grammars bind and their queries compile 
 
 ### M4.11 Grammar pins and `canopy grammar`
 
-- `canopy/grammars/pins.toml`, committed `node-types.json` per built-in grammar,
-  `Canopy.Syntax.Grammars` splices; `canopy grammar fetch|build` (§9.1).
+- Over M4.9's `pins.toml`: committed `node-types.json` per built-in grammar,
+  `Canopy.Syntax.Grammars` splices; `canopy grammar fetch|build` (§9.1), which also installs the
+  grammar repository's own queries (D27). `Canopy.Child.Process` for the build (§6.3).
 
 ### M4.12 Grammar store
 
 - `Canopy.Syntax.GrammarStore`: Helix layout, `; inherits:`, compile every query at startup with
   line/column errors.
-- Test: every built-in profile's grammar binds and its queries compile under `Strict`. **M4 exit.**
+- Built-in queries: each grammar repository's own highlights, injections and locals, and canopy's
+  indents and text objects (`canopy/queries/<lang>/`, D27).
+- Test: every built-in profile's grammar binds and its queries compile under `Strict`.
 - Resolves §14.2's Helix-query-collection check.
 
 ### M4.13 Edit adapter and the tree in the model
@@ -475,6 +510,8 @@ Exit: §5B.7 passes; built-in profiles' grammars bind and their queries compile 
 
 - `Canopy.Syntax.Highlight`: closed `HighlightCapture`, total theme table incl. Helix capture names,
   over `changedRanges`; plugged in as `Plugins.highlight` (§5.5).
+- Themes: a TOML table from capture names to styles, decoded at startup, with a built-in default
+  (§9.1).
 
 ### M4.15 Completeness
 
@@ -486,6 +523,7 @@ Exit: §5B.7 passes; built-in profiles' grammars bind and their queries compile 
 
 - `Canopy.Syntax.Indent` (`indents.scm`, closed `IndentCapture`), `Canopy.Syntax.Structure` (expand/
   shrink selection, bracket matching, auto-pairs), plugged in as `Plugins.enclosing`.
+- Goldens for the built-in profiles: highlighting, completeness and indentation. **M4 exit.**
 
 ---
 
@@ -495,29 +533,35 @@ Exit: scripted-LSP session tests; nightly e2e with pyright/basedpyright and HLS.
 
 ### M5.1 Transport
 
+- First, a probe (§14.2): does HLS type-check a file that is in no component against the project's
+  packages? Its answer may change §9.2 before M5.3 and M5.6 are built on it.
 - `Canopy.Lsp.Transport`: `Content-Length` JSON-RPC over stdio, as an effect with a scripted
   interpreter (expected requests, canned responses, fail on unexpected) (§11.4).
 
 ### M5.2 Client and capabilities
 
 - `Canopy.Lsp.Client`: `SMethod`-indexed requests that return a `RequestId`, their responses
-  arriving as events (§10.3, D25); initialize/shutdown, `$/cancelRequest` on superseded revisions. `Canopy.Lsp.Capabilities`: `Supports m` tokens (§10.3).
+  arriving as events (§10.3, D25); initialize/shutdown, `$/cancelRequest` on superseded revisions. `Canopy.Lsp.Capabilities`: `Supports m` tokens, for one
+  server session, with no dynamic registration declared (§10.3).
 - `Canopy.Lsp.Rows` if any `row-types` field is touched.
 
 ### M5.3 Source maps and projections
 
-- `SourceMap from to` (§10.2), `Shadow`, `Projection`; Generic and Python projections.
+- `SourceMap from to` (§10.2), `Shadow`, `Projection`; Generic and Python projections (python's of
+  the inputs that compiled).
 - Properties: source maps round-trip where they map. Goldens for python shadow documents.
 
 ### M5.4 Shadow document lifecycle
 
-- Server spawn per profile, `didOpen`/`didChange`, on-disk `.canopy/session-<id>.<ext>` and generated
+- Server spawn per profile (`Canopy.Child.Process`), `didOpen`/`didChange`, on-disk `.canopy/session-<id>.<ext>` and generated
   `.gitignore` when the profile requires it; server crash → disabled with notice, restart offered.
 
 ### M5.5 REPL introspection
 
 - `Introspection` hidden queries when `Ready`, purity declared, cache per (query, transcript length)
   (§9.3); ghci and python.
+- `Querying` (§6.4, D32): a submission made while a query is out waits for it. Test: python's `_`
+  is unchanged by a query.
 
 ### M5.6 ghci projection
 
@@ -551,7 +595,8 @@ Exit: scripted-LSP session tests; nightly e2e with pyright/basedpyright and HLS.
 
 ## M6 — depth
 
-Exit: feature table §8 complete. Steps are mostly independent of each other.
+Exit: feature table §8 complete. Steps are mostly independent of each other. M6.13 and M6.14 are
+lists: each feature in them is a CR of its own.
 
 ### M6.1 Vi keymap
 
@@ -578,6 +623,7 @@ Exit: feature table §8 complete. Steps are mostly independent of each other.
 - In the transcript view (M3.13): Alt-↑/↓ selection, copy input/output/both, re-insert and re-run,
   expanding a fold. Inline: output committed folded with "N more lines", timing and exit/exception
   markers (§8.3, §8.4).
+- Result references (`_3`) where the profile's introspection provides them (§8.4).
 
 ### M6.6 Search
 
@@ -645,6 +691,7 @@ Exit: feature table §8 complete. Steps are mostly independent of each other.
 ### M6.16 Node, Julia, utop profiles
 
 - `Canopy.Profile.Builtin.Node`, `.Julia`, `.Utop`; resolves §14.2's node and julia setup checks.
+- Node and julia join the nightly e2e (§11.1).
 
 ### M6.17 §8 audit
 
@@ -654,7 +701,8 @@ Exit: feature table §8 complete. Steps are mostly independent of each other.
 
 ## M7 — tooling
 
-Exit: a client library test drives a session.
+Exit: a client library test drives a session; the release job's static binary passes the version
+check.
 
 ### M7.1 Serve mode
 
@@ -664,4 +712,9 @@ Exit: a client library test drives a session.
 ### M7.2 Client library and test
 
 - A small client library and a test that drives a full session through it against the fake REPL.
-  **M7 exit.**
+
+### M7.3 Release build
+
+- A release workflow: `build-libghostty.sh --release` (baseline CPU, D17), the `static` flag on
+  (D11), and a `canopy` binary with no runtime library dependency, which runs the version check
+  (§3.4) and the fake-REPL session before it is published. **M7 exit.**
