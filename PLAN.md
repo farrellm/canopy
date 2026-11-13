@@ -352,6 +352,8 @@ budgets met, or each miss recorded (§13).
 - `NoEcho` for `Channel`; `CookedChild` through `SendUnechoed` (clear `ECHO`, set `ECHONL`, write,
   restore); `ChildEditorEchoes` (bytes sent + end-of-input sequence) (§7.4); runtime fallback with
   a one-time notice.
+- A `CookedChild` submission with a line over 4095 bytes is refused with a notice; a test shows the
+  line discipline cutting one that is sent anyway (§7.4).
 - Resolves §14.2's open check on changing the echo from the master around the write.
 
 ### M3.9 Setup, python and ghci profiles
