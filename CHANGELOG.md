@@ -4,6 +4,25 @@ Written as changes land, not at release (DESIGN.md §2.9).
 
 ## Unreleased
 
+### Design
+
+- DESIGN.md D23–D26 and PLAN.md, from a review of both before M2 and M3 start. A block's content is
+  captured as it is committed, into canopy's own store, so a later `clear`, `reset` or pruning
+  cannot reach it, and one tracked ref (the commit watermark) replaces a pair for each block (D23,
+  §7.3). What must redraw an earlier block (selection, expanding a fold, transcript search) is a
+  transient view on the host's alternate screen, since committed rows cannot be repainted; this
+  answers D-deferred-4 in part (D24, §8.4). tendril's editor is one pure `step`, with fast plug-ins
+  as pure functions and slow ones as requests answered by revision-tagged inputs, and no signature
+  returns an `Async` (D25, §5.5, §5.8, §10.3). A profile with a bootstrap submits on a side channel
+  (fd 3), and `Busy` carries an input focus, so a running program can be answered (D26, §6.4, §7.5).
+  PLAN.md: the editor core moves ahead of the widgets and the driver (M2.11–M2.14), a transcript-view
+  step is M3.13 (the two after it move down one), and M6.10's snapshots are optional.
+- §2.6: `Canopy.App.View` joins the pure core (rule 4), and the core sees only ghostty's plain-value
+  modules (rule 2). hlint unions the allow-lists of rules that match one module, so rule 2 spells
+  out canopy's subtrees without the core. Fixtures `GhosttyTerminalFromUpdate`,
+  `GhosttyRenderFromView`, `ChildFromView` (reported) and `GhosttyCellFromView`,
+  `GhosttyEventFromEvent`, `GhosttyTerminalFromInterpret` (allowed).
+
 ### M1: ghostty
 
 - `ghostty-vt-ffi-test` is the full layout test (DESIGN.md §3.4): it parses the linked library's

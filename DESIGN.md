@@ -74,9 +74,9 @@ frame — child output, its editor, menus, hints, diagnostics — and draws that
 
 Consequences, each of which the rest of the document depends on:
 
-- **Output is structured, not scraped.** A block's output is a range of child-terminal rows, which
-  can be reformatted as plain text, VT or HTML by libghostty's formatter, searched, folded, copied
-  and exported (§8.4).
+- **Output is structured, not scraped.** A block's output is a range of child-terminal rows,
+  captured as styled text when it is committed (§7.3, D23), which can be reformatted as plain text,
+  VT or HTML by libghostty's formatter, searched, folded, copied and exported (§8.4).
 - **The child's queries are answered correctly.** Device attributes, XTVERSION, colour-scheme and
   size queries are answered by the child terminal, not forwarded to a host that never saw them.
 - **Full-screen children work.** When the child enters the alternate screen, canopy passes host input
@@ -246,10 +246,14 @@ The rules, by module name across all packages:
 1. **`Ghostty.FFI.**` is private to `Ghostty.Effectful.**`** (and `Test.Ghostty.**`). Nothing in canopy
    sees a raw pointer.
 2. **`Ghostty.Effectful.**` is not imported by `Tendril.**`** — only by `Canopy.**`, `Test.**` and
-   `Bench.**`. This is the test-only oracle edge of §1.3.
+   `Bench.**`. This is the test-only oracle edge of §1.3. Within canopy, the pure core (rule 4's
+   five modules) sees only the plain-value modules: `.Cell`, `.Color`, `.Event`, `.Input`, `.Mode`,
+   `.Point` and `.Style`. No operation, handle or region tag reaches `update` or the view (D25).
+   hlint unions the allow-lists of rules that match one module, so the rule spells out canopy's
+   subtrees without the core, and a second rule gives the core those seven.
 3. **`Canopy.Ffi.**`** is private: `Canopy.Ffi.Pty` (the PTY shim, §6.2) to `Canopy.Child.Pty`.
-4. **The pure core does not do IO.** `Canopy.App.Model`, `.Update`, `.Event`, `.Command` may not
-   import `Canopy.Child.**`, `Canopy.Lsp.Transport`, `Canopy.Syntax.GrammarStore`,
+4. **The pure core does not do IO.** `Canopy.App.Model`, `.Update`, `.Event`, `.Command` and
+   `.View` may not import `Canopy.Child.**`, `Canopy.Lsp.Transport`, `Canopy.Syntax.GrammarStore`,
    `TreeSitter.Parse`, or any `Effectful.Concurrent.**`. It sees those subsystems only through their
    pure model modules. (It *may* import `TreeSitter.Tree`, `.Node` and `.Query`: their reads are pure
    functions, §5B.2, and the model holds the current input's `Tree`.) The allow-list does not include
@@ -779,7 +783,7 @@ reads it back where a key reads the same setting. The same treatment applies to 
 row and cell data (§4.3).
 
 **Tracked grid references** (`TrackedRef s`) follow a cell as the terminal scrolls, prunes and
-reflows; blocks are pairs of them (§7.3). A terminal owns the references made from it in a registry,
+reflows; canopy's commit watermark is one (§7.3). A terminal owns the references made from it in a registry,
 and `withTerminal` frees whichever are left when its region ends. A reference names its registry
 entry, not the C handle, so `untrack` is idempotent, and a reference that was untracked reports no
 point and cannot be moved: it is never passed to the library again. `untrack` exists because each
@@ -950,7 +954,7 @@ every signature would hide the errors that matter. The version check in `runGhos
 | `Ghostty.Effectful.Input` | the plain values encoders take: `Key`, `Mods`, `KeyEvent`, `MouseEvent` |
 | `Ghostty.Effectful.Parse` | standalone OSC and SGR parsers |
 | `Ghostty.Effectful.Search` | incremental scrollback search with viewport matches; moving the search's selection is `ghostty_search_select_next`/`_prev` (1.0) |
-| `Ghostty.Effectful.Snapshot` | encode and restore terminal state (session resume, §8.7) |
+| `Ghostty.Effectful.Snapshot` | encode and restore terminal state (optional, §8.7) |
 | `Ghostty.Effectful.Unicode` | codepoint and grapheme widths |
 | `Ghostty.Effectful.Color`, `.Style`, `.Point`, `.Mode` | the plain values keys and frames return: `Rgb`, `Palette`, `Style`, `Point c`, `ModeKey r` (§4.4) |
 
@@ -968,9 +972,10 @@ validation and history, rendered inline in the host terminal. It is useful witho
 `tendril-demo` proves that.
 
 It is designed around reedline's decomposition — highlighter, hinter, completer, validator, menu,
-prompt, history and edit mode as independent pluggable parts — but expressed as **effects**, not
-traits or callbacks: the application interprets them, which is how canopy plugs in tree-sitter and
-LSP without tendril knowing either exists.
+prompt, history and edit mode as independent pluggable parts — but expressed as **values**, not
+traits or callbacks: the fast parts are pure functions the application passes in, and the slow ones
+are requests it answers (§5.5), which is how canopy plugs in tree-sitter and LSP without tendril
+knowing either exists.
 
 ### 5.2 Layers
 
@@ -982,9 +987,10 @@ LSP without tendril knowing either exists.
 | T3 widgets | `Tendril.Widget.Menu`, `.Hint`, `.Popup`, `.Prompt`, `.Search` | no |
 | T4 layout | `Tendril.Render.Style`, `.Doc`, `.Layout`, `.Grid`, `.Diff` | no |
 | T5 terminal | `Tendril.Term.Input` (decoder), `.Output` (VT emitter), `.Tty` (raw mode, size, SIGWINCH), `.Caps` (capability probing) | decoder and emitter no; `.Tty` yes |
-| T6 driver | `Tendril.Effect`, `Tendril.Run` | yes |
+| T6 driver | `Tendril.Editor` (`EditorState`, `step`; §5.8), `Tendril.Effect`, `Tendril.Run` | `.Editor` no; the others yes |
 
-T0–T5's pure parts are where nearly all the logic and all the property tests are.
+T0–T5's pure parts and `Tendril.Editor` are where nearly all the logic and all the property tests
+are.
 
 ### 5.3 Text, positions and units
 
@@ -1031,7 +1037,7 @@ data Command (m :: ModeKind) where
   HistoryPrev, HistoryNext :: Command m
   HistorySearch :: SearchKind -> Command m
   OpenMenu      :: MenuId -> Command m
-  ExpandSelection, ShrinkSelection :: Command m    -- structural, via Structure effect
+  ExpandSelection, ShrinkSelection :: Command m    -- structural, via `enclosing` (§5.5)
   EditExternal  :: Command m           -- $EDITOR
   App           :: AppCommand -> Command m          -- opaque to tendril; canopy's commands
   -- vi-only
@@ -1052,34 +1058,70 @@ commands (canopy's "rewind", "select previous block") are bound in the same trie
 checks.
 
 **Undo** is a tree, not a stack (as in vim and helix), with edit coalescing by command kind and time.
-**History** is an effect (§5.5) whose default interpreter is an append-only file; canopy's
-interpreter is SQLite-backed with context (§8.8).
+**History** is a request (§5.5): standalone it is answered by an effect whose default interpreter
+is an append-only file, and canopy answers it from SQLite, with context (§8.8).
 
-### 5.5 Plug-in points are effects
+### 5.5 Plug-in points
+
+The editor is one pure function (§5.8), and its plug-in points are of two kinds (D25).
+
+**The fast ones are pure functions**, passed to every `step`:
 
 ```haskell
-data Highlighter :: Effect where
-  Highlight :: Revision -> Rope -> Highlighter m Spans
-data Completer :: Effect where
-  Complete  :: Revision -> Rope -> Offset 'Grapheme -> Completer m (Async CompletionList)
-data Hinter :: Effect where
-  Hint      :: Revision -> Rope -> Offset 'Grapheme -> Hinter m (Maybe Hint)
-data Validator :: Effect where
-  Validate  :: Rope -> Validator m Validity     -- Complete | Incomplete Indent | Invalid Diag
-data Structure :: Effect where
-  Enclosing :: Rope -> Range 'Grapheme -> Structure m (Maybe (Range 'Grapheme))
-data History :: Effect where
-  …
+data Plugins = Plugins
+  { highlight :: Revision -> Rope -> Spans
+  , validate  :: Revision -> Rope -> Validity
+  , enclosing :: Rope -> Range 'Grapheme -> Maybe (Range 'Grapheme)
+  }
+
+data Validity = Complete | Incomplete Indent | Invalid Diag | NotReady
 ```
 
-Each comes with trivial interpreters (no highlighting, word completion over history, always-complete
-validation, bracket-matching structure) so that `tendril-demo` is a useful readline out of the box.
+**The slow ones are requests**, which `step` returns as data and the application answers later, with
+an input:
 
-**Slow plug-ins never block typing.** The completer returns an `Async`; results are tagged with the
-`Revision` (a counter incremented on every buffer change) they were computed for, and a result whose
-revision is older than the buffer's is dropped (reedline lists exactly this as unsolved). Highlighting
-is required to be fast and synchronous; canopy meets that with incremental tree-sitter and layers
-slow semantic highlighting on top asynchronously (§9.1).
+```haskell
+data Request app
+  = WantCompletion Revision Rope (Offset 'Grapheme)   -- answered by Completed
+  | WantHint       Revision Rope (Offset 'Grapheme)   -- answered by Hinted
+  | WantValidity   Revision Rope                      -- after NotReady; answered by Validated
+  | WantHistory    HistoryQuery                       -- answered by Recalled
+  | Record         HistoryEntry
+  | Submit         Text
+  | RunApp         app                                -- an App command (§5.4)
+  | EditExternally Rope
+  -- …
+
+data Answer
+  = Completed Revision CompletionList
+  | Hinted    Revision (Maybe Hint)
+  | Validated Revision Validity
+  | Recalled  HistoryQuery [HistoryEntry]
+```
+
+**Slow plug-ins never block typing.** A `Revision` is a counter incremented on every buffer change,
+and an answer whose revision is older than the buffer's is dropped (reedline lists exactly this as
+unsolved). The drop is a comparison inside `step`, so the rule is tested as a pure function, with
+no thread. **No signature carries an `Async`**: tendril depends on `effectful-core` alone (§2.7),
+and an application with one event queue (§1.4) wants an answer as an event, not as a handle
+something must wait on.
+
+Highlighting is required to be fast and synchronous; canopy meets that with incremental tree-sitter
+and layers slow semantic highlighting on top asynchronously (§9.1). The application makes the
+`Plugins` for each `step` from its own state: canopy's close over the current input's tree.
+
+**`NotReady` is for a validator whose state is behind the buffer**, as canopy's tree is while a
+parse is out (§9.1). On `AcceptOrNewline` the editor then asks for `WantValidity` at that revision
+and **holds every later host input, in order**, until `Validated` arrives; then it decides, and
+replays what it held. So typing straight after Enter is neither lost nor applied to the wrong
+buffer, and a validator that never says `NotReady` never causes a hold.
+
+**Standalone, the requests are answered by effects.** `Completer` and `History` are dynamically
+dispatched, each with a real and a trivial or scripted interpreter (§2.7), and `runLineEditor`
+(§5.8) calls them for each request, the completer on a thread of its own. `Plugins` has defaults (no
+highlighting, always-complete validation, bracket-matching `enclosing`), and the trivial
+interpreters complete from history's words, hint from history, and keep history in an append-only
+file, so that `tendril-demo` is a useful readline out of the box.
 
 ### 5.6 Rendering to the host
 
@@ -1102,8 +1144,10 @@ data Surface = Surface
 - **Committing above the live region** is erase-live-region, print commit, redraw live region; this is
   reedline's "external printer" and is how canopy shows child output that arrives *while the user is
   typing* (§8.3).
-- A full-screen mode (alternate screen, own scrollback) is designed for but not built first;
-  `Surface` already distinguishes the regions it would need. D-deferred-4.
+- **Full screen is transient, and the application's.** Canopy's transcript view (§8.4, D24) takes
+  the host's alternate screen while it is open, and draws through the same `Layout`, `Diff` and
+  `Output`. A persistent full-screen layout (own scrollback, side panels) is designed for but not
+  built; `Surface` already distinguishes the regions it would need. D-deferred-4.
 
 ### 5.7 Host input
 
@@ -1131,6 +1175,20 @@ event comes back equal — is the strongest test in the package (§11.2).
 
 ### 5.8 The driver
 
+**The editor is one pure function** (`Tendril.Editor`, D25):
+
+```haskell
+step :: Plugins -> EditorInput -> EditorState app -> (EditorState app, [Request app])
+
+data EditorInput = Host InputEvent | Answer Answer     -- §5.7, §5.5
+```
+
+Everything the editor does is in it: keymaps, commands, the menu and hint widgets, dropping a stale
+answer, the hold after a `NotReady` (§5.5). The renderer is a second pure function, from an
+`EditorState` to the live region's `Doc`. Canopy, which has to interleave host input with child
+output, calls both from its own `update` and view (§6.4, §8.3), and turns each `Request` into a
+`Command`.
+
 ```haskell
 data LineEditor :: Effect where
   ReadInput :: PromptSpec -> LineEditor m ReadResult    -- Submitted Text | Eof | Interrupted
@@ -1138,13 +1196,11 @@ data LineEditor :: Effect where
   Redraw    :: LineEditor m ()
 ```
 
-`runLineEditor` owns the TTY: raw mode entered and restored with `bracket` (and on `SIGTSTP`/`SIGCONT`,
-and on fatal signals, so a crash never leaves the user's terminal raw), the SIGWINCH handler, the
-input thread. For canopy, which needs to interleave host input with child output, tendril also exports
-the pieces separately — the pure `EditorState`, `step :: InputEvent -> EditorState -> (EditorState,
-[Effect])`, and the renderer — so the application can drive the editor from its own event loop
-instead of from `ReadInput`. `ReadInput` is that loop specialised to "the only event source is the
-keyboard".
+`runLineEditor` is that function with the keyboard as its only event source, so there is one
+implementation of the editor, not two. It owns the TTY: raw mode entered and restored with `bracket`
+(and on `SIGTSTP`/`SIGCONT`, and on fatal signals, so a crash never leaves the user's terminal raw),
+the SIGWINCH handler, the input thread. It feeds each event to `step` and answers the requests
+through the `Completer` and `History` effects (§5.5); `ReadInput` returns at the first `Submit`.
 
 ---
 
@@ -1466,7 +1522,7 @@ names, fallbacks from `function.builtin` to `function`) is the application's.
 | :--- | :--- | :--- |
 | C0 | `Canopy.Optics`, `Canopy.Units`, `Canopy.Config.Codec` | Shared vocabulary |
 | C1 engines | `Canopy.Child.Pty`, `Canopy.Child.Process`, `Canopy.Ffi.Pty`; `Canopy.Syntax.GrammarStore`, `Canopy.Syntax.Grammars` (the known grammars' splices); `Canopy.Lsp.Transport`, `.Client`, `.Capabilities`; `Canopy.Watch` | Talk to the outside world; each also exposes a pure model module |
-| C2 domain | `Canopy.Profile.*`, `Canopy.Session.Frame`, `.Block`, `.Transcript`, `.Projection`, `Canopy.Intel.*`; `Canopy.Syntax.Edit`, `.Highlight`, `.Complete`, `.Structure`, `.Indent` (over `tree-sitter-effectful`) | REPL-specific logic and canopy's use of tree-sitter, pure |
+| C2 domain | `Canopy.Profile.*`, `Canopy.Session.Frame`, `.Block`, `.Store`, `.Transcript`, `.Projection`, `Canopy.Intel.*`; `Canopy.Syntax.Edit`, `.Highlight`, `.Complete`, `.Structure`, `.Indent` (over `tree-sitter-effectful`) | REPL-specific logic and canopy's use of tree-sitter, pure |
 | C3 app core | `Canopy.App.Model`, `.Event`, `.Command`, `.Update`, `.View` | The state machine and the view; pure (§2.6 rule 4) |
 | C4 shell | `Canopy.App.Run`, `Canopy.App.Interpret`, `Canopy.Cli`, `Main` | Wire effects, threads and interpreters. `Main` only calls into `Canopy.Cli`: lint trusts no `Main` (§2.6) |
 
@@ -1483,8 +1539,12 @@ actions, by reading its source; not yet run.) The C part is a small shim in `cbi
 `Canopy.Ffi.Pty`, private by §2.6 rule 3. (The macOS equivalent needs `TIOCSCTTY` in a pre-exec hook
 that `posix_spawn` lacks; D-deferred-5.)
 
-**Canopy reads the child's termios from the master** with `tcgetattr` after every read and before
-every submission — a single `ioctl`, and on Linux the master reports the slave's settings. That is how
+A profile that submits on a side channel (§7.5, D26) gets a pipe as well: a file action makes its
+read end the child's fd 3, and canopy keeps the write end.
+
+**Canopy reads the child's termios from the master** with `tcgetattr` after every read, before
+every submission, and once when a busy child's output goes quiet (§6.4) — a single `ioctl`, and on
+Linux the master reports the slave's settings. That is how
 canopy knows whether the child is running its own line editor (`ICANON` and `ECHO` off) or reading
 cooked lines (§7.4) without guessing from output. Observed: a shell's `stty raw -echo` and back,
 haskeline entering raw mode before `ghci>`, and GNU readline entering it before python's `>>>`, all
@@ -1506,14 +1566,17 @@ the child. Ctrl-D on an empty input sends `VEOF`.
 ```haskell
 data Child :: Effect where
   Spawn    :: Launch -> Size -> Child m ChildId
-  Send     :: ChildId -> ByteString -> Child m ()
+  Send     :: ChildId -> ByteString -> Child m ()   -- to the PTY: keystrokes, or a program's stdin
+  SendUnechoed :: ChildId -> ByteString -> Child m ()  -- to a cooked child's PTY, unechoed (§7.4)
+  Submit   :: ChildId -> ByteString -> Child m ()   -- one frame on the side channel (§7.5)
   Resize   :: ChildId -> Size -> Child m ()
   Signal   :: ChildId -> Signal -> Child m ()
   -- output, termios changes and exit arrive as Events through the queue, not as return values
 ```
 
 Two interpreters: `runChildPty` (real) and `runChildScripted`, which plays a recorded or hand-written
-script of output in response to input, for tests (§11.4).
+script of output in response to input, for tests (§11.4). `SendUnechoed` is one operation because
+its termios change, write and restore must not interleave with another write.
 
 ### 6.4 Child lifecycle
 
@@ -1521,15 +1584,44 @@ script of output in response to input, for tests (§11.4).
 data ChildState
   = Starting  StartupProgress      -- running the profile's setup (§7.2); input is queued
   | Ready     PromptInfo           -- at a prompt; submissions go straight out
-  | Busy      Submission BlockId   -- evaluating; type-ahead is queued and shown dimmed
+  | Busy      Submission BlockId InputFocus   -- evaluating; typed input goes where the focus says
   | Paging    Screen               -- child is full-screen or raw; host input passes through (§8.6)
   | Exited    ExitStatus           -- offer restart; transcript survives
+
+data InputFocus
+  = TypeAhead                      -- the next submission: queued, shown dimmed, sent at the prompt
+  | ToProgram Echo                 -- the running program's stdin: each line goes to the PTY at once
+
+data Echo = Visible | Masked
 ```
 
 Transitions are driven by framing events (§7.3), termios changes (§6.2) and process exit. Sending a
 submission is a `Command` that `update` only emits from `Ready`; in other states it is queued in the
 model. The constructors carry what each state needs, so "the current block while busy" is a field of
 `Busy`, not a `Maybe` on the model that might be `Nothing` at the wrong time.
+
+**A busy child may be reading its terminal** — python's `input()`, a `getLine`, a debugger, a y/n
+question — and nothing tells canopy that a process is blocked in a read. Queueing what the user
+types until the next prompt would then wait for a prompt that cannot come. So `Busy` carries where
+typed input goes (D26):
+
+- The focus starts as `TypeAhead`.
+- When a busy child's output goes quiet, a one-shot timer fires and canopy reads the termios again
+  (§6.2), because a child can change mode without writing anything. Output arms the timer, so an
+  idle session still polls nothing (§12.1). If the child has cleared `ECHO`, the focus becomes
+  `ToProgram Masked`: that is a password prompt, and canopy never leaves `ECHO` cleared itself
+  (§7.4), so the child did it. Otherwise, if the cursor is not at the start of a row (a program
+  that printed `Name? ` and stopped), it becomes `ToProgram Visible`. Output that ends a line
+  returns it to `TypeAhead`.
+- The second rule is a guess, so the prompt shows the focus and a key toggles it.
+- A `ToProgram` line is sent with `Send`. The line discipline echoes it, as in any terminal, so it
+  is part of the block's output and not an input: it is not in history. Masked input is drawn
+  masked, and is never written to the journal (§8.7) or to history (§8.8).
+
+A wrong guess is cheap. Where submissions travel on a side channel (§7.5) the two streams cannot
+mix: a line sent to the PTY that no program read is discarded by the bootstrap at the next prompt
+(§7.2). On a PTY-only child the REPL reads it as its next input, and framing survives, because `D`
+is the next `A` (§7.3); only that block's recorded input is missing.
 
 ---
 
@@ -1592,6 +1684,14 @@ because the interpreter imports readline before running `-c` when `-i` is given.
 child reads cooked lines. A bootstrap is also where canopy's introspection helpers (§9.3) are defined,
 so it is the right shape for any language that allows one.
 
+**A bootstrap reads its submissions from a side channel** (D26, §7.5). The table's row is what was
+checked: `code.interact` reading cooked lines from the terminal. The built-in profile goes one step
+further, not yet checked (M3.9): the console's `raw_input` reads one framed submission from fd 3,
+not a line from the terminal, so the terminal's input is the running program's alone (§6.4). The
+bootstrap then knows exactly when an evaluation starts and how it ends, and emits `C` and
+`D;<status>` itself (§7.3). At each prompt it discards terminal input that nobody read
+(`termios.tcflush`). `readline` stays blocked, so that a program's own `input()` reads cooked lines.
+
 Setup steps are typed (`SetPrompt`, `SendLine`, `ExpectPrompt Timeout`) and run in the `Starting`
 state; their echo and output are swallowed into a hidden startup block that is shown only if setup
 fails. The child's own prompt text after the marks is kept and rendered by canopy as the prompt.
@@ -1610,10 +1710,23 @@ data Framing
 
 OSC 133's marks, transcribed: `A` prompt start, `B` prompt end / input start, `C` input end / output
 start, `D[;exit]` command finished. Most REPL prompts give only `A` and `B`; canopy derives `C` as
-"first byte after the echoed submission" (§7.4) and `D` as the next `A`.
+"first byte after the echoed submission" (§7.4) and `D` as the next `A`. A bootstrap that reads from
+a side channel (§7.5) sends all four itself, `D` with a status: 0, or 1 when the input raised.
 
-A **block** is then a pair of tracked grid refs (libghostty tracked refs survive scrolling and reflow)
-into the child terminal: output start and output end. Blocks are the unit of everything in §8.
+**A block's content is captured as it is committed** (D23). Canopy keeps one tracked grid ref into
+the child terminal (libghostty tracked refs survive scrolling and reflow): the **commit watermark**,
+which starts where a block's output starts. Whatever lies between the watermark and the end of what
+can no longer change is formatted once, as VT with its soft wraps removed (`UNWRAP`), appended to
+the block in `Canopy.Session.Store`, and committed to the host (§8.3); then the watermark moves.
+While a block runs, what can no longer change is the rows that have scrolled out of the child's
+active area; when it finishes, it is everything up to the cursor.
+
+So a finished block is what it looked like when it finished. A later `clear`, a `reset` or the
+scrollback's pruning cannot reach it, it re-wraps at any width, and the child terminal holds no
+reference to it: canopy tracks one ref however long the session, where a pair for each block would
+have cost the terminal work on every scroll (§4.4). The watermark lives in `Canopy.App.Interpret`;
+the model holds a block's `BlockId` and its captured content, never a region-tagged value (D25).
+Blocks are the unit of everything in §8.
 
 `Sentinel` is ghcitty's approach (fence each command with markers) and the fallback for REPLs whose
 prompt cannot be set. `PromptRegex` is comint's and rlwrap's, the last resort; it is matched against
@@ -1625,9 +1738,17 @@ A child in cooked mode with `ECHO` set has its input echoed by the line discipli
 its own line editor echoes (and redraws) its input itself. Canopy has already shown the input in its
 own editor, so the echo is noise. `EchoPolicy`:
 
-- `CookedChild`: the child reads cooked lines (python's bootstrap, §7.2), so the echo comes from the
-  line discipline. Canopy clears `ECHO` on the child's termios before each submission and the echo
-  never happens.
+- `NoEcho`: submissions travel on a side channel (§7.5), where nothing echoes, and canopy never
+  touches the child's termios. Python's bootstrap (§7.2).
+- `CookedChild`: the child reads cooked lines from its terminal, so the echo comes from the line
+  discipline, which echoes as it receives. `SendUnechoed` (§6.3) clears `ECHO` and sets `ECHONL`,
+  writes the submission, and restores both. The text is not echoed and its newlines are, so output
+  starts on a fresh row; and the change does not outlast the write, which matters twice. A program
+  that reads its terminal later gets its echo, and an `ECHO` that is off at any other time was
+  turned off by the child, which is how canopy knows a password prompt (§6.4). To be checked in
+  M3.8: that the echo is decided at the write, not at the child's read. A cooked line is at most
+  4095 bytes (Linux's canonical mode discards what is past it), so this is for a REPL that cannot
+  be given a bootstrap.
 - `ChildEditorEchoes`: the child runs its own line editor in raw mode, which echoes and possibly
   redraws. Canopy hides the child-terminal rows from `B` to the first output, identified by comparing
   against the bytes it sent and by the editor's end-of-input sequence where the profile knows one.
@@ -1649,10 +1770,19 @@ data SubmitStyle
   | Wrapped Text Text              -- e.g. ghci's ":{\n" … "\n:}"
   | BlankLineTerminated            -- python's basic REPL: compound statements need a trailing blank line
   | Custom (Text -> [ByteString])  -- built-in profiles only
+  | Channel                        -- one frame on the side channel; needs a bootstrap (§7.2)
 ```
 
 Bracketed is chosen automatically whenever the child has enabled mode 2004 (read from the child
 terminal's modes), encoded by libghostty's paste encoder so the child's own safety expectations hold.
+
+**Where the profile has a bootstrap, submissions do not go through the terminal at all** (D26).
+`Channel` writes each input as one frame (its length in bytes, a newline, then the UTF-8) to a pipe
+the child holds as fd 3 (§6.2), and the bootstrap reads its inputs only from there. The terminal is
+then the running program's (§6.4), and what the terminal styles work around is gone: no echo to
+suppress (§7.4), no 4095-byte line, no blank line to end a compound statement, no keystroke for the
+child's editor to interpret, and an exact `C` and `D` (§7.3). The other styles are for a child
+canopy cannot bootstrap: ghci, and anything framed by a sentinel or a prompt regex.
 
 ### 7.6 Transport
 
@@ -1672,20 +1802,20 @@ architecture carries it.
 | Feature | From | Carried by |
 | :--- | :--- | :--- |
 | Syntax highlighting as you type, including invalid regions | fish, ptpython, bpython | tree-sitter (§9.1) |
-| Multi-line editing as one unit; Enter submits only when the input is complete | ptpython, PyREPL, Julia | `Validator` = tree-sitter completeness + profile rules |
+| Multi-line editing as one unit; Enter submits only when the input is complete | ptpython, PyREPL, Julia | `validate` (§5.5) = tree-sitter completeness + profile rules |
 | Auto-indent and dedent | ptpython, IPython | tree-sitter `indents.scm` |
-| Bracket matching, auto-pairs | editors | `Structure` effect |
+| Bracket matching, auto-pairs | editors | `enclosing` (§5.5) |
 | Structural selection (expand/shrink to enclosing node), node text objects in vi mode | helix, nvim | tree-sitter (`textobjects.scm`) |
 | Emacs, vi and helix keymaps, cursor shape per mode | reedline, ghcitty | tendril keymaps (§5.4) |
 | Open input in `$EDITOR`, evaluate on save | bpython, ghcitty, IPython `%edit` | `EditExternal` |
-| Fish-style ghost suggestions from history, accepted with → | fish, ptpython, ghcitty | `Hinter` |
+| Fish-style ghost suggestions from history, accepted with → | fish, ptpython, ghcitty | the hint request (§5.5) |
 | Format input before submit | — | LSP `textDocument/formatting` on the shadow range |
 
 ### 8.2 Intelligence
 
 | Feature | From | Carried by |
 | :--- | :--- | :--- |
-| Completion menu with types/kinds and docs side panel | ptpython, utop, ghcitty | `Completer` = LSP ⊕ REPL (§9.4) |
+| Completion menu with types/kinds and docs side panel | ptpython, utop, ghcitty | the completion request (§5.5) = LSP ⊕ REPL (§9.4) |
 | Signature help while typing arguments | bpython, ptpython | LSP `signatureHelp` |
 | Inline diagnostics before submit (squiggle + message under the input) | IDEs | LSP diagnostics on the shadow document |
 | Type of the expression under the cursor/selection, live | utop's type bar, Node's eager preview (safely) | LSP `hover`, or REPL `:type` when idle |
@@ -1701,29 +1831,60 @@ architecture carries it.
 | :--- | :--- | :--- |
 | Child output rendered exactly (colours, `\r`, progress bars, cursor motion) | terminals | the child terminal (§1.1) |
 | Output arriving while typing appears above the prompt without breaking the input | reedline's external printer | tendril commit (§5.6) |
-| Long output folded with a "N more lines" marker; expandable | Warp, ghcitty `max_output_lines` | block ranges |
+| Long output folded with a "N more lines" marker; expandable | Warp, ghcitty `max_output_lines` | committed folded; expanded in the transcript view (§8.4) |
 | Highlight output as code when it is code (pretty-printed values) | ghcitty pretty-printing, IPython | tree-sitter on the block's plain text, opt-in per profile |
 | Timing per block, exit/exception marker | ghcitty `show_timing` | framing events |
 | Images in output (kitty graphics), passed through when the host supports them | IPython rich display, kitty | libghostty kitty-graphics state |
 | Hyperlinks (OSC 8) preserved | terminals | ghostty cells carry them |
 
-**Mapping ghostty cells to tendril cells** is `Canopy.App.View`'s job: a pure function from the
-copied `Cell`s of a block's rows (§4.3) to tendril `Doc` rows, with palette colours resolved against
-the child terminal's palette. Rows of a *finished* block are committed once to host scrollback;
-rows of the *running* block are part of the live region and are redrawn from the dirty-row set, so a
-progress bar animates in place and is committed when the block ends.
+**Mapping ghostty cells to tendril cells** is `Canopy.App.View`'s job, a pure function (§2.6
+rule 4, D25):
+
+```haskell
+view :: Model -> ChildFrame -> Surface
+```
+
+`ChildFrame` is plain data the shell makes for each frame: the copied `Cell`s of the running block's
+dirty rows (§4.3), and the child terminal's palette, against which the view resolves palette
+colours. It is an argument and not part of the model, so no frame's cells are kept.
+
+Rows of the *running* block that are still in the child's active area are part of the live region,
+redrawn from the dirty-row set, so a progress bar animates in place. Rows that have scrolled out of
+the active area cannot change again: they are captured and committed while the block still runs,
+and the rest when it finishes (§7.3). Committed rows are in the host's scrollback, and canopy never
+draws them again.
+
+Where a profile folds long output, the fold is decided as the block runs. Once the block has
+committed the threshold's lines, further rows are captured but not committed; the live region shows
+the count and the block's last rows; and the marker is committed when the block ends. The store has
+all of it, for the transcript view (§8.4).
 
 ### 8.4 Blocks and the transcript
 
 | Feature | From | Carried by |
 | :--- | :--- | :--- |
-| Select a previous block (Alt-↑/↓); copy its input, its output, or both | Warp, SLIME presentations | block list |
+| Select a previous block (Alt-↑/↓); copy its input, its output, or both | Warp, SLIME presentations | the transcript view (below) |
 | Re-insert a previous input for editing; re-run it | every REPL's history, but by block | transcript |
 | Reference a previous result by number (`_3`) where the language allows | IPython `Out[n]`, Julia `ans` | profile introspection (§9.3) |
-| Search the transcript, including folded output | terminals | `Ghostty.Effectful.Search` |
-| Export the session as a script (inputs only), a transcript (plain), or HTML (with colours) | bpython save, Ammonite | libghostty formatter |
+| Search the transcript, including folded output | terminals | `Ghostty.Effectful.Search` over the transcript view's terminal |
+| Export the session as a script (inputs only), a transcript (plain), or HTML (with colours) | bpython save, Ammonite | the store (§7.3), through libghostty's formatter |
 | **Rewind**: undo the last *k* blocks by restarting the child and replaying the rest | bpython | transcript + restart; profile marks blocks pure/impure; replay asks before re-running impure ones |
 | Auto-reload on source file change, with the result as a block | ghcitty, ghcid | `Canopy.Watch` + profile reload command |
+
+**The transcript view** (D24). Committed rows are in the host's scrollback, which canopy cannot
+repaint, so nothing that redraws an earlier block can be inline. Selecting a block, expanding a
+fold and searching the transcript open a view on the host's alternate screen instead, as tmux's
+copy mode does, with the machinery passthrough already has (§8.6).
+
+- When the view opens, the store's blocks are replayed, whole, into a second libghostty terminal of
+  the host's width: each input as canopy draws it, then its captured output (§7.3). The view draws
+  that terminal's rows through a render state, and holds its own tracked refs for the blocks'
+  boundaries, which live as long as the view does.
+- Folding is the view's drawing, not the terminal's content. So search finds text inside a fold,
+  and expanding one is a redraw.
+- Copy, re-insert and re-run act on the selected block and close the view. Closing it returns to
+  the inline prompt, with the host's scrollback as it was.
+- Output that arrives while the view is open is captured as usual and committed on return.
 
 ### 8.5 Paste
 
@@ -1750,14 +1911,20 @@ without leaving the child mode.
 
 | Feature | From | Carried by |
 | :--- | :--- | :--- |
-| Auto-saved sessions, resumable with `--continue` (replays inputs) | ghcitty | transcript journal |
-| Restore the *screen* of a session exactly, without re-running | — | `Ghostty.Effectful.Snapshot` |
+| Auto-saved sessions, resumable with `--continue` (replays inputs) | ghcitty | the journal: the block store (§7.3) on disk |
+| Restore the *display* of a session without re-running | — | the journal's captured blocks, committed again |
 | Named checkpoints; restore = restart + replay to the checkpoint | Ammonite | transcript |
 | JSON-RPC mode on a socket: other tools submit inputs and read structured blocks | ghcitty's JSON mode | `Canopy.Serve` (milestone M7) |
 
-A snapshot's byte format is outside libghostty-vt's ABI promise (§3.2), so a stored snapshot can stop
-decoding after any library update. A session store keeps what restores the screen another way (the
-transcript, replayed) and treats a snapshot that fails to decode as absent, never as an error.
+The journal holds each block's input and its captured output (D23). So `--continue` shows the
+session again by committing its blocks, at whatever width the host now has, and replays inputs only
+to rebuild the child's state. Masked input is never in it (§6.4).
+
+A libghostty snapshot would add the child terminal's exact state (modes, cursor, scrollback), but
+that state belonged to a process that is gone, so `Ghostty.Effectful.Snapshot` is optional (M6.10).
+If it is built: a snapshot's byte format is outside libghostty-vt's ABI promise (§3.2), so a stored
+one can stop decoding after any library update, and one that fails to decode is treated as absent,
+never as an error.
 
 ### 8.8 History
 
@@ -1824,6 +1991,8 @@ Canopy's modules over the binding:
 model keeps the previous tree for display until the new one arrives, and the parse is a `Command`
 interpreted by the `Parse` effect with a budget of a few milliseconds; a parse that exceeds it is
 `Aborted`, the previous highlighting stays, and the next idle tick retries without a deadline.
+Until the tree is at the buffer's revision canopy's `validate` answers `NotReady`, so Enter waits
+for the parse and does not judge an old tree (§5.5).
 Because trees are values with pure reads (§5B.2), everything after the parse — highlighting,
 completeness, structure — is part of the pure `update`.
 
@@ -1952,8 +2121,12 @@ mode, kitty graphics) and child terminal modes are each probed once and turned i
 
 ```haskell
 data Supports (m :: Method f t) = Supports    -- constructor not exported
-request :: Supports m -> SMethod m -> MessageParams m -> Eff es (Async (MessageResult m))
+request :: Lsp :> es => Supports m -> SMethod m -> MessageParams m -> Eff es RequestId
 ```
+
+The response is not waited for: it arrives as an `Event` carrying its `RequestId`, as everything
+else does (§1.4, D25). The client keeps each pending id's `SMethod`, so a response is decoded at the
+type its request fixed.
 
 "Did we check that the server supports this?" becomes a type error instead of a review comment.
 
@@ -2062,7 +2235,8 @@ at the binding's own level is §5B.7's.)
 the model and emitted commands. The scripted `Child` interpreter and a scripted LSP interpreter (a list
 of expected requests and canned responses, failing on anything unexpected) make whole sessions
 deterministic: "type `x = 1`, Enter, child prints prompt, type `x.`, completion arrives late with an old
-revision" is a unit test. A tiny `canopy-fake-repl` test executable (an echo REPL that emits OSC 133)
+revision" is a unit test. A `Model` holds no handle and no region-tagged value (D25), so a test of
+`update` needs no terminal. A tiny `canopy-fake-repl` test executable (an echo REPL that emits OSC 133)
 exercises the real PTY path in CI without depending on any language being installed.
 
 Built-in profiles are tested by compiling their grammars' queries against pinned grammar versions, and
@@ -2085,7 +2259,7 @@ Nightly only, against pinned versions recorded in the suite.
 | Keystroke to frame on the host (typing in a 50-line input, with highlighting) | < 4 ms at p99 |
 | Child output throughput (`cat` of a 100 MB file through the child) | ≥ 50% of raw `cat` into the same host |
 | Idle CPU | ~0: no polling; everything is event-driven |
-| Memory | Bounded by child scrollback (configurable; libghostty's compression is enabled after idle) |
+| Memory | The child terminal is bounded by its scrollback (libghostty's compression is enabled after idle), which need only hold what is not yet captured (§12.2). The transcript's store grows with the session, and is the journal on disk (§8.7) |
 
 ### 12.2 How
 
@@ -2093,8 +2267,11 @@ Nightly only, against pinned versions recorded in the suite.
   the host's refresh (at most one frame per ~8 ms) and suppressed while the child holds synchronized
   output (`RenderHold`).
 - Only dirty rows are copied out of libghostty (§4.3); only changed host cells are emitted (§5.6).
-- Bulk output that scrolls past without the user looking is committed to host scrollback via the
-  formatter's VT output in one write, not cell by cell.
+- Rows that scroll out of the child's active area are captured after every `feed`, by one formatter
+  call from the commit watermark (§7.3), and written to the host with the next frame in one write,
+  not cell by cell. A PTY read is fed in slices small enough that one slice cannot scroll more rows
+  than the child's scrollback retains (a slice of *n* bytes scrolls at most *n* rows), so nothing
+  is pruned before it is captured.
 
 ### 12.3 Benchmarks
 
@@ -2254,10 +2431,10 @@ building the colour's `Just` strictly changed nothing; neither was kept.
 | **M0** infrastructure | Seven package skeletons; the vendored tree-sitter and its shim generator; prelude; common stanzas and check; hlint layering with fixtures; ormolu; haddock floor; CI; `build-libghostty.sh` and the pin | CI green on an empty-but-wired tree |
 | **M1** ghostty | `ghostty-vt-ffi` complete for terminal, render state, formatter, key/mouse/paste encoders, OSC parser; layout test. `ghostty-effectful` with scoped handles, typed keys, events | Formatter goldens; every typed key exercised |
 | **M2** tendril | Text/units, Emacs keymap, undo tree, history, input decoder with kitty protocol, inline renderer with commits, `tendril-demo` | Decoder roundtrip and render-diff properties pass; demo usable as a daily readline |
-| **M3** canopy, generic | PTY child, child terminal, OSC 133 / regex / sentinel framing, echo suppression, blocks, passthrough, generic + python + ghci profiles without tree-sitter or LSP | rlwrap parity and better: output while typing, progress bars, `help()` pager, Ctrl-C |
+| **M3** canopy, generic | PTY child, child terminal, OSC 133 / regex / sentinel framing, echo suppression, side-channel submission, captured blocks, passthrough, the transcript view, generic + python + ghci profiles without tree-sitter or LSP | rlwrap parity and better: output while typing, progress bars, `help()` pager, Ctrl-C |
 | **M4** tree-sitter | `tree-sitter-ffi` complete; `tree-sitter-effectful` with persistent trees, `Parse`, typed grammars, queries, predicates and the highlighter. In canopy: grammar store and pins, highlighting, completeness-driven Enter, indentation, structural selection, `canopy grammar` | §5B.7 passes; built-in profiles' grammars bind and their queries compile under `Strict` |
 | **M5** LSP | Client, capabilities evidence, shadow documents and projections (python, ghci), completion merge, diagnostics, hover, signature help | Scripted-LSP session tests; nightly e2e with pyright/basedpyright and HLS |
-| **M6** depth | Vi and helix modes, history DB and browser, block navigation and export, rewind, sessions and snapshots, paste-transcript cleaning, input modes, ghcitty parity for ghci (`:core`/`:stg`, Hoogle, typed holes, auto-reload), kitty graphics | Feature table §8 complete |
+| **M6** depth | Vi and helix modes, history DB and browser, block navigation and export, rewind, sessions, paste-transcript cleaning, input modes, ghcitty parity for ghci (`:core`/`:stg`, Hoogle, typed holes, auto-reload), kitty graphics | Feature table §8 complete |
 | **M7** tooling | JSON-RPC serve mode | A client library test drives a session |
 
 ---
@@ -2315,8 +2492,11 @@ reading the pinned sources. A ✗ changed the design, in the section named.
 | `unicode-data` provides grapheme-break and width data | ✗ neither, in 0.9.0, and nothing else on Hackage does without ICU; tendril generates its own tables | §5.3 |
 
 Still open, each to be checked when its milestone starts: the node and julia setups (§7.2); musl
-spawn, by running it; clearing `ECHO` on a cooked child from the master side before submission
-(§7.4); Helix's query collection loading under canopy's `inherits` and predicate support (§9.1).
+spawn, by running it; clearing `ECHO` and setting `ECHONL` on a cooked child from the master side
+around a submission's write, and that the echo is decided at the write (§7.4); python's bootstrap
+reading its submissions from fd 3 (§7.2); that a block's `UNWRAP` capture, fed to a fresh terminal,
+gives back its cells, and that a feed slice cannot outrun the scrollback (§7.3, §12.2); Helix's
+query collection loading under canopy's `inherits` and predicate support (§9.1).
 
 ### 14.3 Width disagreement with the host
 
@@ -2353,7 +2533,7 @@ input; a per-session toggle hides them.
 | D13 | Trees are persistent (copy-on-edit, finalizer-only delete), which makes node and query reads pure | §5B.2 |
 | D4 | Own LSP client over `lsp-types`; capabilities as evidence | §9.2, §10.3 |
 | D5 | Elm-style pure core, single-owner event loop, feeders on STM | §1.4 |
-| D6 | Inline rendering with commits to host scrollback | §5.6 |
+| D6 | Inline rendering with commits to host scrollback; what must redraw an earlier block is the transcript view's (D24) | §5.6 |
 | D7 | OSC 133 via prompt setup as the primary framing | §7.2, §7.3 |
 | D8 | Built-in profiles in Haskell; user profiles in TOML decoded to the same type at startup | §7.1 |
 | D9 | `optics` for updates, record dot for reads; `Control.Lens` banned by lint; simple `lsp-types` fields use `#_field` labels, and `lsp-types`' own lenses (through `lensVL`) only for code over every type with a field | §2.6, §2.7 |
@@ -2369,6 +2549,10 @@ input; a per-session toggle hides them.
 | D20 | Callbacks read what they need inside themselves (a mark's cursor in C, a title or working directory in Haskell), as the header asks for the title and working directory, and each mark records how many Haskell entries came before it; so `feed` is `vt_write` with no stops. Each `vt_write_until` call per OSC cost the parser its setup. Its 64 KiB slices are superseded by D21 | §4.5, §12.3 |
 | D21 | `feed` is one `vt_write` and one take: the take walks the Haskell buffer and the marks newest first and builds the returned list in order, `WritePty` runs joined, rather than building it reversed and copying it in order; since a slice's take would leave a list to append | §4.5, §12.3 |
 | D22 | Renovate updates the CI's GitHub Actions only (digest-pinned, grouped, minor/patch/digest automerged); toolchain versions, Hackage bounds and the C pins move by hand | §2.8 |
+| D23 | A block's content is captured as it is committed, as unwrapped VT, into canopy's own store, which is also the journal. A finished block is what it looked like when it finished, out of reach of `clear`, `reset` and pruning; the child terminal holds no reference to it, and canopy tracks one ref, the commit watermark | §7.3, §8.3, §8.7, §12.2 |
+| D24 | Selecting a block, expanding a fold and searching the transcript are a transient view on the host's alternate screen, drawn from the store through a second terminal, since committed rows cannot be repainted. Inline commits (D6) stay the default. Answers D-deferred-4 in part | §8.4, §5.6 |
+| D25 | tendril's editor is one pure `step`: fast plug-ins are pure functions passed to it, slow ones are requests answered by revision-tagged inputs, and `runLineEditor` and the `Completer` and `History` effects are built over it. Nothing returns an `Async`; an LSP response is an event. Canopy's model holds no region-tagged value, and the view is a pure function of the model and a copied frame, seeing only ghostty's plain-value modules | §2.6, §5.5, §5.8, §8.3, §10.3 |
+| D26 | A profile with a bootstrap submits on a side channel (fd 3), which leaves the terminal to the running program. `Busy` carries an input focus: type-ahead, or to the program, masked when the child cleared `ECHO`. A cooked PTY-only child's echo is suppressed around the write alone, so canopy never leaves `ECHO` cleared | §6.4, §7.2, §7.4, §7.5 |
 
 ### 15.2 Deferred
 
@@ -2377,7 +2561,7 @@ input; a per-session toggle hides them.
 | D-deferred-1 | Split the LSP client into a package of its own (the tree-sitter half of this question was answered by D3: both are now packages) | A second consumer, or its dependencies diverging from canopy's |
 | D-deferred-2 | Do published `ghostty-effectful`/`tendril`/`tree-sitter-effectful` keep depending on `canopy-prelude`? | First Hackage release of any |
 | D-deferred-3 | A Jupyter kernel `Transport` | A target language whose REPL cannot be framed but has a kernel |
-| D-deferred-4 | Full-screen (alternate-screen) mode with canopy-owned scrollback | Inline mode proving unable to do something users ask for (split docs pane, persistent side panel) |
+| D-deferred-4 | A *persistent* full-screen (alternate-screen) layout with canopy-owned scrollback | **Answered in part 2026-11-12** (D24): the design's own block features (§8.4) could not be inline, so a transient transcript view takes the alternate screen while it is open. The persistent layout is still deferred, on the original trigger: inline mode proving unable to do something users ask for (split docs pane, persistent side panel) |
 | D-deferred-5 | macOS PTY spawn | First macOS user |
 | D-deferred-6 | Replace `hs-tree-sitter` with an own `capi` binding | **Fired 2026-11-03**: every built-in profile's head-of-tree grammar is ABI 15, which `hs-tree-sitter` 13.0.14.0 cannot load. Answer: yes, as two packages, `tree-sitter-ffi` and `tree-sitter-effectful` (D3, §5A, §5B) |
 | D-deferred-7 | Profile scripting beyond data (e.g. a small embedded language for custom submit/projection in user profiles) | A user profile that cannot be expressed with the built-in combinators |

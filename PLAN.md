@@ -234,15 +234,18 @@ Exit: decoder roundtrip and render-diff properties pass; `tendril-demo` usable a
 - Property: render A, then diff A→B, equals render B from scratch, as ghostty screens.
   **The other half of M2's exit condition.**
 
-### M2.11 Plug-in effects and history
+### M2.11 Editor core
 
-- `Highlighter`, `Completer` (`Async`, revision-tagged), `Hinter`, `Validator`, `Structure`,
-  `History` effects with trivial interpreters; append-only file history (§5.5).
-- Tests: stale-revision completion results dropped.
+- `Tendril.Editor`: `EditorState`, `Plugins` with its defaults, `Request`, `Answer`, and
+  `step :: Plugins -> EditorInput -> EditorState app -> (EditorState app, [Request app])` (§5.5,
+  §5.8, D25). Pure: it comes before the widgets and the driver, which are built over it.
+- Tests, with no thread: an answer for an old revision is dropped; after a `NotReady`, later input
+  is held and replayed in order when `Validated` arrives.
 
 ### M2.12 T3 widgets
 
-- `Tendril.Widget.Prompt`, `.Menu`, `.Hint`, `.Popup`, `.Search` (incremental history search).
+- `Tendril.Widget.Prompt`, `.Menu`, `.Hint`, `.Popup`, `.Search` (incremental history search), and
+  the renderer from an `EditorState` to the live region's `Doc`.
 - Screen goldens per widget.
 
 ### M2.13 Terminal I/O
@@ -251,10 +254,13 @@ Exit: decoder roundtrip and render-diff properties pass; `tendril-demo` usable a
   size and SIGWINCH.
 - `Tendril.Term.Caps`: probing with DA1 sentinel, kitty keyboard, 2026, 2027 (§5.7).
 
-### M2.14 Driver
+### M2.14 Driver, effects and history
 
-- `Tendril.Effect` (`LineEditor`), `Tendril.Run` (`runLineEditor`), `Surface` with `live`/`commits`
-  (§5.6); exported `EditorState`, `step`, renderer for canopy's own loop (§5.8).
+- `Completer` and `History` effects with trivial interpreters; append-only file history (§5.5).
+- `Tendril.Effect` (`LineEditor`), `Tendril.Run` (`runLineEditor`: `step` driven from the keyboard,
+  answering its requests through the effects, the completer on its own thread), `Surface` with
+  `live`/`commits` (§5.6).
+- Test: a scripted completer that answers late.
 
 ### M2.15 `tendril-demo`
 
@@ -277,53 +283,72 @@ Exit: rlwrap parity and better — output while typing, progress bars, `help()` 
 
 - `cbits/` shim + `Canopy.Ffi.Pty` + `Canopy.Child.Pty`: `posix_openpt`, `posix_spawn` with
   `POSIX_SPAWN_SETSID`, winsize, `tcgetattr` from the master (§6.2).
-- Tests: child is session leader with a controlling tty; termios changes visible from the master.
+- A side-channel pipe when the launch asks for one: its read end is the child's fd 3 (§6.2, §7.5).
+- Tests: child is session leader with a controlling tty; termios changes visible from the master;
+  the child reads a frame from fd 3.
 
 ### M3.3 Child effect and fake REPL
 
-- `Child` effect; `runChildPty`, `runChildScripted` (§6.3).
-- `canopy-fake-repl` test executable: echo REPL emitting OSC 133 (§11.4).
+- `Child` effect (`Send`, `SendUnechoed`, `Submit`); `runChildPty`, `runChildScripted` (§6.3).
+- `canopy-fake-repl` test executable: echo REPL emitting OSC 133, reading its inputs from the
+  terminal or, with a flag, from fd 3 (§11.4).
 - Test: real PTY path against the fake REPL.
 
 ### M3.4 App core and shell
 
-- `Canopy.App.Event`, `.Command`, `.Model`, `.Update` (pure), `ChildState` (§6.4).
+- `Canopy.App.Event`, `.Command`, `.Model`, `.Update` (pure), `ChildState` with its `InputFocus`
+  (§6.4). The model holds no region-tagged value (D25): tracked refs stay in `Canopy.App.Interpret`.
 - `Canopy.App.Run`: feeder threads on one bounded STM queue; event loop in a row with `Ghostty` and
   without `Concurrent` (§4.6). `Canopy.App.Interpret`, `Canopy.Cli`.
-- hlint rule: no wildcard `_ ->` in `Canopy.App.Update` (§10.4), with fixtures.
+- hlint rule: no wildcard `_ ->` in `Canopy.App.Update` (§10.4), with fixtures. (§2.6's rules 2 and
+  4 for the core and the view, and their fixtures, landed with D25.)
 - Test: `update` on hand-written event sequences.
 
 ### M3.5 Profiles and OSC 133 framing
 
 - `Canopy.Profile` type (§7.1) and `Canopy.Profile.Builtin.Generic`.
-- `Canopy.Session.Frame`, `.Block`, `.Transcript`: blocks as tracked grid-ref pairs; derived `C`/`D`
-  (§7.3).
-- Scripted-child tests: blocks delimited correctly across chunk boundaries.
+- `Canopy.Session.Frame`, `.Block`, `.Store`, `.Transcript`: the commit watermark, one tracked ref;
+  a block's content captured as it is committed (§7.3, D23). `C` and `D` are taken from a child that
+  sends them and derived otherwise; deriving `C` from the echo is finished in M3.8.
+- Scripted-child tests: blocks delimited correctly across chunk boundaries; a finished block is
+  unchanged by a later `clear`, a `reset` and the scrollback's pruning.
 
 ### M3.6 View
 
-- `Canopy.App.View`: ghostty cells → tendril `Doc` with palette resolution; running block in the
-  live region, finished blocks committed (§8.3).
+- `Canopy.App.View`: `view :: Model -> ChildFrame -> Surface`, ghostty cells → tendril `Doc` with
+  palette resolution; the running block's active-area rows in the live region (§8.3).
+- Capture after every feed, from the watermark, committed with the next frame; a PTY read fed in
+  slices that cannot outrun the child's scrollback (§12.2).
 - Frame coalescing (~8 ms) and `RenderHold` suppression (§12.2).
+- Property: a block's `UNWRAP` capture, fed to a fresh terminal, gives back its cells; and a flood
+  of newlines loses no row. Resolves §14.2's two capture checks.
 - Screen goldens: output while typing; a `\r` progress bar animates in place and is committed once.
 
-### M3.7 Submission and queueing
+### M3.7 Submission, queueing and input focus
 
-- `SubmitStyle`: `Lines`, `Bracketed` (auto when child set 2004, via the paste encoder), `Wrapped`,
-  `BlankLineTerminated`, `Custom` (§7.5).
-- Input queued in `Starting`/`Busy`, type-ahead shown dimmed.
+- `SubmitStyle`: `Channel` (one frame on fd 3), `Lines`, `Bracketed` (auto when child set 2004, via
+  the paste encoder), `Wrapped`, `BlankLineTerminated`, `Custom` (§7.5).
+- Input queued in `Starting`/`Busy` as type-ahead, shown dimmed.
+- `InputFocus` (§6.4, D26): the quiet timer and its termios read; `ToProgram` on a cursor left
+  mid-row, `Masked` when the child cleared `ECHO`; the focus in the prompt and its toggle key;
+  masked input kept out of history.
+- Scripted-child tests: a program that reads a line in the middle of a block; a password prompt.
 
 ### M3.8 Echo suppression
 
-- `CookedChild` (clear `ECHO` from the master before submit) and `ChildEditorEchoes` (bytes sent +
-  end-of-input sequence) (§7.4); runtime fallback with a one-time notice.
-- Resolves §14.2's open check on clearing `ECHO` from the master.
+- `NoEcho` for `Channel`; `CookedChild` through `SendUnechoed` (clear `ECHO`, set `ECHONL`, write,
+  restore); `ChildEditorEchoes` (bytes sent + end-of-input sequence) (§7.4); runtime fallback with
+  a one-time notice.
+- Resolves §14.2's open check on changing the echo from the master around the write.
 
 ### M3.9 Setup, python and ghci profiles
 
 - Typed `SetupStep`s run in `Starting`, hidden startup block shown on failure; refused inputs
   (`:set prompt`) (§7.2).
-- `Canopy.Profile.Builtin.Python` (bootstrap) and `.Ghci`.
+- `Canopy.Profile.Builtin.Python`: a bootstrap that reads its submissions from fd 3, sends `C` and
+  `D;<status>` itself, and discards unread terminal input at each prompt. Resolves §14.2's check on
+  it.
+- `Canopy.Profile.Builtin.Ghci`.
 
 ### M3.10 Regex and sentinel framing
 
@@ -342,12 +367,21 @@ Exit: rlwrap parity and better — output while typing, progress bars, `help()` 
   re-encoded by libghostty from the child's modes; escape chord (§8.6).
 - Paste into a full-screen child through the safety check; `Rejected` asks (§8.5).
 
-### M3.13 User profiles in TOML
+### M3.13 Transcript view
+
+- The store's blocks replayed into a second libghostty terminal and drawn on the host's alternate
+  screen, over M3.12's machinery (§8.4, D24): scrolling, and a return to the inline prompt that
+  leaves the host's scrollback as it was. Output that arrives meanwhile is captured, and committed
+  on return.
+- Screen goldens: a session's blocks in the view are what was committed, at the width they ran at
+  and at a narrower one.
+
+### M3.14 User profiles in TOML
 
 - `Canopy.Config.Codec`: `toml-parser` codec to `Profile`, applicative validation reporting every
   error with locations; `extends` via `Profile Partial` (§7.1, §10.5).
 
-### M3.14 Benchmarks and e2e harness
+### M3.15 Benchmarks and e2e harness
 
 - Keystroke-to-frame and child-throughput benchmarks against §12.1's budgets.
 - `canopy-e2e` with the host side attached to a headless libghostty terminal (§11.5); nightly
@@ -440,17 +474,18 @@ Exit: §5B.7 passes; built-in profiles' grammars bind and their queries compile 
 ### M4.14 Highlighting
 
 - `Canopy.Syntax.Highlight`: closed `HighlightCapture`, total theme table incl. Helix capture names,
-  over `changedRanges`; plugged in as tendril's `Highlighter`.
+  over `changedRanges`; plugged in as `Plugins.highlight` (§5.5).
 
 ### M4.15 Completeness
 
-- `Canopy.Syntax.Complete` as the `Validator`: ERROR/MISSING at end, unclosed brackets; profile rules
+- `Canopy.Syntax.Complete` as `Plugins.validate`, `NotReady` while the tree is behind the buffer
+  (§5.5, §9.1): ERROR/MISSING at end, unclosed brackets; profile rules
   (`:{`, trailing `\`).
 
 ### M4.16 Indent and structure
 
 - `Canopy.Syntax.Indent` (`indents.scm`, closed `IndentCapture`), `Canopy.Syntax.Structure` (expand/
-  shrink selection, bracket matching, auto-pairs).
+  shrink selection, bracket matching, auto-pairs), plugged in as `Plugins.enclosing`.
 
 ---
 
@@ -465,8 +500,8 @@ Exit: scripted-LSP session tests; nightly e2e with pyright/basedpyright and HLS.
 
 ### M5.2 Client and capabilities
 
-- `Canopy.Lsp.Client`: `SMethod`-indexed requests, initialize/shutdown, `$/cancelRequest` on
-  superseded revisions. `Canopy.Lsp.Capabilities`: `Supports m` tokens (§10.3).
+- `Canopy.Lsp.Client`: `SMethod`-indexed requests that return a `RequestId`, their responses
+  arriving as events (§10.3, D25); initialize/shutdown, `$/cancelRequest` on superseded revisions. `Canopy.Lsp.Capabilities`: `Supports m` tokens (§10.3).
 - `Canopy.Lsp.Rows` if any `row-types` field is touched.
 
 ### M5.3 Source maps and projections
@@ -496,8 +531,8 @@ Exit: scripted-LSP session tests; nightly e2e with pyright/basedpyright and HLS.
 
 ### M5.8 Completion merge
 
-- `Canopy.Intel` merge of LSP and REPL candidates and ranking (§9.4); wired as tendril's `Completer`
-  with kinds/types and docs side panel.
+- `Canopy.Intel` merge of LSP and REPL candidates and ranking (§9.4); answering tendril's completion
+  request (§5.5), with kinds/types and docs side panel.
 
 ### M5.9 Hover, type bar, signature help
 
@@ -529,7 +564,7 @@ Exit: feature table §8 complete. Steps are mostly independent of each other.
 
 ### M6.3 History database
 
-- SQLite `History` interpreter with context per entry; prefix up-arrow per profile; Ctrl-R fuzzy
+- SQLite history, answering tendril's history requests (§5.5), with context per entry; prefix up-arrow per profile; Ctrl-R fuzzy
   popup ranked by recency/project/success (§8.8).
 
 ### M6.4 History browser
@@ -540,18 +575,20 @@ Exit: feature table §8 complete. Steps are mostly independent of each other.
 
 - The terminal's `SELECTION` data key and option, as `TerminalData`/`TerminalOption` constructors
   over the selection API's value (left out of M1.5).
-- Alt-↑/↓ selection, copy input/output/both, re-insert and re-run, fold with "N more lines", timing
-  and exit/exception markers (§8.3, §8.4).
+- In the transcript view (M3.13): Alt-↑/↓ selection, copy input/output/both, re-insert and re-run,
+  expanding a fold. Inline: output committed folded with "N more lines", timing and exit/exception
+  markers (§8.3, §8.4).
 
 ### M6.6 Search
 
-- `Ghostty.Effectful.Search` (FFI + effectful) and transcript search including folded output.
+- `Ghostty.Effectful.Search` (FFI + effectful) and transcript search including folded output, over
+  the transcript view's terminal (M3.13, §8.4).
 - At libghostty-vt 1.0 the search's selection moves with `ghostty_search_select_next`/`_prev` (the
   `OPT_SELECT_NEXT`/`PREV` options are gone), and its data and option keys start at `INVALID = 0`.
 
 ### M6.7 Export
 
-- Script / plain / HTML export via the formatter (§8.4).
+- Script / plain / HTML export from the store, through the formatter (§8.4).
 
 ### M6.8 Rewind and checkpoints
 
@@ -560,10 +597,13 @@ Exit: feature table §8 complete. Steps are mostly independent of each other.
 
 ### M6.9 Sessions
 
-- Transcript journal, `--continue` replay (§8.7).
+- The block store as a journal on disk; `--continue` commits its blocks again and replays their
+  inputs (§8.7, D23).
 
-### M6.10 Snapshots
+### M6.10 Snapshots (optional)
 
+- Optional since D23: the journal restores a session's display (M6.9), and §8's audit (M6.17) does
+  not need this step. Build it only if the child terminal's exact state proves to be wanted.
 - `Ghostty.Effectful.Snapshot` (FFI + effectful); exact screen restore without re-running.
 - The snapshot byte format is outside libghostty-vt's 1.x ABI promise, so a stored snapshot must be
   allowed to fail to decode after an upgrade: the session falls back to replay (DESIGN.md §8.7).
