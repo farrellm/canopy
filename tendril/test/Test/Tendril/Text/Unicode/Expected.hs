@@ -12,5 +12,8 @@ digests =
     ("indicConjunctBreak", 0x05400450a9b80ca6),
     ("extendedPictographic", 0x5fc4fdef1b6d16a5),
     ("width", 0x0f6ecb8a3f093d8e),
-    ("emojiVariationBase", 0x60bd89eaae8d1ce8)
+    ("emojiVariationBase", 0x60bd89eaae8d1ce8),
+    ("zeroWidthInCluster", 0x29bc0a352a483285),
+    ("emojiModifier", 0xcb4d0a690cae081e),
+    ("emojiModifierBase", 0x6afa824ca519961b)
   ]

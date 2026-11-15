@@ -58,6 +58,18 @@ Written as changes land, not at release (DESIGN.md §2.9).
   property over every code point, which `tendril-test` recomputes through the lookups; CI runs the
   script with `--check`, with the UCD files cached. A probe of `width` against libghostty's
   `codepointWidth` agreed on all 1,114,112 code points (§14.2); M2.3 makes it a test (M2.1).
+- T0 text (M2.2): `Tendril.Text.Units` (`Offset (u :: Unit)`, abstract, no `Num`, nominal role,
+  with a test that a coercion between units does not type-check), `Tendril.Text.Grapheme`
+  (segmentation, tested on the 853 cases of the UCD's `GraphemeBreakTest.txt`, which the generator
+  now writes into the test suite: 851 pass as written, and the two with a skin tone after a letter
+  with the tailoring's break before it), `Tendril.Text.Width` (a text's cells with grapheme-cluster
+  mode on or off) and `Tendril.Text.Buffer` (a `text-rope` rope with total conversions between
+  bytes, UTF-16 units, code points and clusters). Clusters follow libghostty-vt's two tailorings of
+  UAX #29, found by a probe against its `graphemes`: an emoji modifier continues only a modifier
+  base, and a VS15 or VS16 after anything but a variation base is invisible to the rules (D33,
+  DESIGN.md §5.3). The tables gain `zeroWidthInCluster`, `emojiModifier` and
+  `emojiModifierBase`. The first QuickCheck properties (unit round trips, clusters, widths), and
+  CI runs `tendril-test` with the fixed `QUICKCHECK_SEED` again.
 
 ### M1: ghostty
 

@@ -7,11 +7,18 @@ Writes `Tendril.Text.Unicode.Tables`, which answers, for every code point:
   the properties UAX #29's segmentation reads;
 - its width in cells, as libghostty-vt computes it (below);
 - whether it is the base of an emoji variation sequence, which decides
-  whether a following VS15 or VS16 changes a cluster's width.
+  whether a following VS15 or VS16 changes a cluster's width;
+- whether it adds no width inside a cluster, libghostty-vt's
+  `width_zero_in_grapheme`, which its cluster width reads;
+- whether it is an Emoji_Modifier or an Emoji_Modifier_Base, which
+  libghostty-vt's tailoring of UAX #29 reads: a modifier continues a cluster
+  only straight after a base (uucode's `isExtendNoControl`).
 
 and `Test.Tendril.Text.Unicode.Expected`, a digest of each property over all
 of 0..10FFFF, which the test suite recomputes through the public lookups: the
 `--check` below compares text, and the digests check what GHC decodes from it.
+It also writes `Test.Tendril.Text.Grapheme.Conformance`, the cases of the
+UCD's `GraphemeBreakTest.txt`, which `Tendril.Text.Grapheme` must pass.
 
 **The width rule is libghostty-vt's**, because width is the terminal's
 decision (§5.3). libghostty-vt 1.0.0 takes it from uucode
@@ -56,10 +63,12 @@ UCD_SHA256 = {
     "extracted/DerivedEastAsianWidth.txt": "f4c7bc4537a71e12452f6347ecbbc71c31cba21b5190c92be1ae296b0ef32b09",
     "extracted/DerivedGeneralCategory.txt": "d6b151d2d40ee9b1876d26f417980f45ffae47b6055ccf7203cb31f07a030f94",
     "DerivedCoreProperties.txt": "09c928886a178fcafd93c29e4bd59073a058e5a100b716d425cb563ab50f68c9",
+    "auxiliary/GraphemeBreakTest.txt": "b0cf047ee94485bbdc846de2b902f5f8a815f6b674f9d04223cddadd91c9df31",
 }
 
 OUT = Path("tendril/src/Tendril/Text/Unicode/Tables.hs")
 OUT_EXPECTED = Path("tendril/test/Test/Tendril/Text/Unicode/Expected.hs")
+OUT_CONFORMANCE = Path("tendril/test/Test/Tendril/Text/Grapheme/Conformance.hs")
 
 N = 0x110000
 
@@ -171,11 +180,14 @@ def load():
 
     ext_pict = [False] * N
     modifier = [False] * N
+    modifier_base = [False] * N
     for a, b, (v,) in records(fetch("emoji/emoji-data.txt")):
         if v == "Extended_Pictographic":
             fill(ext_pict, a, b, True)
         elif v == "Emoji_Modifier":
             fill(modifier, a, b, True)
+        elif v == "Emoji_Modifier_Base":
+            fill(modifier_base, a, b, True)
 
     vs_base = [False] * N
     for line in fetch("emoji/emoji-variation-sequences.txt").splitlines():
@@ -183,18 +195,22 @@ def load():
         if line:
             vs_base[int(line.split(";")[0].split()[0], 16)] = True
 
-    width = [ghostty_width(cp, gc[cp], eaw[cp], gcb[cp], ignorable[cp], modifier[cp]) for cp in range(N)]
+    widths = [ghostty_width(cp, gc[cp], eaw[cp], gcb[cp], ignorable[cp], modifier[cp]) for cp in range(N)]
     return {
         "graphemeBreak": gcb,
         "indicConjunctBreak": incb,
         "extendedPictographic": [int(x) for x in ext_pict],
-        "width": width,
+        "width": [w for w, _ in widths],
         "emojiVariationBase": [int(x) for x in vs_base],
+        "zeroWidthInCluster": [int(z) for _, z in widths],
+        "emojiModifier": [int(x) for x in modifier],
+        "emojiModifierBase": [int(x) for x in modifier_base],
     }
 
 
 def ghostty_width(cp, gc, eaw, gcb, ignorable, modifier):
-    """The module docstring's rule, uucode's `Wcwidth` and ghostty's fold of it."""
+    """The module docstring's rule, uucode's `Wcwidth` and ghostty's fold of it:
+    the width, and `zero_in_grapheme`."""
     if gc in ("Cc", "Cs", "Zl", "Zp"):
         w = 0
     elif cp == 0x00AD:
@@ -211,8 +227,8 @@ def ghostty_width(cp, gc, eaw, gcb, ignorable, modifier):
     g = GCB[gcb][0]
     zero_in_grapheme = w == 0 or modifier or gc in ("Mn", "Me") or g in ("V", "T", "Prepend")
     if zero_in_grapheme and not modifier and g != "Prepend":
-        return 0
-    return standalone
+        return 0, zero_in_grapheme
+    return standalone, zero_in_grapheme
 
 
 def classes(props):
@@ -286,7 +302,15 @@ def generate():
         sys.exit("gen-unicode-tables: a stage no longer fits in a byte; widen it")
     col = {k: [r[i] for r in rows] for i, k in enumerate(keys)}
     flags = [
-        e | (v << 1) for e, v in zip(col["extendedPictographic"], col["emojiVariationBase"], strict=True)
+        e | (v << 1) | (z << 2) | (m << 3) | (b << 4)
+        for e, v, z, m, b in zip(
+            col["extendedPictographic"],
+            col["emojiVariationBase"],
+            col["zeroWidthInCluster"],
+            col["emojiModifier"],
+            col["emojiModifierBase"],
+            strict=True,
+        )
     ]
 
     hs = f"""\
@@ -308,6 +332,9 @@ module Tendril.Text.Unicode.Tables
     extendedPictographic,
     emojiVariationBase,
     width,
+    zeroWidthInCluster,
+    emojiModifier,
+    emojiModifierBase,
   )
 where
 
@@ -351,6 +378,35 @@ emojiVariationBase c = testBit (flagsOf (classOf c)) 1
 width :: Char -> Int
 width c = widthOf (classOf c)
 
+-- | Whether a code point adds no width when it continues a grapheme cluster
+-- (libghostty-vt's @width_zero_in_grapheme@): a zero-width code point, a
+-- nonspacing or enclosing mark, a Hangul V or T jamo, a prepend, or an emoji
+-- modifier. Any other code point after a cluster's first makes it two cells
+-- wide, in the terminal's grapheme-cluster mode (2027).
+--
+-- >>> map zeroWidthInCluster "a\\x0301\\x1F3FB\\x6F22"
+-- [False,True,True,False]
+zeroWidthInCluster :: Char -> Bool
+zeroWidthInCluster c = testBit (flagsOf (classOf c)) 2
+
+-- | Whether a code point is an @Emoji_Modifier@ (UTS #51): the five skin
+-- tones. UAX #29 makes it @Extend@, but libghostty-vt continues a cluster
+-- with one only straight after an 'emojiModifierBase', as UTS #51's ED-13
+-- says, and so does "Tendril.Text.Grapheme".
+--
+-- >>> map emojiModifier "\\x1F3FB\\x1F44D\\&a"
+-- [True,False,False]
+emojiModifier :: Char -> Bool
+emojiModifier c = testBit (flagsOf (classOf c)) 3
+
+-- | Whether a code point is an @Emoji_Modifier_Base@ (UTS #51), which an
+-- 'emojiModifier' may follow in one cluster.
+--
+-- >>> map emojiModifierBase "\\x1F44D\\x1F600\\&a"
+-- [True,False,False]
+emojiModifierBase :: Char -> Bool
+emojiModifierBase c = testBit (flagsOf (classOf c)) 4
+
 -- A code point's class: stage 1 maps its block (the code point shifted right
 -- by {SHIFT}) to a block number, and stage 2 the block's code points to their
 -- classes. Each class has one value of each property.
@@ -375,7 +431,7 @@ flagsOf = byteAt classFlags
 {literal("classGraphemeBreak", col["graphemeBreak"], "Each class's 'GraphemeBreak', by constructor index.")}
 {literal("classIncb", col["indicConjunctBreak"], "Each class's 'IndicConjunctBreak', by constructor index.")}
 {literal("classWidth", col["width"], "Each class's width.")}
-{literal("classFlags", flags, "Each class's flags: bit 0 'extendedPictographic', bit 1 'emojiVariationBase'.")}"""
+{literal("classFlags", flags, "Each class's flags: bit 0 'extendedPictographic', bit 1 'emojiVariationBase', bit 2 'zeroWidthInCluster', bit 3 'emojiModifier', bit 4 'emojiModifierBase'.")}"""
 
     items = [f'("{k}", 0x{fnv1a(props[k]):016x})' for k in keys]
     digests = "  [ " + ",\n    ".join(items) + "\n  ]"
@@ -392,7 +448,33 @@ digests :: [(Text, Word64)]
 digests =
 {digests}
 """
-    return hs, expected
+    return hs, expected, conformance()
+
+
+def conformance():
+    """`Test.Tendril.Text.Grapheme.Conformance`: each case of
+    `GraphemeBreakTest.txt` as its line number and its clusters."""
+    items = []
+    for n, line in enumerate(fetch("auxiliary/GraphemeBreakTest.txt").splitlines(), 1):
+        line = line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        # "÷ 0061 × 0308 ÷ 0062 ÷": a break at each ÷, none at each ×.
+        clusters = [c.replace("×", " ").split() for c in line.strip("÷ ").split("÷")]
+        hs = ", ".join("[" + ", ".join(f"'\\x{cp}'" for cp in cl) + "]" for cl in clusters)
+        items.append(f"({n}, [{hs}])")
+    body = "  [ " + ",\n    ".join(items) + "\n  ]"
+    return f"""\
+-- | __Generated__ by @scripts/gen-unicode-tables.py@ from the UCD's
+-- @GraphemeBreakTest.txt@ at {UCD_VERSION}: UAX #29's conformance cases, which
+-- "Tendril.Text.Grapheme" must segment as they do.
+module Test.Tendril.Text.Grapheme.Conformance (cases) where
+
+-- | Each case's line in the file, and its grapheme clusters in order.
+cases :: [(Int, [[Char]])]
+cases =
+{body}
+"""
 
 
 def main():
@@ -408,9 +490,9 @@ def main():
             print(f"shift {shift}: stage1 {len(s1)} (max {max(s1)}) + stage2 {len(s2)} = {len(s1) + len(s2)}")
         return 0
 
-    hs, expected = generate()
+    hs, expected, cases = generate()
     stale = []
-    for path, text in ((OUT, hs), (OUT_EXPECTED, expected)):
+    for path, text in ((OUT, hs), (OUT_EXPECTED, expected), (OUT_CONFORMANCE, cases)):
         old = path.read_text() if path.exists() else ""
         if old == text:
             continue

@@ -33,7 +33,11 @@ library
   import:           warnings, extensions
   exposed-modules:
     Tendril
+    Tendril.Text.Buffer
+    Tendril.Text.Grapheme
     Tendril.Text.Unicode.Tables
+    Tendril.Text.Units
+    Tendril.Text.Width
 
   other-modules:    Paths_tendril
   autogen-modules:  Paths_tendril
@@ -42,6 +46,8 @@ library
     , base ^>=4.21.2.0
     , bytestring ^>=0.12
     , canopy-prelude
+    , text ^>=2.1
+    , text-rope ^>=0.3
 
   mixins:
     base hiding (Prelude),
@@ -73,17 +79,26 @@ test-suite tendril-test
   main-is:          Main.hs
   other-modules:
     Test.Tendril
+    Test.Tendril.Text.Buffer
+    Test.Tendril.Text.Gen
+    Test.Tendril.Text.Grapheme
+    Test.Tendril.Text.Grapheme.Conformance
     Test.Tendril.Text.Unicode
     Test.Tendril.Text.Unicode.Expected
+    Test.Tendril.Text.Units
+    Test.Tendril.Text.Width
 
   build-depends:
     , base ^>=4.21.2.0
     , canopy-prelude
     , effectful-core ^>=2.7.1
     , ghostty-effectful
+    , QuickCheck ^>=2.19
     , tasty ^>=1.5
     , tasty-hunit ^>=0.10.2
+    , tasty-quickcheck ^>=0.11.1
     , tendril
+    , text ^>=2.1
 
   mixins:
     base hiding (Prelude),
