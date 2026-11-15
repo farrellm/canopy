@@ -6,11 +6,14 @@ import Data.List (lookup)
 import Tendril.Text.Unicode.Tables
   ( GraphemeBreak (..),
     IndicConjunctBreak (..),
+    emojiModifier,
+    emojiModifierBase,
     emojiVariationBase,
     extendedPictographic,
     graphemeBreak,
     indicConjunctBreak,
     width,
+    zeroWidthInCluster,
   )
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
@@ -68,7 +71,10 @@ lookups =
     ("indicConjunctBreak", fromIntegral . fromEnum . indicConjunctBreak),
     ("extendedPictographic", bool 0 1 . extendedPictographic),
     ("width", fromIntegral . width),
-    ("emojiVariationBase", bool 0 1 . emojiVariationBase)
+    ("emojiVariationBase", bool 0 1 . emojiVariationBase),
+    ("zeroWidthInCluster", bool 0 1 . zeroWidthInCluster),
+    ("emojiModifier", bool 0 1 . emojiModifier),
+    ("emojiModifierBase", bool 0 1 . emojiModifierBase)
   ]
 
 -- | 64-bit FNV-1a, the generator's @fnv1a@.

@@ -6,7 +6,7 @@ lists of them): it builds with
 commit if it changes a decision (§2.9). Section references (§) are to DESIGN.md.
 
 M0 is done (PR #1), and M1 (PRs #2–#13; the performance work of D18–D21 followed in PR #30). M2 has
-started: M2.1 is done. Steps
+started: M2.1 and M2.2 are done. Steps
 are numbered `M<n>.<k>`
 and are in dependency order within a milestone.
 
@@ -201,6 +201,20 @@ Exit: decoder roundtrip and render-diff properties pass; `tendril-demo` usable a
   (§10.1, D30). The same for every later type with a parameter that carries a guarantee.
 - Tests: UCD `GraphemeBreakTest.txt` conformance; unit conversions round-trip.
 - First QuickCheck suite: restore the fixed `QUICKCHECK_SEED` / `--quickcheck-replay` in CI.
+- `Offset` is abstract (`offset`, `fromOffset`), so no user has the constructor that would let
+  `coerce` unwrap it whatever the role; the role test fails with the annotation removed.
+  `Tendril.Text.Buffer` converts between `Byte`, `Utf16`, `CodePoint` and `Grapheme` totally
+  (`Nothing` past the end or inside a unit), through a `BufferUnit` class; `Column` is not one,
+  since a column is a place on a row: `Tendril.Text.Width` measures text, in grapheme-cluster mode
+  (2027) or not. The conformance cases are generated into the test suite by
+  `gen-unicode-tables.py` from the pinned `GraphemeBreakTest.txt`; 851 of 853 pass as written, and
+  two (lines 844–845, a skin tone after a letter) pass with the first tailoring's break below, as
+  in uucode's own test. So `.Grapheme` is UAX #29 as libghostty-vt tailors it, not UAX #29 alone.
+  At 18.0.0 GB9c no longer needs a consonant before the linker. A probe against libghostty's `graphemes` found its two tailorings
+  of UAX #29 (an emoji modifier continues only a modifier base; a stray variation selector is
+  invisible to the rules); tendril copies them, and the tables gained three flags for them and for
+  the cluster width (D33, DESIGN.md §5.3). The probe then agreed on a million generated texts;
+  M2.3 keeps it as the test. CI runs `tendril-test` alone with the seed. **Done.**
 
 ### M2.3 Width oracle
 

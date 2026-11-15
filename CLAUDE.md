@@ -1,7 +1,7 @@
 # canopy
 
 A language-agnostic REPL frontend for the terminal: a terminal emulator (libghostty-vt) with one pane,
-a line editor, tree-sitter and LSP. **M0 (infrastructure) and M1 (the ghostty bindings) are built**
+a line editor, tree-sitter and LSP. **M0 (infrastructure) and M1 (the ghostty bindings) are built, and M2 (tendril) has started**
 (`PLAN.md`), with nothing user-facing yet. [`DESIGN.md`](./DESIGN.md) is the architecture and is ahead of the code. Where the
 two disagree, the design is the intent and the code is behind. Conventions are cassini's
 (`../cassini`) on purpose (§2, D10).

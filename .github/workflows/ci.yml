@@ -25,8 +25,10 @@ env:
   GHC_VERSION: "9.12.4"
   CABAL_VERSION: "3.16.1.0"
   DOCTEST_VERSION: "0.25.0"
-  # The fixed QuickCheck seed (§11.1) arrives with the first property test:
-  # tasty rejects --quickcheck-replay in a suite without tasty-quickcheck.
+  # CI runs the property tests with a fixed seed and prints it on failure
+  # (§11.1). tasty rejects --quickcheck-replay in a suite without
+  # tasty-quickcheck, so only the suites that have it are given it.
+  QUICKCHECK_SEED: "20261115"
   # The same flags on every cabal command, so no step reconfigures the build.
   CABAL_FLAGS: --enable-tests --enable-benchmarks --ghc-options=-Werror
 
@@ -95,8 +97,14 @@ jobs:
       - name: Test
         run: >-
           cabal test $CABAL_FLAGS --test-show-details=direct
-          ghostty-vt-ffi-test ghostty-effectful-test tendril-test
+          ghostty-vt-ffi-test ghostty-effectful-test
           tree-sitter-ffi-test tree-sitter-effectful-test canopy-test
+
+      - name: Test, the suites with properties, at the fixed seed
+        run: >-
+          cabal test $CABAL_FLAGS --test-show-details=direct
+          --test-options="--quickcheck-replay=$QUICKCHECK_SEED"
+          tendril-test
 
       - name: The committed tree-sitter shims are current (§5A.2)
         run: python3 scripts/gen-ts-shims.py --check
