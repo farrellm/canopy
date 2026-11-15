@@ -17,10 +17,10 @@ import Tendril.Text.Unicode.Tables (GraphemeBreak (..), graphemeBreak)
 import Tendril.Text.Unicode.Tables qualified as Tables
 import Tendril.Text.Units (fromOffset)
 import Tendril.Text.Width (WidthMode (..), clusterWidth, textWidth)
-import Test.QuickCheck (Gen, Property, forAll, ioProperty, withNumTests, (.&&.), (===))
-import Test.Tasty (TestTree, testGroup)
+import Test.QuickCheck (Gen, Property, forAllShrink, ioProperty, shrinkList, (.&&.), (===))
+import Test.Tasty (TestTree, adjustOption, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
-import Test.Tasty.QuickCheck (testProperty)
+import Test.Tasty.QuickCheck (QuickCheckTests (..), testProperty)
 import Test.Tendril.Text.Gen (genText)
 
 tests :: TestTree
@@ -37,7 +37,8 @@ tests =
       testCase "a corpus of clusters" $ do
         theirs <- oracle (traverse graphemes corpus)
         [(t, ours t, g) | (t, g) <- zip corpus (map (map pair) theirs), ours t /= g] @?= [],
-      testProperty "generated texts' clusters and widths" sameAsGhostty
+      adjustOption (\(QuickCheckTests n) -> QuickCheckTests (n * 1000)) $
+        testProperty "generated texts' clusters and widths" sameAsGhostty
     ]
 
 -- | Tendril's clusters of a text, each with its width.
@@ -53,10 +54,12 @@ pair g = (g.cluster, fromIntegral g.width)
 -- | A text's clusters and their widths are ghostty's, and so is its width
 -- in grapheme-cluster mode. Many texts, since the generator weights the hard
 -- code points: the million of M2.2's probe agreed, and a tenth of that takes
--- about two seconds.
+-- about two seconds. So the count is a thousand times tasty's, which keeps
+-- @--quickcheck-tests@ in charge. A failure shrinks by dropping code points, which
+-- keeps the controls out.
 sameAsGhostty :: Property
 sameAsGhostty =
-  withNumTests 100000 . forAll noControls $ \t -> ioProperty $ do
+  forAllShrink noControls (map T.pack . shrinkList (const []) . T.unpack) $ \t -> ioProperty $ do
     theirs <- map pair <$> oracle (graphemes t)
     pure $
       ours t === theirs

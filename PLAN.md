@@ -222,7 +222,7 @@ Exit: decoder roundtrip and render-diff properties pass; `tendril-demo` usable a
 - Widths agree with libghostty for every codepoint and a cluster corpus (§11.2).
 - The dependency was already there: M0 added it to check the oracle links. `Test.Tendril.Text.Oracle`
   compares `width` with `codepointWidth` on every code point, and clusters with their widths (and a
-  text's width with mode 2027 on) with `graphemes`, on a corpus of 43 texts and on 100,000
+  text's width with mode 2027 on) with `graphemes`, on a corpus of 42 texts and on 100,000
   generated texts without controls, whose clusters the header leaves unspecified (about two
   seconds). Everything agreed on the first run; making VS15 widen a cluster fails both. **Done.**
 

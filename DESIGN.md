@@ -1066,7 +1066,8 @@ point that is not zero-width-in-cluster, and chosen by a VS15 or VS16 after a va
 (`Tendril.Text.Width.clusterWidth`, ghostty's `graphemeWidth`); without the mode the code points'
 widths add. A probe of tendril's clusters and their widths against `ghostty_unicode_grapheme_width`
 agreed on a million generated texts, weighted toward modifier bases, skin tones, ZWJ and variation
-selectors (M2.2), and `tendril-test` repeats it on a hundred thousand at each run (M2.3).
+selectors (M2.2), and `tendril-test` repeats it on a hundred thousand at each run, the same ones
+in CI, which pins the seed (M2.3).
 `Tendril.Term.Caps` probes the host for grapheme-cluster mode (mode 2027) and adjusts. Mismatched
 width tables are the classic source of line editors corrupting the screen; the test suite compares
 tendril's widths against libghostty's for every codepoint and a corpus of clusters (§11.2), and the
