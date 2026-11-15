@@ -100,7 +100,7 @@ def fetch(rel):
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
         print(f"gen-unicode-tables: fetching {UCD_URL}/{rel}", file=sys.stderr)
-        with urllib.request.urlopen(f"{UCD_URL}/{rel}") as r:
+        with urllib.request.urlopen(f"{UCD_URL}/{rel}", timeout=60) as r:
             data = r.read()
         tmp = path.with_suffix(".part")
         tmp.write_bytes(data)
@@ -108,7 +108,10 @@ def fetch(rel):
     data = path.read_bytes()
     got = hashlib.sha256(data).hexdigest()
     if got != UCD_SHA256[rel]:
-        sys.exit(f"gen-unicode-tables: {path}: sha256 {got}, pinned {UCD_SHA256[rel]}")
+        sys.exit(
+            f"gen-unicode-tables: {path}: sha256 {got}, pinned {UCD_SHA256[rel]}; "
+            "delete it to fetch it again"
+        )
     return data.decode("utf-8")
 
 
@@ -287,8 +290,6 @@ def generate():
     ]
 
     hs = f"""\
-{{-# LANGUAGE StrictData #-}}
-
 -- | Unicode {UCD_VERSION}'s character properties that segmentation and width
 -- read (DESIGN.md §5.3).
 --
@@ -342,8 +343,8 @@ emojiVariationBase :: Char -> Bool
 emojiVariationBase c = testBit (flagsOf (classOf c)) 1
 
 -- | The cells a code point takes, as libghostty-vt computes it: 0, 1 or 2.
--- The rule is in the generator's header; tendril's test suite holds it
--- against libghostty's for every code point.
+-- The rule is in the generator's header; a probe held it against
+-- libghostty's for every code point, and M2.3's test keeps it there.
 --
 -- >>> map width "a\\x6F22\\x0301\\x1F600\\x0007"
 -- [1,2,0,2,0]
@@ -363,13 +364,11 @@ classOf c = fromMaybe 0 $ do
 byteAt :: ByteString -> Int -> Int
 byteAt bs i = maybe 0 fromIntegral (BS.indexMaybe bs i)
 
-graphemeBreakOf, incbOf, widthOf :: Int -> Int
+graphemeBreakOf, incbOf, widthOf, flagsOf :: Int -> Int
 graphemeBreakOf = byteAt classGraphemeBreak
 incbOf = byteAt classIncb
-widthOf i = maybe 1 fromIntegral (BS.indexMaybe classWidth i)
-
-flagsOf :: Int -> Word8
-flagsOf i = fromMaybe 0 (BS.indexMaybe classFlags i)
+widthOf = byteAt classWidth
+flagsOf = byteAt classFlags
 
 {literal("stage1", stage1, f"Stage 1: each block of {1 << SHIFT} code points' block number.")}
 {literal("stage2", stage2, "Stage 2: the blocks, each code point's class.")}

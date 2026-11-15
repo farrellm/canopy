@@ -1,5 +1,3 @@
-{-# LANGUAGE StrictData #-}
-
 -- | Unicode 18.0.0's character properties that segmentation and width
 -- read (DESIGN.md §5.3).
 --
@@ -121,8 +119,8 @@ emojiVariationBase :: Char -> Bool
 emojiVariationBase c = testBit (flagsOf (classOf c)) 1
 
 -- | The cells a code point takes, as libghostty-vt computes it: 0, 1 or 2.
--- The rule is in the generator's header; tendril's test suite holds it
--- against libghostty's for every code point.
+-- The rule is in the generator's header; a probe held it against
+-- libghostty's for every code point, and M2.3's test keeps it there.
 --
 -- >>> map width "a\x6F22\x0301\x1F600\x0007"
 -- [1,2,0,2,0]
@@ -142,13 +140,11 @@ classOf c = fromMaybe 0 $ do
 byteAt :: ByteString -> Int -> Int
 byteAt bs i = maybe 0 fromIntegral (BS.indexMaybe bs i)
 
-graphemeBreakOf, incbOf, widthOf :: Int -> Int
+graphemeBreakOf, incbOf, widthOf, flagsOf :: Int -> Int
 graphemeBreakOf = byteAt classGraphemeBreak
 incbOf = byteAt classIncb
-widthOf i = maybe 1 fromIntegral (BS.indexMaybe classWidth i)
-
-flagsOf :: Int -> Word8
-flagsOf i = fromMaybe 0 (BS.indexMaybe classFlags i)
+widthOf = byteAt classWidth
+flagsOf = byteAt classFlags
 
 -- | Stage 1: each block of 128 code points' block number.
 stage1 :: ByteString
