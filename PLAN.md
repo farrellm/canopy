@@ -5,7 +5,8 @@ lists of them): it builds with
 `-Werror`, passes every CI step, adds its `CHANGELOG.md` line, and updates `DESIGN.md` in the same
 commit if it changes a decision (§2.9). Section references (§) are to DESIGN.md.
 
-M0 is done (PR #1), and M1 (PRs #2–#13; the performance work of D18–D21 followed in PR #30). Steps
+M0 is done (PR #1), and M1 (PRs #2–#13; the performance work of D18–D21 followed in PR #30). M2 has
+started: M2.1 is done. Steps
 are numbered `M<n>.<k>`
 and are in dependency order within a milestone.
 
@@ -183,6 +184,14 @@ Exit: decoder roundtrip and render-diff properties pass; `tendril-demo` usable a
 - `scripts/gen-unicode-tables.py`: pinned UCD version → `Tendril.Text.Unicode.Tables` (grapheme
   break, extended pictographic, `InCB`, East Asian width), committed; `--check` mode in CI like the
   tree-sitter shims (§5.3).
+- The UCD version is libghostty-vt's (18.0.0; its uucode's files are unicode.org's, byte for
+  byte), fetched into `_deps/ucd/` against pinned sums. The width is libghostty-vt's rule, not East
+  Asian Width alone, so the tables carry one width per code point computed from General_Category,
+  Default_Ignorable, Emoji_Modifier and the grapheme-break classes too, and an emoji-variation-base
+  flag for M2.2's VS15/VS16 widths (DESIGN.md §5.3). Two byte stages read with `indexMaybe`, no raw
+  memory read (§10.6). The generator writes a digest per property over every code point, which
+  `tendril-test` recomputes. A probe of `width` against `codepointWidth` agreed on every code point;
+  M2.3 keeps it as the test. **Done.**
 
 ### M2.2 T0 text
 

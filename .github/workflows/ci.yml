@@ -101,6 +101,17 @@ jobs:
       - name: The committed tree-sitter shims are current (§5A.2)
         run: python3 scripts/gen-ts-shims.py --check
 
+      # The pinned UCD files are fetched once and cached; the script checks
+      # each against its pinned sum either way.
+      - name: Restore the pinned UCD
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: _deps/ucd
+          key: ucd-${{ hashFiles('scripts/gen-unicode-tables.py') }}
+
+      - name: The committed Unicode tables are current (§5.3)
+        run: python3 scripts/gen-unicode-tables.py --check
+
       - name: The generated ghostty binding is current (§3.3)
         run: python3 scripts/gen-ghostty-ffi.py --check
 

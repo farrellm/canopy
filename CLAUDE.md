@@ -21,8 +21,8 @@ two disagree, the design is the intent and the code is behind. Conventions are c
 | `cabal.project` | Lists the seven packages. |
 | `.ormolu` | ormolu's fixities and re-exports (§2.5). Copied from cassini. Not style config. |
 | `.hlint.yaml`, `lint/` | §2.6's layering rules, their fixtures, and `lint/check-layering.sh`. |
-| `scripts/` | `build-libghostty.sh`, `vendor-tree-sitter.sh`, `gen-ts-shims.py`, `gen-ghostty-ffi.py`, `check-ghostty-coverage.py`, `check-ghostty-signatures.py`, `check-ghostty-safety.py`, `check-common-stanzas.sh`, `check-haddock.py`, `check-layout-rows.py`, `check-allocation.py`. |
-| `_deps/` | Gitignored output of `build-libghostty.sh`: the Zig, the release tarballs unpacked, and the built library. |
+| `scripts/` | `build-libghostty.sh`, `vendor-tree-sitter.sh`, `gen-ts-shims.py`, `gen-unicode-tables.py`, `gen-ghostty-ffi.py`, `check-ghostty-coverage.py`, `check-ghostty-signatures.py`, `check-ghostty-safety.py`, `check-common-stanzas.sh`, `check-haddock.py`, `check-layout-rows.py`, `check-allocation.py`. |
+| `_deps/` | Gitignored output of `build-libghostty.sh` (the Zig, the release tarballs unpacked, and the built library) and of `gen-unicode-tables.py` (the pinned UCD files). |
 | `.github/workflows/ci.yml` | CI, §2.8 steps 1–8. |
 | `.github/renovate.json` | Renovate, for the workflow's actions only (§2.8, D22). |
 
@@ -50,7 +50,9 @@ two disagree, the design is the intent and the code is behind. Conventions are c
 6. **Pins move only on purpose.** `ghostty-vt-ffi/LIBGHOSTTY_VT_VERSION` (with the tarballs' sums in
    `build-libghostty.sh`) and
    `tree-sitter-ffi/TREE_SITTER_VERSION` each change in one commit that says why. A tree-sitter bump
-   also regenerates the shims, and a ghostty bump the generated binding (`gen-ghostty-ffi.py`).
+   also regenerates the shims, and a ghostty bump the generated binding (`gen-ghostty-ffi.py`). The
+   UCD version and sums in `scripts/gen-unicode-tables.py` are libghostty-vt's Unicode (§5.3): a
+   ghostty bump that moves its Unicode moves them, and regenerates tendril's tables, in that commit.
 7. **Goldens are read before they are accepted.** Every fixed bug adds a numbered regression case
    and a `CHANGELOG.md` line in the same commit (§11.1).
 
@@ -66,6 +68,7 @@ root:
   time. That is by design (§3.1).
 - Build: `cabal build all --enable-tests --enable-benchmarks --ghc-options=-Werror`
 - Test: `cabal test all`, `python3 scripts/gen-ts-shims.py --check`,
+  `python3 scripts/gen-unicode-tables.py --check`,
   `python3 scripts/gen-ghostty-ffi.py --check`, `python3 scripts/check-ghostty-coverage.py`,
   `python3 scripts/check-ghostty-signatures.py` and `python3 scripts/check-ghostty-safety.py`
 - Doctest: `cabal repl --with-repl=doctest --repl-options=-Wno-missing-export-lists lib:<pkg>`, for
