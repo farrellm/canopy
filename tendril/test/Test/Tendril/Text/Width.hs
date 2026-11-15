@@ -1,5 +1,5 @@
 -- | Display width (DESIGN.md §5.3), by hand for the clusters whose rule is
--- subtle. M2.3 holds the widths against libghostty's.
+-- subtle. "Test.Tendril.Text.Oracle" holds them against libghostty's.
 module Test.Tendril.Text.Width (tests) where
 
 import Tendril.Text.Unicode.Tables (width)

@@ -6,7 +6,7 @@ lists of them): it builds with
 commit if it changes a decision (§2.9). Section references (§) are to DESIGN.md.
 
 M0 is done (PR #1), and M1 (PRs #2–#13; the performance work of D18–D21 followed in PR #30). M2 has
-started: M2.1 and M2.2 are done. Steps
+started: M2.1–M2.3 are done. Steps
 are numbered `M<n>.<k>`
 and are in dependency order within a milestone.
 
@@ -220,6 +220,11 @@ Exit: decoder roundtrip and render-diff properties pass; `tendril-demo` usable a
 
 - `tendril-test` gains its test-only `ghostty-effectful` dependency (§1.3, rule 2's allowed edge).
 - Widths agree with libghostty for every codepoint and a cluster corpus (§11.2).
+- The dependency was already there: M0 added it to check the oracle links. `Test.Tendril.Text.Oracle`
+  compares `width` with `codepointWidth` on every code point, and clusters with their widths (and a
+  text's width with mode 2027 on) with `graphemes`, on a corpus of 43 texts and on 100,000
+  generated texts without controls, whose clusters the header leaves unspecified (about two
+  seconds). Everything agreed on the first run; making VS15 widen a cluster fails both. **Done.**
 
 ### M2.4 T1 editing
 

@@ -70,6 +70,12 @@ Written as changes land, not at release (DESIGN.md §2.9).
   DESIGN.md §5.3). The tables gain `zeroWidthInCluster`, `emojiModifier` and
   `emojiModifierBase`. The first QuickCheck properties (unit round trips, clusters, widths), and
   CI runs `tendril-test` with the fixed `QUICKCHECK_SEED` again.
+- The width oracle (M2.3, DESIGN.md §11.2): `tendril-test` holds `Tendril.Text.Unicode.Tables.width`
+  against libghostty-vt's `codepointWidth` on all 1,114,112 code points, and tendril's clusters,
+  their widths and a text's width in grapheme-cluster mode against its `graphemes`, on a corpus
+  (ZWJ sequences, flags and a tag sequence, combining marks, Indic conjuncts, Hangul, variation
+  selectors, skin tones) and on 100,000 generated texts without controls. All agree; a broken VS15
+  rule fails both the corpus and the property.
 
 ### M1: ghostty
 
