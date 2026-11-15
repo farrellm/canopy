@@ -18,7 +18,7 @@ where
 import Data.Text qualified as T
 import Tendril.Text.Grapheme (clusters)
 import Tendril.Text.Unicode.Tables (emojiVariationBase, width, zeroWidthInCluster)
-import Tendril.Text.Units (Offset, Unit (..), offset)
+import Tendril.Text.Units (Offset, Unit (..), fromOffset, offset)
 
 -- | How the host measures text.
 data WidthMode
@@ -35,19 +35,19 @@ data WidthMode
 -- >>> textWidth CodePoints "a\x2764\xFE0F"
 -- Offset 2
 textWidth :: WidthMode -> Text -> Offset 'Column
-textWidth mode = offset . fromIntegral . sum . measure
+textWidth mode = offset . sum . measure
   where
     measure = case mode of
-      Clusters -> map clusterWidth . clusters
-      CodePoints -> map width . toString
+      Clusters -> map (fromOffset . clusterWidth) . clusters
+      CodePoints -> map (fromIntegral . width) . toString
 
 -- | The cells one grapheme cluster takes in grapheme-cluster mode:
 -- libghostty-vt's @graphemeWidth@, on a text that is one cluster.
 --
--- >>> map clusterWidth ["e\x0301", "\x1F44D\x1F3FD", "\x2764", "\x2764\xFE0F", "a\xFE0F"]
+-- >>> map (fromOffset . clusterWidth) ["e\x0301", "\x1F44D\x1F3FD", "\x2764", "\x2764\xFE0F", "a\xFE0F"]
 -- [1,2,1,2,1]
-clusterWidth :: Text -> Int
-clusterWidth t = case T.uncons t of
+clusterWidth :: Text -> Offset 'Column
+clusterWidth t = offset . fromIntegral $ case T.uncons t of
   Nothing -> 0
   Just (c, rest) -> go (width c) c (toString rest)
   where

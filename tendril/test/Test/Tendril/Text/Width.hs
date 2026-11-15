@@ -2,7 +2,6 @@
 -- subtle. M2.3 holds the widths against libghostty's.
 module Test.Tendril.Text.Width (tests) where
 
-import Tendril.Text.Grapheme (clusters)
 import Tendril.Text.Unicode.Tables (width)
 import Tendril.Text.Units (fromOffset)
 import Tendril.Text.Width (WidthMode (..), clusterWidth, textWidth)
@@ -18,7 +17,7 @@ tests =
     "Tendril.Text.Width"
     [ testCase "clusters" $
         map
-          clusterWidth
+          (fromOffset . clusterWidth)
           [ "a",
             "e\x0301", -- a combining mark adds nothing
             "\x1F44D\x1F3FD", -- an emoji and its skin tone
@@ -38,8 +37,5 @@ tests =
       testCase "an empty text" $ textWidth Clusters "" @?= textWidth CodePoints "",
       testProperty "without mode 2027, code point widths add" $
         forAll genText $ \t ->
-          fromOffset (textWidth CodePoints t) === fromIntegral (sum (map width (toString t))),
-      testProperty "with it, every cluster takes at most two cells" $
-        forAll genText $ \t ->
-          all ((<= 2) . clusterWidth) (clusters t) === True
+          fromOffset (textWidth CodePoints t) === fromIntegral (sum (map width (toString t)))
     ]

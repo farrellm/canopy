@@ -226,6 +226,9 @@ Exit: decoder roundtrip and render-diff properties pass; `tendril-demo` usable a
 - `Tendril.Edit.Command` (`Command app m` indexed by `ModeKind`), `.Motion`, `.KillRing`,
   `.Selection`, `.Register`; `EditorState` and command application.
 - Properties: cursor always on a grapheme boundary; rope metric invariants preserved (§11.3).
+- Answer D-deferred-13 before the motions land: `'Grapheme` conversions segment the whole buffer
+  today, so decide between cached boundaries and a cluster metric in the rope, with a benchmark
+  on a large paste.
 
 ### M2.5 Undo tree
 
