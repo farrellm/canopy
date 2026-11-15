@@ -83,6 +83,7 @@ test-suite tendril-test
     Test.Tendril.Text.Gen
     Test.Tendril.Text.Grapheme
     Test.Tendril.Text.Grapheme.Conformance
+    Test.Tendril.Text.Oracle
     Test.Tendril.Text.Unicode
     Test.Tendril.Text.Unicode.Expected
     Test.Tendril.Text.Units

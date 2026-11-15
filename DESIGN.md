@@ -1066,7 +1066,8 @@ point that is not zero-width-in-cluster, and chosen by a VS15 or VS16 after a va
 (`Tendril.Text.Width.clusterWidth`, ghostty's `graphemeWidth`); without the mode the code points'
 widths add. A probe of tendril's clusters and their widths against `ghostty_unicode_grapheme_width`
 agreed on a million generated texts, weighted toward modifier bases, skin tones, ZWJ and variation
-selectors (M2.2), and M2.3's test makes it permanent.
+selectors (M2.2), and `tendril-test` repeats it on a hundred thousand at each run, the same ones
+in CI, which pins the seed (M2.3).
 `Tendril.Term.Caps` probes the host for grapheme-cluster mode (mode 2027) and adjusts. Mismatched
 width tables are the classic source of line editors corrupting the screen; the test suite compares
 tendril's widths against libghostty's for every codepoint and a corpus of clusters (§11.2), and the
@@ -2638,7 +2639,7 @@ reading the pinned sources. A ✗ changed the design, in the section named.
 | `text-rope` keeps UTF-16 metrics | ✓ `Data.Text.Mixed.Rope` | §5.3 |
 | libghostty-vt segments grapheme clusters by UAX #29 | ✗ 2026-11-15, 1.0.0: two tailorings (an emoji modifier continues only a modifier base; a stray VS15 or VS16 is invisible to the rules), which tendril copies; a probe agreed on a million generated texts with controls left out, whose clusters the header leaves unspecified (M2.2) | §5.3, D33 |
 | `unicode-data` provides grapheme-break and width data | ✗ neither, in 0.9.0, and nothing else on Hackage does without ICU; tendril generates its own tables | §5.3 |
-| unicode.org's UCD files at libghostty-vt's Unicode version are the ones it builds from, and a width rule computed from them agrees with `codepointWidth` | ✓ 2026-11-14, libghostty-vt 1.0.0: its uucode's 18.0.0 copies have the sums the generator pins, and a probe of the generated `width` against `codepointWidth` agreed on all 1,114,112 code points (M2.1; M2.3's test makes it permanent) | §5.3 |
+| unicode.org's UCD files at libghostty-vt's Unicode version are the ones it builds from, and a width rule computed from them agrees with `codepointWidth` | ✓ 2026-11-14, libghostty-vt 1.0.0: its uucode's 18.0.0 copies have the sums the generator pins, and a probe of the generated `width` against `codepointWidth` agreed on all 1,114,112 code points (M2.1; `tendril-test` checks every code point, M2.3) | §5.3 |
 
 Still open, each to be checked when its milestone starts: the node and julia setups (§7.2); musl
 spawn, by running it; clearing `ECHO` and setting `ECHONL` on a cooked child from the master side
