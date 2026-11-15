@@ -31,12 +31,16 @@ common extensions
 
 library
   import:           warnings, extensions
-  exposed-modules:  Tendril
+  exposed-modules:
+    Tendril
+    Tendril.Text.Unicode.Tables
+
   other-modules:    Paths_tendril
   autogen-modules:  Paths_tendril
   hs-source-dirs:   src
   build-depends:
     , base ^>=4.21.2.0
+    , bytestring ^>=0.12
     , canopy-prelude
 
   mixins:
@@ -67,7 +71,11 @@ test-suite tendril-test
   type:             exitcode-stdio-1.0
   hs-source-dirs:   test
   main-is:          Main.hs
-  other-modules:    Test.Tendril
+  other-modules:
+    Test.Tendril
+    Test.Tendril.Text.Unicode
+    Test.Tendril.Text.Unicode.Expected
+
   build-depends:
     , base ^>=4.21.2.0
     , canopy-prelude

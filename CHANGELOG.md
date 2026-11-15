@@ -46,6 +46,19 @@ Written as changes land, not at release (DESIGN.md §2.9).
   - Stale text: the introduction, §2.8 step 1, §2.1's dependency table, §8.5's cleaning rule,
     PLAN.md's header and M1.6's note, and the root `CLAUDE.md`.
 
+### M2: tendril
+
+- `scripts/gen-unicode-tables.py` writes `Tendril.Text.Unicode.Tables` from the UCD at 18.0.0,
+  libghostty-vt 1.0.0's version (its uucode's copies are byte-identical to unicode.org's, whose sums
+  the script pins): each code point's `Grapheme_Cluster_Break`, `Indic_Conjunct_Break`,
+  `Extended_Pictographic`, whether it is an emoji variation base, and its width by libghostty-vt's
+  rule (uucode's `wcwidth` and ghostty's fold of it), which needs General_Category,
+  Default_Ignorable and Emoji_Modifier beside East Asian Width (DESIGN.md §5.3). Two stages of bytes
+  in `ByteString` literals, read with `indexMaybe`. The generator also writes a digest of each
+  property over every code point, which `tendril-test` recomputes through the lookups; CI runs the
+  script with `--check`, with the UCD files cached. A probe of `width` against libghostty's
+  `codepointWidth` agreed on all 1,114,112 code points (§14.2); M2.3 makes it a test (M2.1).
+
 ### M1: ghostty
 
 - `ghostty-vt-ffi-test` is the full layout test (DESIGN.md §3.4): it parses the linked library's
