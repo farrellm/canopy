@@ -6,7 +6,7 @@ lists of them): it builds with
 commit if it changes a decision (§2.9). Section references (§) are to DESIGN.md.
 
 M0 is done (PR #1), and M1 (PRs #2–#13; the performance work of D18–D21 followed in PR #30). M2 has
-started: M2.1–M2.3 are done. Steps
+started: M2.1–M2.4 are done. Steps
 are numbered `M<n>.<k>`
 and are in dependency order within a milestone.
 
@@ -234,6 +234,18 @@ Exit: decoder roundtrip and render-diff properties pass; `tendril-demo` usable a
 - Answer D-deferred-13 before the motions land: `'Grapheme` conversions segment the whole buffer
   today, so decide between cached boundaries and a cluster metric in the rope, with a benchmark
   on a large paste.
+- D-deferred-13 is answered by neither option (D34): positions are code point offsets kept on
+  cluster boundaries. A boundary near one is found by segmenting from the nearest code point after
+  which the segmenter's state is independent of what came before, so an edit reads the text near
+  it. `tendril-bench` found the larger cost elsewhere. `text-rope` splits a chunk by walking it, and
+  its `fromText` makes one chunk, so the buffer is now built in chunks of 4,096 code points. On a
+  1 MiB paste, an edit or motion takes 0.4–52 µs, against 0.17–8 ms with one chunk. The whole-buffer
+  grapheme conversion takes 143–151 ms. CI gates the suite's allocation.
+- T1's state is `EditState`, in `Tendril.Edit.Command`, since `EditorState` is M2.11's T6 type,
+  which will hold it with the undo tree, history and revision. `apply` returns `Nothing` for the
+  editor's commands. The vi and Helix commands come with their keymaps (M6.1, M6.2). Beyond §5.4's
+  list, T1 adds Emacs's mark and region, yank-pop and registers. The mode index's role is
+  nominal. **Done.**
 
 ### M2.5 Undo tree
 

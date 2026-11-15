@@ -10,7 +10,7 @@ module Test.Tendril.Text.Units (tests) where
 
 import Control.Exception (TypeError (..), evaluate, try)
 import Data.Type.Coercion (Coercion (..))
-import Tendril.Text.Units (Offset, Unit (..))
+import Tendril.Text.Units (Offset, Range, Unit (..))
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase)
 
@@ -22,9 +22,17 @@ tests =
         r <- try (evaluate byteToUtf16)
         case r of
           Left (TypeError _) -> pass
-          Right Coercion -> assertFailure "an Offset 'Byte coerces to an Offset 'Utf16"
+          Right Coercion -> assertFailure "an Offset 'Byte coerces to an Offset 'Utf16",
+      testCase "coerce cannot change a range's unit" $ do
+        r <- try (evaluate rangeByteToUtf16)
+        case r of
+          Left (TypeError _) -> pass
+          Right (_ :: Coercion (Range 'Byte) (Range 'Utf16)) -> assertFailure "a Range 'Byte coerces to a Range 'Utf16"
     ]
 
 -- Its own binding, so its deferred error is a thunk the test forces.
 byteToUtf16 :: Coercion (Offset 'Byte) (Offset 'Utf16)
 byteToUtf16 = Coercion
+
+rangeByteToUtf16 :: Coercion (Range 'Byte) (Range 'Utf16)
+rangeByteToUtf16 = Coercion

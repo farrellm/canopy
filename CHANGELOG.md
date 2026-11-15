@@ -76,6 +76,23 @@ Written as changes land, not at release (DESIGN.md §2.9).
   (ZWJ sequences, flags and a tag sequence, combining marks, Indic conjuncts, Hangul, variation
   selectors, skin tones) and on 100,000 generated texts without controls. All agree; a broken VS15
   rule fails both the corpus and the property.
+- T1 editing (M2.4, DESIGN.md §5.4): `Tendril.Edit.Command` (`Command app m`, indexed by
+  `ModeKind`, with a nominal role and a test that a coercion between modes does not type-check;
+  `EditState`; `apply`), `.Motion` (clusters, words, line ends, lines up and down with a goal
+  column, the buffer's ends), `.KillRing` (consecutive kills join; yank and yank-pop), `.Selection`
+  (Emacs's mark and region) and `.Register`. `apply` returns `Nothing` for the editor's commands
+  (undo, history, accepting, `App`). `Tendril.Text.Units` gains `Range`, and `Tendril.Text.Buffer`
+  gains `replace`, `slice`, the clusters and boundaries near an offset, and line ends.
+- D-deferred-13 answered (D34, DESIGN.md §5.3): the cursor and anchor are code point offsets kept
+  on cluster boundaries, which a property holds over random command sequences. A boundary is found
+  by segmenting from the nearest code point after which the segmenter's state is independent of the
+  text before it (`Tendril.Text.Grapheme.resume`), never from the buffer's start. §5.5's requests
+  and `enclosing` take code point offsets. The buffer's rope is built in chunks of at most 4,096
+  code points: one chunk made each edit near the end of a 1 MiB paste cost 0.17–8 ms, and chunked
+  they cost 0.4–52 µs.
+- `tendril-bench` (DESIGN.md §12.3) measures one command in a 1 MiB paste, and the grapheme
+  conversion the editor no longer makes on a keystroke (143–151 ms). CI's step 8 gates its
+  allocation against `tendril/bench/baseline/ghc-9.12.4.csv`.
 
 ### M1: ghostty
 

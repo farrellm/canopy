@@ -26,6 +26,15 @@
 --
 -- A 'Segmenter' reads code points one at a time and says before each whether
 -- a cluster starts there; 'clusters' and 'boundaries' run one over a text.
+--
+-- __Resuming.__ Most code points leave the segmenter in a state that does not
+-- depend on anything read before them ('resume'): every rule that looks
+-- further back than one code point (GB9c, GB11, GB12–13 and the two
+-- tailorings) does so only through a run of @Extend@, @ZWJ@ or regional
+-- indicators. So the boundaries after such a code point can be found by
+-- segmenting from it, not from the start of the text, which is how the
+-- editor finds a boundary near the cursor without reading the whole buffer
+-- (D34).
 module Tendril.Text.Grapheme
   ( -- * Segmenting text
     clusters,
@@ -35,6 +44,7 @@ module Tendril.Text.Grapheme
     Segmenter,
     segmenter,
     breakBefore,
+    resume,
   )
 where
 
@@ -134,6 +144,24 @@ breakBefore c s
             IncbExtend | not (emojiModifier c) -> s.linked
             _ -> False
         }
+
+-- | The segmenter after reading a code point, when that does not depend on
+-- what was read before it: when the code point is not @Extend@ (which
+-- includes the variation selectors and the emoji modifiers), @ZWJ@, a
+-- regional indicator or @InCB=Extend@. Whether a cluster starts at the code
+-- point itself may still depend on what came before (a prepend, a Hangul
+-- jamo), but every break after it does not.
+--
+-- >>> resume 'a' == Just (snd (breakBefore 'a' segmenter))
+-- True
+-- >>> isJust (resume '\x0301')
+-- False
+resume :: Char -> Maybe Segmenter
+resume c = snd (breakBefore c segmenter) <$ guard settles
+  where
+    settles =
+      graphemeBreak c `notElem` [Extend, ZWJ, RegionalIndicator]
+        && indicConjunctBreak c /= IncbExtend
 
 -- | A text's grapheme clusters, in order.
 --
