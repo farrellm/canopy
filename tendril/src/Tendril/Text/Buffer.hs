@@ -91,7 +91,7 @@ instance BufferUnit 'Utf16 where
 instance BufferUnit 'Grapheme where
   extent b = offset (fromIntegral (length (boundaries (toText b))) - 1)
   toCodePoint b g = boundaries (toText b) !!? fromIntegral (fromOffset g)
-  fromCodePoint b c = offset . fromIntegral <$> elemIndex c (boundaries (toText b))
+  fromCodePoint b c = offset . fromIntegral <$> elemIndex c (takeWhile (<= c) (boundaries (toText b)))
 
 -- | An offset in another unit.
 --

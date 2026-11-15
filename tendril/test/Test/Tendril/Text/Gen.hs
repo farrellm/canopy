@@ -15,8 +15,8 @@ genChar =
   frequency
     [ (6, elements interesting),
       (1, elements ['a' .. 'z']),
-      (1, toEnum <$> choose (0, 0xD7FF)),
-      (1, toEnum <$> choose (0xE000, 0x10FFFF))
+      (1, choose ('\x0000', '\xD7FF')),
+      (1, choose ('\xE000', '\x10FFFF'))
     ]
 
 -- | CR and LF; a combining acute; ZWJ; an emoji, two emoji modifier bases, a

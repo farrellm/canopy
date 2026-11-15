@@ -4,7 +4,7 @@ module Test.Tendril.Text.Grapheme (tests) where
 
 import Data.Text qualified as T
 import Tendril.Text.Grapheme (boundaries, clusters)
-import Tendril.Text.Unicode.Tables (emojiModifier, emojiModifierBase)
+import Tendril.Text.Unicode.Tables (GraphemeBreak (..), emojiModifier, emojiModifierBase, graphemeBreak)
 import Tendril.Text.Units (Offset, Unit (..), fromOffset, offset)
 import Test.QuickCheck (forAll, (===))
 import Test.Tasty (TestTree, testGroup)
@@ -40,13 +40,15 @@ tests =
 
 -- | A case's clusters under libghostty-vt's tailoring (DESIGN.md §5.3), as
 -- uucode's own conformance test adjusts them: a break before each emoji
--- modifier that does not follow an emoji modifier base.
+-- modifier that does not follow an emoji modifier base or a prepend (GB9b
+-- still holds).
 tailored :: [[Char]] -> [[Char]]
 tailored = concatMap (split [])
   where
     split acc = \case
       p : m : rest
-        | emojiModifier m && not (emojiModifierBase p) -> reverse (p : acc) : split [] (m : rest)
+        | emojiModifier m && not (emojiModifierBase p) && graphemeBreak p /= Prepend ->
+            reverse (p : acc) : split [] (m : rest)
       c : rest -> split (c : acc) rest
       [] -> [reverse acc]
 

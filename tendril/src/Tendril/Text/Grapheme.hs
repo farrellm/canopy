@@ -156,12 +156,14 @@ boundaries t = offset 0 : snd (mapAccumL step 0 (lengths t))
   where
     step acc n = let acc' = acc + fromIntegral n in (acc', offset acc')
 
--- | Each cluster's length in code points.
+-- | Each cluster's length in code points, produced lazily: a consumer that
+-- stops early (a conversion near the start of a buffer) segments only the
+-- prefix it reads.
 lengths :: Text -> [Int]
-lengths t = case T.foldl' step (segmenter, 0, []) t of
-  (_, 0, ns) -> reverse ns
-  (_, n, ns) -> reverse (n : ns)
+lengths = go segmenter 0
   where
-    step (s, n, ns) c = case breakBefore c s of
-      (True, s') | n > 0 -> (s', 1, n : ns)
-      (_, s') -> (s', n + 1, ns)
+    go !s !n rest = case T.uncons rest of
+      Nothing -> [n | n > 0]
+      Just (c, rest') -> case breakBefore c s of
+        (True, s') | n > 0 -> n : go s' 1 rest'
+        (_, s') -> go s' (n + 1) rest'

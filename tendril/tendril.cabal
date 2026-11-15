@@ -90,7 +90,6 @@ test-suite tendril-test
 
   build-depends:
     , base ^>=4.21.2.0
-    , bytestring ^>=0.12
     , canopy-prelude
     , effectful-core ^>=2.7.1
     , ghostty-effectful

@@ -4,9 +4,8 @@
 -- where it is defined, and is undefined past the end and inside a unit.
 module Test.Tendril.Text.Buffer (tests) where
 
-import Data.ByteString qualified as BS
 import Data.Text qualified as T
-import Data.Text.Encoding qualified as TE
+import Data.Text.Foreign (lengthWord8)
 import Tendril.Text.Buffer (Buffer, BufferUnit (..), convert, fromText, splitAtOffset)
 import Tendril.Text.Grapheme (boundaries, clusters)
 import Tendril.Text.Units (Offset, Unit (..), fromOffset, offset)
@@ -35,7 +34,7 @@ tests =
                 toText b
               )
                 === ( fromIntegral (T.length t),
-                      fromIntegral (lengthUtf8 t),
+                      fromIntegral (lengthWord8 t),
                       fromIntegral (length (clusters t)),
                       t
                     ),
@@ -104,6 +103,3 @@ roundTrips b =
     back converted o = case converted of
       Nothing -> property True
       Just x -> convert @u @a b x === Just o
-
-lengthUtf8 :: Text -> Int
-lengthUtf8 = BS.length . TE.encodeUtf8
