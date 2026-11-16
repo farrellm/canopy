@@ -185,7 +185,9 @@ apply cmd s0 = case cmd of
   SetMark -> Just s {stateSelection = Selection x (Just x)}
   Deselect -> Just s {stateSelection = collapsed x}
   Delete m -> Just (cut (motionRange m) s)
-  Kill m -> Just (killRange (direction m) (motionRange m))
+  Kill m ->
+    let p = (moveTo m).position
+     in Just (killRange (if p < x then Backward else Forward) (range x p))
   KillSelection -> Just (maybe s (killRange Forward) selected)
   CopySelection -> Just (maybe s (\r -> deselected {stateKillRing = kill (slice r b) s.stateKillRing}) selected)
   Yank -> Just (maybe s yank (current s.stateKillRing))
@@ -219,7 +221,6 @@ apply cmd s0 = case cmd of
       let t = moveTo m
        in s {stateSelection = Selection t.position anchor, stateGoal = t.goal}
     motionRange m = range x (moveTo m).position
-    direction m = if (moveTo m).position < x then Backward else Forward
     killRange dir r
       | r.start == r.end = s
       | otherwise =

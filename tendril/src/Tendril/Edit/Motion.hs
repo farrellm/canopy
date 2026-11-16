@@ -14,6 +14,7 @@ import Data.Char (isAlphaNum)
 import Data.Text qualified as T
 import Tendril.Text.Buffer
   ( Buffer,
+    clusterEnd,
     clustersBefore,
     clustersFrom,
     extent,
@@ -73,7 +74,7 @@ data Target = Target
 target :: Buffer -> Maybe Word -> Offset 'CodePoint -> Motion -> Target
 target b goal x = \case
   PrevCluster -> Target (maybe x fst (listToMaybe (clustersBefore b x))) Nothing
-  NextCluster -> Target (maybe x end (listToMaybe (clustersFrom b x))) Nothing
+  NextCluster -> Target (maybe x clusterEnd (listToMaybe (clustersFrom b x))) Nothing
   PrevWord ->
     let rest = dropWhile (not . isWord) (clustersBefore b x)
      in Target (maybe (offset 0) fst (viaNonEmpty last (takeWhile isWord rest))) Nothing
@@ -86,12 +87,13 @@ target b goal x = \case
     | start == offset 0 -> Target x (Just column)
     | otherwise -> Target (atColumn (lineStart b (before start))) (Just column)
   LineDown
-    | lineEnd b x == extent b -> Target x (Just column)
-    | otherwise -> Target (atColumn (after (lineEnd b x))) (Just column)
+    | here == extent b -> Target x (Just column)
+    | otherwise -> Target (atColumn (after here)) (Just column)
   BufferStart -> Target (offset 0) Nothing
   BufferEnd -> Target (extent b) Nothing
   where
     start = lineStart b x
+    here = lineEnd b x
     column = fromMaybe (fromIntegral (length (takeWhile ((< x) . fst) (clustersFrom b start)))) goal
     -- The cluster @column@ clusters into the line that starts here, or the
     -- line's end.
@@ -101,10 +103,6 @@ target b goal x = \case
        in fromMaybe e (starts !!? fromIntegral column)
     before o = offset (fromOffset o - 1)
     after o = offset (fromOffset o + 1)
-
--- | Where a cluster ends.
-end :: (Offset 'CodePoint, Text) -> Offset 'CodePoint
-end (s, t) = offset (fromOffset s + fromIntegral (T.length t))
 
 -- | Whether a cluster is part of a word: it starts with a letter or a digit.
 isWord :: (Offset 'CodePoint, Text) -> Bool

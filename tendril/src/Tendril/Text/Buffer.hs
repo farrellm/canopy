@@ -34,6 +34,7 @@ module Tendril.Text.Buffer
     -- * Clusters near a position
     clustersFrom,
     clustersBefore,
+    clusterEnd,
     isBoundary,
     floorBoundary,
     ceilingBoundary,
@@ -237,12 +238,14 @@ isBoundary b x
 -- >>> map (floorBoundary "e\x0301\&a" . offset) [0 .. 4]
 -- [Offset 0,Offset 0,Offset 2,Offset 3,Offset 3]
 floorBoundary :: Buffer -> Offset 'CodePoint -> Offset 'CodePoint
-floorBoundary b x0
-  | isBoundary b x = x
-  | otherwise = maybe (offset 0) end (listToMaybe (clustersBefore b x))
-  where
-    x = min x0 (extent b)
-    end (st, t) = offset (fromOffset st + fromIntegral (T.length t))
+floorBoundary b x = maybe (offset 0) clusterEnd (listToMaybe (clustersBefore b x))
+
+-- | Where a cluster from 'clustersFrom' or 'clustersBefore' ends.
+--
+-- >>> map clusterEnd (clustersFrom "ae\x0301" (offset 0))
+-- [Offset 1,Offset 3]
+clusterEnd :: (Offset 'CodePoint, Text) -> Offset 'CodePoint
+clusterEnd (st, t) = offset (fromOffset st + fromIntegral (T.length t))
 
 -- | The boundary at or after an offset: the end of the cluster it is in. An
 -- offset past the end is the end.

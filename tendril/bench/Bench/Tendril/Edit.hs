@@ -28,7 +28,7 @@ benchmarks =
     ]
 
 shape :: String -> Text -> Benchmark
-shape name t = env (pure (fromText t, Strict (middle t), Strict (typedIn (middle t)))) $ \(~(b, Strict m, Strict w)) ->
+shape name t = env (pure (let m0 = middle t in (fromText t, Strict m0, Strict (typedIn m0)))) $ \(~(b, Strict m, Strict w)) ->
   bgroup
     name
     [ bench "to grapheme" (whnf (\b' -> convert @'CodePoint @'Grapheme b' (extent b')) b),
