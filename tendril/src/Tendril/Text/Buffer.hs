@@ -204,22 +204,28 @@ clustersFrom (Buffer rope) x = dropWhile ((< x) . fst) (segmentFrom r s (charsFr
 -- >>> take 1 (clustersBefore "ae\x0301\&b" (offset 2))
 -- [(Offset 0,"a")]
 clustersBefore :: Buffer -> Offset 'CodePoint -> [(Offset 'CodePoint, Text)]
-clustersBefore (Buffer rope) x0 = go (min (fromOffset x0) (Rope.charLength rope))
+clustersBefore (Buffer rope) x0 = go 1 (min (fromOffset x0) (Rope.charLength rope))
   where
-    go y
+    go k y
       | y == 0 = []
-      | otherwise = search (restart rope (y - 1))
+      | otherwise = search (restart rope (y - min y k))
       where
-        -- The last cluster from the restart on that ends by @y@; if there is
-        -- none, the restart is inside the cluster before it, so look again
-        -- from further back.
+        -- Every cluster from the restart on that ends by @y@, nearest first,
+        -- then the ones before the first of them. If there is none, the
+        -- restart is inside the cluster that ends by @y@, so look again from
+        -- further back.
         search (r, s) =
-          case viaNonEmpty last (filter endsBy (takeWhile ((< y) . fromOffset . fst) (segmentFrom r s (charsFrom r rope)))) of
-            Just c -> c : go (fromOffset (fst c))
-            Nothing
+          case filter endsBy (takeWhile ((< y) . fromOffset . fst) (segmentFrom r s (charsFrom r rope))) of
+            c : cs -> reverse (c : cs) <> go window (fromOffset (fst c))
+            []
               | r == 0 -> []
               | otherwise -> search (restart rope (r - 1))
         endsBy (st, t) = fromOffset st + fromIntegral (T.length t) <= y
+    -- How far back each batch of clusters after the first starts: one
+    -- segmentation yields every cluster in it, where restarting at each
+    -- cluster would split the rope and segment again for every one. The
+    -- first starts as near as it can, since most callers want one cluster.
+    window = 32
 
 -- | Whether a cluster starts or ends at an offset: the start and the end of
 -- the buffer are boundaries, and an offset past the end is not.
@@ -238,7 +244,14 @@ isBoundary b x
 -- >>> map (floorBoundary "e\x0301\&a" . offset) [0 .. 4]
 -- [Offset 0,Offset 0,Offset 2,Offset 3,Offset 3]
 floorBoundary :: Buffer -> Offset 'CodePoint -> Offset 'CodePoint
-floorBoundary b x = maybe (offset 0) clusterEnd (listToMaybe (clustersBefore b x))
+floorBoundary b x0
+  | isBoundary b x = x
+  | otherwise = maybe (offset 0) clusterEnd (listToMaybe (clustersBefore b x))
+  where
+    -- Most offsets asked about are boundaries already, which 'isBoundary'
+    -- confirms more cheaply than finding the cluster before (and at either
+    -- end, for nothing).
+    x = min x0 (extent b)
 
 -- | Where a cluster from 'clustersFrom' or 'clustersBefore' ends.
 --

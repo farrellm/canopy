@@ -93,6 +93,19 @@ Written as changes land, not at release (DESIGN.md §2.9).
 - `tendril-bench` (DESIGN.md §12.3) measures one command in a 1 MiB paste, and the grapheme
   conversion the editor no longer makes on a keystroke (143–151 ms). CI's step 8 gates its
   allocation against `tendril/bench/baseline/ghc-9.12.4.csv`.
+- Fixed in review of M2.4, each with a numbered regression case:
+  - A yank-pop moved the newest entry to the back of the kill ring, so a kill after yank-pops went
+    in front of a reordered ring. The ring now keeps a yank pointer, as Emacs's does (regression 19;
+    DESIGN.md §5.4).
+  - A kill of nothing ended a run of kills and left the selection active. It now does neither
+    (regression 20).
+- Also changed in that review:
+  - `KillSelection` joins a kill at the start of its entry when the cursor is before the anchor.
+  - A vertical motion that cannot move keeps the goal it was given, so it no longer holds the old
+    buffer in an unevaluated column.
+  - `clustersBefore` segments 32 code points at a time after the nearest cluster, so a word back
+    allocates 24–34% less. The bench baseline is regenerated for it (DESIGN.md §12.3).
+  - Kill finds its motion's target once, and `Tendril.Text.Buffer` exports `clusterEnd`.
 
 ### M1: ghostty
 

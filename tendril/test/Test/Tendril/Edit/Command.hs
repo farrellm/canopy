@@ -98,6 +98,21 @@ tests =
         let s = edits (editState "ab") [Select PrevCluster, CopyToRegister (Register 'r'), Move BufferStart, InsertRegister (Register 'r')]
         (toText s.buffer, s.cursor) @?= ("bab", offset 1)
         toText (edits s [InsertRegister (Register 'q')]).buffer @?= "bab",
+      -- Regression 19 (DESIGN.md §5.4): a yank-pop moved the newest entry
+      -- to the back of the ring, so a kill after it went in front of a
+      -- reordered ring, and the next yank-pop found the wrong entry.
+      testCase "regression 19: a yank-pop moves a pointer, not the entries" $ do
+        let s = edits (editState "x y z") [Kill PrevWord, Move PrevCluster, Kill PrevWord, Yank, YankPop]
+        (toText s.buffer, current s.killRing) @?= ("x z ", Just "z")
+        let s' = edits s [Move BufferStart, Kill NextWord]
+        (entries s'.killRing, current s'.killRing) @?= (["x", "y", "z"], Just "x")
+        toText (edits s' [Yank, YankPop]).buffer @?= "y z ",
+      -- Regression 20 (DESIGN.md §5.4): a kill of nothing ended a run of
+      -- kills, and left the selection it was given.
+      testCase "regression 20: a kill of nothing keeps the run and ends the selection" $ do
+        let s = edits (editState "ab\ncd") [Move BufferStart, Kill NextWord, Kill LineEnd, Kill NextWord]
+        entries s.killRing @?= ["ab\ncd"]
+        (edits (editState "ab") [SetMark, KillSelection]).selection @?= Selection (offset 2) Nothing,
       testCase "the editor's commands are not edits" $
         forM_ [Undo, Redo, AcceptOrNewline, HistoryPrev, HistoryNext, ExpandSelection, ShrinkSelection, EditExternal, App ()] $ \c ->
           when (isJust (apply c (editState "x"))) (assertFailure (show c))

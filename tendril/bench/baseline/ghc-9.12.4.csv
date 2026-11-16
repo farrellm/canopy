@@ -1,23 +1,23 @@
 Name,Mean (ps),2*Stdev (ps),Allocated,Copied,Peak Memory
-All.tendril.Edit.lines.to grapheme,147673491175,2126155620,586719064,415294,30408704
-All.tendril.Edit.lines.PrevCluster at the end,2813204,249526,8520,1,30408704
-All.tendril.Edit.lines.PrevWord at the end,21025650,1002766,58354,14,30408704
-All.tendril.Edit.lines.LineEnd at the end,471969,34828,2792,0,30408704
-All.tendril.Edit.lines.LineUp at the end,17576014,1519086,53074,14,30408704
-All.tendril.Edit.lines.Insert in the middle,2504409,131890,3312,0,30408704
-All.tendril.Edit.lines.Delete PrevCluster in the middle,7796733,725446,12026,2,30408704
-All.tendril.Edit.lines.NextCluster in the middle,3287517,236416,6352,0,30408704
-"All.tendril.Edit.lines.Insert after 5,000 typed",224057,7176,1704,0,30408704
-"All.tendril.Edit.lines.PrevCluster after 5,000 typed",18217065,678466,99754,32,30408704
-"All.tendril.Edit.lines.PrevWord after 5,000 typed",70730366,3150548,416021,158,30408704
-All.tendril.Edit.one line.to grapheme,148819006000,12176660224,579296768,102652,30408704
-All.tendril.Edit.one line.PrevCluster at the end,7900395,745840,8233,1,30408704
-All.tendril.Edit.one line.PrevWord at the end,55005422,5265660,56341,8,30408704
-All.tendril.Edit.one line.LineEnd at the end,974965,66146,2656,0,30408704
-All.tendril.Edit.one line.LineUp at the end,3659633,167982,3472,0,30408704
-All.tendril.Edit.one line.Insert in the middle,3721888,323258,3008,0,30408704
-All.tendril.Edit.one line.Delete PrevCluster in the middle,11340059,869296,11433,2,30408704
-All.tendril.Edit.one line.NextCluster in the middle,4671091,342488,6065,1,30408704
-"All.tendril.Edit.one line.Insert after 5,000 typed",212370,14490,1704,0,30408704
-"All.tendril.Edit.one line.PrevCluster after 5,000 typed",17027572,459034,99753,29,30408704
-"All.tendril.Edit.one line.PrevWord after 5,000 typed",75764741,1438902,416021,148,30408704
+All.tendril.Edit.lines.to grapheme,160136337850,5387748548,586722060,373596,25165824
+All.tendril.Edit.lines.PrevCluster at the end,2365248,211996,8512,1,25165824
+All.tendril.Edit.lines.PrevWord at the end,10221134,972426,38280,18,25165824
+All.tendril.Edit.lines.LineEnd at the end,441625,27614,2736,0,25165824
+All.tendril.Edit.lines.LineUp at the end,15925436,1236936,53019,14,25165824
+All.tendril.Edit.lines.Insert in the middle,1966643,145650,3280,1,25165824
+All.tendril.Edit.lines.Delete PrevCluster in the middle,6360808,440342,12017,3,25165824
+All.tendril.Edit.lines.NextCluster in the middle,2743657,237336,6296,1,25165824
+"All.tendril.Edit.lines.Insert after 5,000 typed",207847,17324,1672,0,25165824
+"All.tendril.Edit.lines.PrevCluster after 5,000 typed",17142422,546918,99744,33,25165824
+"All.tendril.Edit.lines.PrevWord after 5,000 typed",60524383,4362478,315451,127,25165824
+All.tendril.Edit.one line.to grapheme,144619148800,12607852838,579251889,643032,25165824
+All.tendril.Edit.one line.PrevCluster at the end,6395085,362594,8224,1,25165824
+All.tendril.Edit.one line.PrevWord at the end,18804247,191802,37752,17,25165824
+All.tendril.Edit.one line.LineEnd at the end,953902,60498,2600,0,25165824
+All.tendril.Edit.one line.LineUp at the end,2788738,117560,3400,0,25165824
+All.tendril.Edit.one line.Insert in the middle,2729048,117594,2976,0,25165824
+All.tendril.Edit.one line.Delete PrevCluster in the middle,8763177,255180,11424,2,25165824
+All.tendril.Edit.one line.NextCluster in the middle,3880715,376644,6008,0,25165824
+"All.tendril.Edit.one line.Insert after 5,000 typed",252982,16710,1672,0,25165824
+"All.tendril.Edit.one line.PrevCluster after 5,000 typed",20439336,1916106,99747,30,25165824
+"All.tendril.Edit.one line.PrevWord after 5,000 typed",64180425,2007678,315445,117,25165824

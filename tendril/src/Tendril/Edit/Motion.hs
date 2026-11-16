@@ -57,7 +57,8 @@ data Target = Target
     -- | For 'LineUp' and 'LineDown', the column they aimed at, in clusters
     -- from the start of a line, which the next vertical motion aims at too:
     -- so a run of them passes a short line and comes back to the column it
-    -- started from. 'Nothing' after any other motion.
+    -- started from. On the first line or the last, where they do not move,
+    -- the goal they were given. 'Nothing' after any other motion.
     goal :: Maybe Word
   }
   deriving stock (Eq, Show)
@@ -84,16 +85,22 @@ target b goal x = \case
   LineStart -> Target (lineStart b x) Nothing
   LineEnd -> Target (floorBoundary b (lineEnd b x)) Nothing
   LineUp
-    | start == offset 0 -> Target x (Just column)
-    | otherwise -> Target (atColumn (lineStart b (before start))) (Just column)
+    | start == offset 0 -> Target x goal
+    | otherwise -> vertical (lineStart b (before start))
   LineDown
-    | here == extent b -> Target x (Just column)
-    | otherwise -> Target (atColumn (after here)) (Just column)
+    | here == extent b -> Target x goal
+    | otherwise -> vertical (after here)
   BufferStart -> Target (offset 0) Nothing
   BufferEnd -> Target (extent b) Nothing
   where
     start = lineStart b x
     here = lineEnd b x
+    -- The column is forced before it is kept, so the goal holds a number,
+    -- not a thunk that holds this buffer. Where a vertical motion does not
+    -- move, it keeps the goal it was given: the cursor stays, so the next
+    -- one finds the same column, and a long line is not counted for
+    -- nothing.
+    vertical s = let !c = column in Target (atColumn s) (Just c)
     column = fromMaybe (fromIntegral (length (takeWhile ((< x) . fst) (clustersFrom b start)))) goal
     -- The cluster @column@ clusters into the line that starts here, or the
     -- line's end.

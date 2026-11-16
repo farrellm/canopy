@@ -1152,8 +1152,13 @@ list, the edit commands are:
 - `CopyToRegister` and `InsertRegister`, for Emacs's registers, which vi's will share.
 
 A kill straight after a kill joins its kill-ring entry, at the end going forward and at the start
-going back. The ring keeps Emacs's default of 120 entries. Vertical motions keep a goal column,
-counted in clusters from the start of the line, across a run of them. `EditState` is
+going back. `KillSelection` goes back when the cursor is before the anchor, as Emacs's
+`kill-region` does. A kill of nothing adds no entry, but it is still a kill: it ends the selection,
+and a run of kills goes on through it. The ring keeps Emacs's default of 120 entries. As in Emacs, a
+yank-pop moves a yank pointer and leaves the entries in their order. A kill puts its entry in front
+and the pointer on it, so a kill after yank-pops does not reorder the ring. Vertical motions keep a
+goal column, counted in clusters from the start of the line, across a run of them. On the first line
+or the last, where one does not move, it keeps the goal it was given and counts nothing. `EditState` is
 `Tendril.Editor`'s `EditorState` without the parts that need the editor: the undo tree, the
 history, the revision and the widgets.
 
@@ -2635,6 +2640,13 @@ The figures above are each a fresh, balanced rope's first command. After 5,000 c
 at a time in the middle, an insertion takes 0.2 µs, a cluster back 17 µs (97 KB) and a word back
 70 µs. The rope near the cursor is then many small nodes, since `text-rope`'s `<>` does not
 rebalance. That cost does not grow with the edits: a cluster back takes 17.6 µs after 20,000.
+
+A word back first restarted the segmenter at each cluster, splitting the rope and segmenting again
+for each one. Now `clustersBefore` finds the nearest cluster as before, and then segments 32 code
+points at a time, yielding every cluster in each window (2026-11-15, in review). A word back at the
+end takes 10–19 µs and allocates 38 KB, down from 56–58 KB. After 5,000 characters typed it takes
+60–64 µs and allocates 315 KB, down from 416 KB. The other commands are unchanged, and the baseline
+was regenerated for this.
 
 ---
 

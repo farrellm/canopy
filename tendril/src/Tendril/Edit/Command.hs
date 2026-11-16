@@ -74,16 +74,18 @@ data Command app (m :: ModeKind) where
   -- | Delete the text between the cursor and where a motion would take it.
   Delete :: Motion -> Command app m
   -- | Delete it, onto the kill ring. A kill straight after a kill joins its
-  -- entry, at the end going forward and at the start going back.
+  -- entry, at the end going forward and at the start going back; a kill of
+  -- nothing adds no entry and does not break the run.
   Kill :: Motion -> Command app m
-  -- | Kill the selected text.
+  -- | Kill the selected text. Joining a kill, it goes at the start of the
+  -- entry if the cursor is before the anchor.
   KillSelection :: Command app m
   -- | Copy the selected text onto the kill ring, and end the selection.
   CopySelection :: Command app m
   -- | Insert the kill ring's current entry.
   Yank :: Command app m
   -- | Straight after a yank, replace what it inserted with the kill ring's
-  -- next entry, and rotate the ring.
+  -- next older entry, moving its yank pointer (Emacs's @yank-pop@).
   YankPop :: Command app m
   -- | Store the selected text in a register, and end the selection.
   CopyToRegister :: Register -> Command app m
@@ -188,7 +190,11 @@ apply cmd s0 = case cmd of
   Kill m ->
     let p = (moveTo m).position
      in Just (killRange (if p < x then Backward else Forward) (range x p))
-  KillSelection -> Just (maybe s (killRange Forward) selected)
+  KillSelection ->
+    -- Emacs's kill-region: joining a kill, it goes at the start of the
+    -- entry when the cursor is before the anchor.
+    let dir = if any (x <) s0.stateSelection.anchor then Backward else Forward
+     in Just (maybe deselected (killRange dir) selected)
   CopySelection -> Just (maybe s (\r -> deselected {stateKillRing = kill (slice r b) s.stateKillRing}) selected)
   Yank -> Just (maybe s yank (current s.stateKillRing))
   YankPop -> Just $ case s0.stateChain of
@@ -221,8 +227,10 @@ apply cmd s0 = case cmd of
       let t = moveTo m
        in s {stateSelection = Selection t.position anchor, stateGoal = t.goal}
     motionRange m = range x (moveTo m).position
+    -- A kill of nothing kills nothing, but as in Emacs it is still a kill:
+    -- it ends the selection, and a chain of kills goes on through it.
     killRange dir r
-      | r.start == r.end = s
+      | r.start == r.end = deselected {stateChain = if s0.stateChain == Killed then Killed else Unchained}
       | otherwise =
           let t = slice r b
               ring = case (s0.stateChain, dir) of
