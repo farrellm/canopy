@@ -78,9 +78,11 @@ data Command app (m :: ModeKind) where
   -- nothing adds no entry and does not break the run.
   Kill :: Motion -> Command app m
   -- | Kill the selected text. Joining a kill, it goes at the start of the
-  -- entry if the cursor is before the anchor.
+  -- entry if the cursor is before the anchor. With nothing selected it is a
+  -- kill of nothing.
   KillSelection :: Command app m
-  -- | Copy the selected text onto the kill ring, and end the selection.
+  -- | Copy the selected text onto the kill ring, and end the selection. A
+  -- copy of nothing adds no entry.
   CopySelection :: Command app m
   -- | Insert the kill ring's current entry.
   Yank :: Command app m
@@ -194,8 +196,10 @@ apply cmd s0 = case cmd of
     -- Emacs's kill-region: joining a kill, it goes at the start of the
     -- entry when the cursor is before the anchor.
     let dir = if any (x <) s0.stateSelection.anchor then Backward else Forward
-     in Just (maybe deselected (killRange dir) selected)
-  CopySelection -> Just (maybe s (\r -> deselected {stateKillRing = kill (slice r b) s.stateKillRing}) selected)
+     in Just (killRange dir (fromMaybe (range x x) selected))
+  CopySelection -> Just $ case selected of
+    Just r | r.start /= r.end -> deselected {stateKillRing = kill (slice r b) s.stateKillRing}
+    _ -> deselected
   Yank -> Just (maybe s yank (current s.stateKillRing))
   YankPop -> Just $ case s0.stateChain of
     Yanked at n ->

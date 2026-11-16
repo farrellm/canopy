@@ -113,6 +113,16 @@ tests =
         let s = edits (editState "ab\ncd") [Move BufferStart, Kill NextWord, Kill LineEnd, Kill NextWord]
         entries s.killRing @?= ["ab\ncd"]
         (edits (editState "ab") [SetMark, KillSelection]).selection @?= Selection (offset 2) Nothing,
+      -- Regression 21 (DESIGN.md §5.4): a copy of an empty selection put an
+      -- empty entry on the kill ring, so the next yank inserted nothing.
+      testCase "regression 21: a copy of nothing adds no entry" $ do
+        let s = edits (editState "ab") [Kill PrevWord, Insert "x", SetMark, CopySelection]
+        (entries s.killRing, s.selection) @?= (["ab"], Selection (offset 1) Nothing)
+        toText (edits s [Yank]).buffer @?= "xab",
+      -- Regression 22 (DESIGN.md §5.4): a KillSelection with nothing
+      -- selected ended a run of kills, though a kill of nothing does not.
+      testCase "regression 22: a KillSelection with nothing selected keeps the run" $
+        entries (edits (editState "one two") [Kill PrevWord, KillSelection, Kill PrevWord]).killRing @?= ["one two"],
       testCase "the editor's commands are not edits" $
         forM_ [Undo, Redo, AcceptOrNewline, HistoryPrev, HistoryNext, ExpandSelection, ShrinkSelection, EditExternal, App ()] $ \c ->
           when (isJust (apply c (editState "x"))) (assertFailure (show c))

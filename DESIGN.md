@@ -1154,7 +1154,8 @@ list, the edit commands are:
 A kill straight after a kill joins its kill-ring entry, at the end going forward and at the start
 going back. `KillSelection` goes back when the cursor is before the anchor, as Emacs's
 `kill-region` does. A kill of nothing adds no entry, but it is still a kill: it ends the selection,
-and a run of kills goes on through it. The ring keeps Emacs's default of 120 entries. As in Emacs, a
+and a run of kills goes on through it. A `KillSelection` with nothing selected is one, and a
+`CopySelection` of nothing adds no entry either. The ring keeps Emacs's default of 120 entries. As in Emacs, a
 yank-pop moves a yank pointer and leaves the entries in their order. A kill puts its entry in front
 and the pointer on it, so a kill after yank-pops does not reorder the ring. Vertical motions keep a
 goal column, counted in clusters from the start of the line, across a run of them. On the first line

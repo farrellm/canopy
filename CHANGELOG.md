@@ -99,6 +99,14 @@ Written as changes land, not at release (DESIGN.md §2.9).
     DESIGN.md §5.4).
   - A kill of nothing ended a run of kills and left the selection active. It now does neither
     (regression 20).
+  - A copy of an empty selection put an empty entry on the kill ring, so the next yank inserted
+    nothing. It now adds none (regression 21).
+  - A `KillSelection` with nothing selected ended a run of kills. It is now a kill of nothing, which
+    does not (regression 22).
+  - `clustersBefore` inside a long cluster of code points that each resume (a run of Hangul L)
+    stepped back one code point at a time, segmenting to the end each time: quadratic. It now steps
+    back twice as far each time (regression 23). `restart` reads only the new part of each doubled
+    window, and a `Buffer` literal is chunked like `fromText`'s.
 - Also changed in that review:
   - `KillSelection` joins a kill at the start of its entry when the cursor is before the anchor.
   - A vertical motion that cannot move keeps the goal it was given, so it no longer holds the old

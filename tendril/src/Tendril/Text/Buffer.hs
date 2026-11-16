@@ -58,7 +58,11 @@ import Tendril.Text.Units (Offset, Range, Unit (..), fromOffset, offset)
 
 -- | A text being edited.
 newtype Buffer = Buffer Rope
-  deriving newtype (Eq, Ord, Show, Semigroup, Monoid, IsString, NFData)
+  deriving newtype (Eq, Ord, Show, Semigroup, Monoid, NFData)
+
+-- | Through 'fromText', so a literal is chunked like any other text (D34).
+instance IsString Buffer where
+  fromString = fromText . fromString
 
 instance ToText Buffer where
   toText (Buffer r) = Rope.toText r
@@ -213,14 +217,15 @@ clustersBefore (Buffer rope) x0 = go 1 (min (fromOffset x0) (Rope.charLength rop
         -- Every cluster from the restart on that ends by @y@, nearest first,
         -- then the ones before the first of them. If there is none, the
         -- restart is inside the cluster that ends by @y@, so look again from
-        -- further back.
+        -- twice as far back: a cluster of many code points that each resume
+        -- (a run of Hangul L, of spacing marks) would otherwise be segmented
+        -- again for every one of them.
         search (r, s) =
-          case filter endsBy (takeWhile ((< y) . fromOffset . fst) (segmentFrom r s (charsFrom r rope))) of
+          case filter ((<= offset y) . clusterEnd) (takeWhile ((< y) . fromOffset . fst) (segmentFrom r s (charsFrom r rope))) of
             c : cs -> reverse (c : cs) <> go window (fromOffset (fst c))
             []
               | r == 0 -> []
-              | otherwise -> search (restart rope (r - 1))
-        endsBy (st, t) = fromOffset st + fromIntegral (T.length t) <= y
+              | otherwise -> search (restart rope (r - min r (y - r)))
     -- How far back each batch of clusters after the first starts: one
     -- segmentation yields every cluster in it, where restarting at each
     -- cluster would split the rope and segment again for every one. The
@@ -275,15 +280,16 @@ ceilingBoundary b x0
 -- | Where segmenting can start at or before a code point offset, and the
 -- segmenter's state there: just after the nearest code point that resumes
 -- it, or the start of the text. The window searched doubles until it finds
--- one, so ordinary text costs a few code points.
+-- one, so ordinary text costs a few code points. Each doubling reads only
+-- the part of its window that the last one did not.
 restart :: Rope -> Word -> (Word, Segmenter)
-restart rope x = go 64
+restart rope x = go x 64
   where
-    go k = case lastResume (Rope.toText (sliceRope w x rope)) of
+    go hi k = case lastResume (Rope.toText (sliceRope w hi rope)) of
       Just (j, s) -> (w + j + 1, s)
       Nothing
         | w == 0 -> (0, segmenter)
-        | otherwise -> go (2 * k)
+        | otherwise -> go w (2 * k)
       where
         w = x - min x k
 

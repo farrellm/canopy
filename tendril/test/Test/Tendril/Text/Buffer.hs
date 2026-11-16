@@ -101,6 +101,13 @@ tests =
         take 2 (clustersBefore b (extent b)) @?= [(offset 301, "b"), (offset 0, "a" <> T.replicate 300 "\x0301")]
         take 1 (clustersFrom b (offset 150)) @?= [(offset 301, "b")]
         floorBoundary b (offset 150) @?= offset 0,
+      -- Regression 23 (D34): inside a cluster of code points that each
+      -- resume (a run of Hangul L), clustersBefore stepped back one code
+      -- point at a time and segmented to the end again for each: quadratic.
+      testCase "regression 23: a long cluster of resuming code points" $ do
+        let run = T.replicate 20000 "\x1100"
+            b = fromText ("a" <> run)
+        take 2 (clustersBefore b (extent b)) @?= [(offset 1, run), (offset 0, "a")],
       testProperty "clustersFrom is whole-text segmentation from there on" $
         nearby $
           \t x -> clustersFrom (fromText t) x === filter ((>= x) . fst) (segmented t),
