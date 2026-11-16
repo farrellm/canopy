@@ -107,8 +107,14 @@ Written as changes land, not at release (DESIGN.md §2.9).
     stepped back one code point at a time, segmenting to the end each time: quadratic. It now steps
     back twice as far each time (regression 23). `restart` reads only the new part of each doubled
     window, and a `Buffer` literal is chunked like `fromText`'s.
+  - The editor's commands left a run of kills and a yank's claim on a yank-pop in place, and
+    `EditState` is abstract, so the editor could not end them. `Tendril.Edit.Command.interrupt`
+    does, and the editor calls it after each of its commands (regression 24).
 - Also changed in that review:
-  - `KillSelection` joins a kill at the start of its entry when the cursor is before the anchor.
+  - `KillSelection` no longer has a direction: it can only follow a kill as a kill of nothing,
+    since every kill ends the selection (DESIGN.md §5.4).
+  - `Tendril.Text.Buffer.fromRope` is removed. Nothing used it, and it made a buffer whose rope
+    skipped the chunking.
   - A vertical motion that cannot move keeps the goal it was given, so it no longer holds the old
     buffer in an unevaluated column.
   - `clustersBefore` segments 32 code points at a time after the nearest cluster, so a word back

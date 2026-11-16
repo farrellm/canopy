@@ -30,6 +30,7 @@ module Tendril.Edit.Command
     editState,
     withBuffer,
     apply,
+    interrupt,
   )
 where
 
@@ -77,9 +78,9 @@ data Command app (m :: ModeKind) where
   -- entry, at the end going forward and at the start going back; a kill of
   -- nothing adds no entry and does not break the run.
   Kill :: Motion -> Command app m
-  -- | Kill the selected text. Joining a kill, it goes at the start of the
-  -- entry if the cursor is before the anchor. With nothing selected it is a
-  -- kill of nothing.
+  -- | Kill the selected text. With nothing selected it is a kill of
+  -- nothing. It never joins a kill: a kill ends the selection, and any
+  -- command that starts one ends the run of kills.
   KillSelection :: Command app m
   -- | Copy the selected text onto the kill ring, and end the selection. A
   -- copy of nothing adds no entry.
@@ -173,7 +174,10 @@ withBuffer b s = (editState b) {stateKillRing = s.stateKillRing, stateRegisters 
 
 -- | The state after an editing command; or 'Nothing' for a command that is
 -- the editor's, not an edit (undo, history, accepting the input, structural
--- selection, the external editor, the application's).
+-- selection, the external editor, the application's). After running one of
+-- those, the editor passes its state through 'interrupt', so that a
+-- yank-pop or a kill after it does not act as if straight after the yank or
+-- kill before it.
 --
 -- >>> s = editState "ab cd"
 -- >>> fmap (\s' -> (s'.buffer, s'.cursor)) (apply (Kill PrevWord) s)
@@ -192,11 +196,9 @@ apply cmd s0 = case cmd of
   Kill m ->
     let p = (moveTo m).position
      in Just (killRange (if p < x then Backward else Forward) (range x p))
-  KillSelection ->
-    -- Emacs's kill-region: joining a kill, it goes at the start of the
-    -- entry when the cursor is before the anchor.
-    let dir = if any (x <) s0.stateSelection.anchor then Backward else Forward
-     in Just (killRange dir (fromMaybe (range x x) selected))
+  -- Only a kill of nothing can follow a kill (every kill ends the
+  -- selection), so the direction is never read for a join.
+  KillSelection -> Just (killRange Forward (fromMaybe (range x x) selected))
   CopySelection -> Just $ case selected of
     Just r | r.start /= r.end -> deselected {stateKillRing = kill (slice r b) s.stateKillRing}
     _ -> deselected
@@ -243,6 +245,19 @@ apply cmd s0 = case cmd of
                 _ -> kill t s.stateKillRing
            in (cut r s) {stateKillRing = ring, stateChain = Killed}
     yank t = (insert t s) {stateChain = Yanked x (len t)}
+
+-- | What a command the editor ran (one 'apply' returns 'Nothing' for) leaves
+-- of the state: it ends a run of kills, a yank's claim on a yank-pop and a
+-- run of vertical motions, as any command but one of those does in Emacs.
+--
+-- >>> run s cs = foldlM (flip apply) s cs
+-- >>> killed = run (editState "ab cd") [Kill PrevWord, Deselect, Kill PrevWord, Yank]
+-- >>> fmap (.buffer) (killed >>= apply YankPop)
+-- Just "cd"
+-- >>> fmap (.buffer) (killed >>= apply YankPop . interrupt)
+-- Just "ab "
+interrupt :: EditState -> EditState
+interrupt s = s {stateGoal = Nothing, stateChain = Unchained}
 
 -- | Which way a kill went from the cursor.
 data Direction = Backward | Forward

@@ -280,7 +280,9 @@ The rules, by module name across all packages:
   dynamically dispatched effect with at least two interpreters — a real one and a pure or scripted
   one — which is what the test plan stands on (§11). Operations are generated with `effectful-th`'s
   `makeEffect`. `Ghostty` is the exception: static, with one interpreter (§4.2).
-- **`optics`, never `lens`.** Records get labels with `makeFieldLabelsNoPrefix`; external types that
+- **`optics`, never `lens`.** A package that does not depend on `optics` (the table in §2.1 gives
+  it to `canopy` only) updates its records with record-update syntax and takes no dependency for
+  it. Records get labels with `makeFieldLabelsNoPrefix`; external types that
   derive `Generic` get labels for free through `optics-core`'s generic-label instances. `lsp-types`'
   generated records all derive `Generic` (`deriving stock (Show, Eq, Ord, Generic)`), but their fields
   carry its `lens`-era underscore prefix, so the labels are `#_label`, `#_textEdit`, and record dot
@@ -1143,7 +1145,9 @@ would infer a phantom one, and `coerce` would move a command between modes.
 **T1 applies the edits** (M2.4). `Tendril.Edit.Command.apply :: Command app m -> EditState -> Maybe
 EditState` runs the commands that change the text, the cursor, the selection, the kill ring or the
 registers. It returns `Nothing` for the editor's commands: undo (M2.5), history, accepting,
-structural selection, `$EDITOR` and `App`, which `Tendril.Editor` handles (§5.8). Besides §5.4's
+structural selection, `$EDITOR` and `App`, which `Tendril.Editor` handles (§5.8). After one, the
+editor passes its state through `interrupt`, which ends a run of kills, a yank's claim on a
+yank-pop and a run of vertical motions, as any other command does in Emacs. Besides §5.4's
 list, the edit commands are:
 
 - `Select`, `SetMark` and `Deselect`, and `KillSelection` and `CopySelection`, for Emacs's mark and
@@ -1152,8 +1156,9 @@ list, the edit commands are:
 - `CopyToRegister` and `InsertRegister`, for Emacs's registers, which vi's will share.
 
 A kill straight after a kill joins its kill-ring entry, at the end going forward and at the start
-going back. `KillSelection` goes back when the cursor is before the anchor, as Emacs's
-`kill-region` does. A kill of nothing adds no entry, but it is still a kill: it ends the selection,
+going back. `KillSelection` never joins one: every kill ends the selection, and every command that
+starts one ends the run, so there is no mark left to say which way it went (Emacs keeps an inactive
+mark for that; tendril does not). A kill of nothing adds no entry, but it is still a kill: it ends the selection,
 and a run of kills goes on through it. A `KillSelection` with nothing selected is one, and a
 `CopySelection` of nothing adds no entry either. The ring keeps Emacs's default of 120 entries. As in Emacs, a
 yank-pop moves a yank pointer and leaves the entries in their order. A kill puts its entry in front

@@ -5,7 +5,7 @@ module Test.Tendril.Edit.Command (tests) where
 
 import Data.Text qualified as T
 import Data.Text.Mixed.Rope qualified as Rope
-import Tendril.Edit.Command (Command (..), EditState, ModeKind (..), apply, editState)
+import Tendril.Edit.Command (Command (..), EditState, ModeKind (..), apply, editState, interrupt)
 import Tendril.Edit.KillRing (current, entries)
 import Tendril.Edit.Motion (Motion (..))
 import Tendril.Edit.Register (Register (..))
@@ -123,6 +123,15 @@ tests =
       -- selected ended a run of kills, though a kill of nothing does not.
       testCase "regression 22: a KillSelection with nothing selected keeps the run" $
         entries (edits (editState "one two") [Kill PrevWord, KillSelection, Kill PrevWord]).killRing @?= ["one two"],
+      -- Regression 24 (DESIGN.md §5.4): the editor's commands left the
+      -- chain alone, so a yank-pop after one still replaced the yank before
+      -- it, and a kill after one joined the kill before it.
+      testCase "regression 24: interrupt ends a yank's claim and a run of kills" $ do
+        let s = edits (editState "ab cd") [Kill PrevWord, Deselect, Kill PrevWord, Yank]
+        toText (edits s [YankPop]).buffer @?= "cd"
+        toText (edits (interrupt s) [YankPop]).buffer @?= "ab "
+        let k = edits (editState "one two") [Kill PrevWord]
+        entries (edits (interrupt k) [Kill PrevWord]).killRing @?= ["one ", "two"],
       testCase "the editor's commands are not edits" $
         forM_ [Undo, Redo, AcceptOrNewline, HistoryPrev, HistoryNext, ExpandSelection, ShrinkSelection, EditExternal, App ()] $ \c ->
           when (isJust (apply c (editState "x"))) (assertFailure (show c))

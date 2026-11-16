@@ -18,7 +18,6 @@
 module Tendril.Text.Buffer
   ( Buffer,
     fromText,
-    fromRope,
     toRope,
     isEmpty,
 
@@ -88,10 +87,6 @@ chunked t
 -- | The most code points 'chunked' puts in a chunk.
 chunkSize :: Int
 chunkSize = 4096
-
--- | A buffer holding a rope's text.
-fromRope :: Rope -> Buffer
-fromRope = Buffer
 
 -- | The buffer's rope, for a consumer that reads one (tree-sitter's input,
 -- through canopy's adapter).

@@ -34,7 +34,8 @@ two disagree, the design is the intent and the code is behind. Conventions are c
 2. **House style is §2.3–§2.7, so it is not re-litigated.** In short:
    - relude through the `canopy-prelude` mixins
    - `effectful`, never mtl
-   - `optics`, never `lens`: record dot to read, labels to update
+   - `optics`, never `lens`: record dot to read, labels to update (a package without `optics`,
+     which is every one but `canopy`, uses record-update syntax)
    - explicit export lists
    - no partial functions
    - Haddock on every export, with a 100% floor
