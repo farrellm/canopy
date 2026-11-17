@@ -5,8 +5,9 @@
 --
 -- Seven position systems meet in canopy, and confusing two is the commonest
 -- bug in editors. An 'Offset' says which one it is in: the cursor is an
--- @'Offset' ''Grapheme'@, tree-sitter talks in @'Offset' ''Byte'@, LSP in
--- @'Offset' ''Utf16'@ and the renderer in @'Offset' ''Column'@. There is no
+-- @'Offset' ''CodePoint'@ kept on a cluster boundary (D34), tree-sitter
+-- talks in @'Offset' ''Byte'@, LSP in @'Offset' ''Utf16'@ and the renderer
+-- in @'Offset' ''Column'@. There is no
 -- 'Num' instance, so offsets in two units cannot be added, and the
 -- constructor is not exported and the unit's role is nominal, so 'coerce'
 -- cannot change the unit either (D30). Conversions are functions of the text
@@ -16,8 +17,12 @@ module Tendril.Text.Units
     Offset,
     offset,
     fromOffset,
+    Range,
+    range,
   )
 where
+
+import GHC.Records (HasField (..))
 
 -- | What an 'Offset' counts.
 data Unit
@@ -55,3 +60,26 @@ offset = Offset
 -- its own idea of the unit.
 fromOffset :: Offset u -> Word
 fromOffset (Offset n) = n
+
+-- | The text between two offsets in one unit, the first never after the
+-- second. Read its ends as @r.start@ and @r.end@; 'range' is the only way to
+-- make one, so they are in order.
+data Range (u :: Unit) = Range (Offset u) (Offset u)
+  deriving stock (Eq, Ord, Show)
+
+-- Nominal through 'Offset' already, but declared, so that the guarantee
+-- does not rest on a field's type (D30).
+type role Range nominal
+
+instance HasField "start" (Range u) (Offset u) where
+  getField (Range s _) = s
+
+instance HasField "end" (Range u) (Offset u) where
+  getField (Range _ e) = e
+
+-- | The range between two offsets, in either order.
+--
+-- >>> range (offset @'CodePoint 5) (offset 2)
+-- Range (Offset 2) (Offset 5)
+range :: Offset u -> Offset u -> Range u
+range a b = Range (min a b) (max a b)

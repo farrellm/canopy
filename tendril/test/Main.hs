@@ -2,6 +2,9 @@ module Main (main) where
 
 import Test.Tasty (defaultMain, testGroup)
 import Test.Tendril qualified
+import Test.Tendril.Edit.Command qualified
+import Test.Tendril.Edit.KillRing qualified
+import Test.Tendril.Edit.Mode qualified
 import Test.Tendril.Text.Buffer qualified
 import Test.Tendril.Text.Grapheme qualified
 import Test.Tendril.Text.Oracle qualified
@@ -20,5 +23,8 @@ main =
         Test.Tendril.Text.Grapheme.tests,
         Test.Tendril.Text.Width.tests,
         Test.Tendril.Text.Oracle.tests,
-        Test.Tendril.Text.Buffer.tests
+        Test.Tendril.Text.Buffer.tests,
+        Test.Tendril.Edit.KillRing.tests,
+        Test.Tendril.Edit.Command.tests,
+        Test.Tendril.Edit.Mode.tests
       ]

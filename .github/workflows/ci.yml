@@ -151,6 +151,8 @@ jobs:
         run: |
           cabal bench ghostty-effectful-bench $CABAL_FLAGS --benchmark-options="--csv $RUNNER_TEMP/ghostty-effectful-bench.csv"
           python3 scripts/check-allocation.py --slack 4096 ghostty-effectful/bench/baseline/ghc-9.12.4.csv "$RUNNER_TEMP/ghostty-effectful-bench.csv"
+          cabal bench tendril-bench $CABAL_FLAGS --benchmark-options="--csv $RUNNER_TEMP/tendril-bench.csv"
+          python3 scripts/check-allocation.py --slack 4096 tendril/bench/baseline/ghc-9.12.4.csv "$RUNNER_TEMP/tendril-bench.csv"
 
   lint:
     name: Lint and format

@@ -6,14 +6,29 @@ module Test.Tendril.Text.Buffer (tests) where
 
 import Data.Text qualified as T
 import Data.Text.Foreign (lengthWord8)
-import Tendril.Text.Buffer (Buffer, BufferUnit (..), convert, fromText, splitAtOffset)
+import Tendril.Text.Buffer
+  ( Buffer,
+    BufferUnit (..),
+    ceilingBoundary,
+    clustersBefore,
+    clustersFrom,
+    convert,
+    floorBoundary,
+    fromText,
+    isBoundary,
+    lineEnd,
+    lineStart,
+    replace,
+    slice,
+    splitAtOffset,
+  )
 import Tendril.Text.Grapheme (boundaries, clusters)
-import Tendril.Text.Units (Offset, Unit (..), fromOffset, offset)
-import Test.QuickCheck (Property, conjoin, counterexample, forAll, property, (.&&.), (===))
+import Tendril.Text.Units (Offset, Unit (..), fromOffset, offset, range)
+import Test.QuickCheck (Gen, Property, choose, conjoin, counterexample, forAll, property, vectorOf, (.&&.), (===))
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=))
 import Test.Tasty.QuickCheck (testProperty)
-import Test.Tendril.Text.Gen (genText)
+import Test.Tendril.Text.Gen (genRunText, genText)
 
 tests :: TestTree
 tests =
@@ -78,8 +93,76 @@ tests =
                 [ fmap (bimap toText toText) (splitAtOffset (offset @'Grapheme (fromIntegral g)) b)
                     === Just (T.concat (take g (clusters t)), T.concat (drop g (clusters t)))
                 | g <- [0 .. length (clusters t)]
-                ]
+                ],
+      -- D34: the boundaries near an offset, found by segmenting from a
+      -- place nearby, are the ones segmenting the whole text finds.
+      testCase "a run longer than the first window" $ do
+        let b = fromText ("a" <> T.replicate 300 "\x0301" <> "b")
+        take 2 (clustersBefore b (extent b)) @?= [(offset 301, "b"), (offset 0, "a" <> T.replicate 300 "\x0301")]
+        take 1 (clustersFrom b (offset 150)) @?= [(offset 301, "b")]
+        floorBoundary b (offset 150) @?= offset 0,
+      -- Regression 23 (D34): inside a cluster of code points that each
+      -- resume (a run of Hangul L), clustersBefore stepped back one code
+      -- point at a time and segmented to the end again for each: quadratic.
+      testCase "regression 23: a long cluster of resuming code points" $ do
+        let run = T.replicate 20000 "\x1100"
+            b = fromText ("a" <> run)
+        take 2 (clustersBefore b (extent b)) @?= [(offset 1, run), (offset 0, "a")],
+      testProperty "clustersFrom is whole-text segmentation from there on" $
+        nearby $
+          \t x -> clustersFrom (fromText t) x === filter ((>= x) . fst) (segmented t),
+      testProperty "clustersBefore is whole-text segmentation up to there, backwards" $
+        nearby $
+          \t x -> clustersBefore (fromText t) x === reverse (filter ((<= x) . end) (segmented t)),
+      testProperty "isBoundary, floorBoundary and ceilingBoundary agree with the boundaries" $
+        nearby $ \t x ->
+          let b = fromText t
+              bs = boundaries t
+              x' = min x (extent b)
+           in (isBoundary b x, floorBoundary b x, ceilingBoundary b x)
+                === ( x `elem` bs,
+                      fromMaybe (offset 0) (viaNonEmpty last (filter (<= x') bs)),
+                      fromMaybe (extent b) (find (>= x') bs)
+                    ),
+      testProperty "lineStart and lineEnd are the line feeds around an offset" $
+        nearby $ \t x ->
+          let n = fromOffset x
+              (before, after) = T.splitAt (fromIntegral n) t
+           in (lineStart (fromText t) x, lineEnd (fromText t) x)
+                === ( offset (fromIntegral (T.length before - T.length (T.takeWhileEnd (/= '\n') before))),
+                      offset (fromIntegral (T.length before + T.length (T.takeWhile (/= '\n') after)))
+                    ),
+      testProperty "replace and slice are Data.Text's" $
+        forAll genText $ \t ->
+          forAll genText $ \u ->
+            forAll (positions t) $ \(x, y) ->
+              let r = range x y
+                  at o = fromIntegral (fromOffset o)
+                  (before, rest) = T.splitAt (at r.start) t
+                  (mid, after) = T.splitAt (at r.end - at r.start) rest
+               in (toText (replace r u (fromText t)), slice r (fromText t)) === (before <> u <> after, mid)
     ]
+
+-- | A text and offsets into it, one past the end among them.
+nearby :: (Text -> Offset 'CodePoint -> Property) -> Property
+nearby p = forAll genRunText $ \t ->
+  forAll (vectorOf 8 (choose (0, T.length t + 1))) $ \xs ->
+    conjoin [counterexample (show x) (p t (offset (fromIntegral x))) | x <- xs]
+
+-- | Two offsets into a text, in either order.
+positions :: Text -> Gen (Offset 'CodePoint, Offset 'CodePoint)
+positions t = do
+  let o = offset . fromIntegral
+  x <- choose (0, T.length t)
+  y <- choose (0, T.length t)
+  pure (o x, o y)
+
+-- | Each cluster of a whole text, with its start.
+segmented :: Text -> [(Offset 'CodePoint, Text)]
+segmented t = zip (boundaries t) (clusters t)
+
+end :: (Offset 'CodePoint, Text) -> Offset 'CodePoint
+end (o, c) = offset (fromOffset o + fromIntegral (T.length c))
 
 -- | Every offset of unit @a@ from 0 to one past the end: each that converts
 -- to another unit converts back to itself, and the one past the end converts

@@ -34,7 +34,8 @@ two disagree, the design is the intent and the code is behind. Conventions are c
 2. **House style is §2.3–§2.7, so it is not re-litigated.** In short:
    - relude through the `canopy-prelude` mixins
    - `effectful`, never mtl
-   - `optics`, never `lens`: record dot to read, labels to update
+   - `optics`, never `lens`: record dot to read, labels to update (a package without `optics`,
+     which is every one but `canopy`, uses record-update syntax)
    - explicit export lists
    - no partial functions
    - Haddock on every export, with a 100% floor
@@ -77,7 +78,7 @@ root:
   `scripts/check-common-stanzas.sh` and `python3 scripts/check-layout-rows.py`
 - Format: `ormolu --mode check $(git ls-files '*.hs')`
 - Haddock: `cabal haddock all 2>&1 | python3 scripts/check-haddock.py`
-- Benchmarks (§12.3): `cabal bench ghostty-effectful-bench <CI's flags> --benchmark-options="--csv out.csv"`,
-  then `python3 scripts/check-allocation.py --slack 4096 ghostty-effectful/bench/baseline/ghc-9.12.4.csv out.csv`.
-  Name the suite: the root is no package's directory. A baseline is regenerated only on purpose,
+- Benchmarks (§12.3): `cabal bench <pkg>-bench <CI's flags> --benchmark-options="--csv out.csv"`,
+  then `python3 scripts/check-allocation.py --slack 4096 <pkg>/bench/baseline/ghc-9.12.4.csv out.csv`,
+  for `ghostty-effectful` and `tendril`. Name the suite: the root is no package's directory. A baseline is regenerated only on purpose,
   in a commit that says why.

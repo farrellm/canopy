@@ -3,14 +3,14 @@
 module Test.Tendril.Text.Grapheme (tests) where
 
 import Data.Text qualified as T
-import Tendril.Text.Grapheme (boundaries, clusters)
+import Tendril.Text.Grapheme (boundaries, breakBefore, clusters, resume, segmenter)
 import Tendril.Text.Unicode.Tables (GraphemeBreak (..), emojiModifier, emojiModifierBase, graphemeBreak)
 import Tendril.Text.Units (Offset, Unit (..), fromOffset, offset)
-import Test.QuickCheck (forAll, (===))
+import Test.QuickCheck (conjoin, counterexample, forAll, (===))
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 import Test.Tasty.QuickCheck (testProperty)
-import Test.Tendril.Text.Gen (genText)
+import Test.Tendril.Text.Gen (genRunText, genText)
 import Test.Tendril.Text.Grapheme.Conformance (cases)
 
 tests :: TestTree
@@ -33,6 +33,16 @@ tests =
       testProperty "the clusters are the text, none empty" $
         forAll genText $ \t ->
           let cs = clusters t in (T.concat cs, any T.null cs) === (t, False),
+      -- D34: after a code point that resumes, the state is the same
+      -- whatever was read before it, so segmenting can start there.
+      testProperty "resume's state is the state after any text" $
+        forAll genRunText $ \t ->
+          let states = scanl (\s c -> snd (breakBefore c s)) segmenter (toString t)
+           in conjoin
+                [ counterexample (show (c, s)) (Just (snd (breakBefore c s)) === resume c)
+                | (s, c) <- zip states (toString t),
+                  isJust (resume c)
+                ],
       testProperty "the boundaries are the clusters' ends" $
         forAll genText $ \t ->
           boundaries t === scanl (\o c -> plus o (T.length c)) (offset 0) (clusters t)

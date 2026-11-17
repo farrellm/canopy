@@ -33,6 +33,11 @@ library
   import:           warnings, extensions
   exposed-modules:
     Tendril
+    Tendril.Edit.Command
+    Tendril.Edit.KillRing
+    Tendril.Edit.Motion
+    Tendril.Edit.Register
+    Tendril.Edit.Selection
     Tendril.Text.Buffer
     Tendril.Text.Grapheme
     Tendril.Text.Unicode.Tables
@@ -46,6 +51,7 @@ library
     , base ^>=4.21.2.0
     , bytestring ^>=0.12
     , canopy-prelude
+    , containers ^>=0.7
     , text ^>=2.1
     , text-rope ^>=0.3
 
@@ -79,6 +85,9 @@ test-suite tendril-test
   main-is:          Main.hs
   other-modules:
     Test.Tendril
+    Test.Tendril.Edit.Command
+    Test.Tendril.Edit.KillRing
+    Test.Tendril.Edit.Mode
     Test.Tendril.Text.Buffer
     Test.Tendril.Text.Gen
     Test.Tendril.Text.Grapheme
@@ -98,6 +107,30 @@ test-suite tendril-test
     , tasty ^>=1.5
     , tasty-hunit ^>=0.10.2
     , tasty-quickcheck ^>=0.11.1
+    , tendril
+    , text ^>=2.1
+    , text-rope ^>=0.3
+
+  mixins:
+    base hiding (Prelude),
+    canopy-prelude (Canopy.Prelude as Prelude)
+
+  default-language: GHC2024
+
+-- DESIGN.md §12.3. Compiled with -O2, and -T so allocation is reported beside
+-- time; the library is at cabal's default optimization, as in every build.
+-- CI gates allocation against bench/baseline/ (§2.8 step 8).
+benchmark tendril-bench
+  import:           warnings, extensions
+  type:             exitcode-stdio-1.0
+  hs-source-dirs:   bench
+  main-is:          Main.hs
+  other-modules:    Bench.Tendril.Edit
+  ghc-options:      -O2 -with-rtsopts=-T
+  build-depends:
+    , base ^>=4.21.2.0
+    , canopy-prelude
+    , tasty-bench ^>=0.5.1
     , tendril
     , text ^>=2.1
 

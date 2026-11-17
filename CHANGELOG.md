@@ -76,6 +76,50 @@ Written as changes land, not at release (DESIGN.md §2.9).
   (ZWJ sequences, flags and a tag sequence, combining marks, Indic conjuncts, Hangul, variation
   selectors, skin tones) and on 100,000 generated texts without controls. All agree; a broken VS15
   rule fails both the corpus and the property.
+- T1 editing (M2.4, DESIGN.md §5.4): `Tendril.Edit.Command` (`Command app m`, indexed by
+  `ModeKind`, with a nominal role and a test that a coercion between modes does not type-check;
+  `EditState`; `apply`), `.Motion` (clusters, words, line ends, lines up and down with a goal
+  column, the buffer's ends), `.KillRing` (consecutive kills join; yank and yank-pop), `.Selection`
+  (Emacs's mark and region) and `.Register`. `apply` returns `Nothing` for the editor's commands
+  (undo, history, accepting, `App`). `Tendril.Text.Units` gains `Range`, and `Tendril.Text.Buffer`
+  gains `replace`, `slice`, the clusters and boundaries near an offset, and line ends.
+- D-deferred-13 answered (D34, DESIGN.md §5.3): the cursor and anchor are code point offsets kept
+  on cluster boundaries, which a property holds over random command sequences. A boundary is found
+  by segmenting from the nearest code point after which the segmenter's state is independent of the
+  text before it (`Tendril.Text.Grapheme.resume`), never from the buffer's start. §5.5's requests
+  and `enclosing` take code point offsets. The buffer's rope is built in chunks of at most 4,096
+  code points: one chunk made each edit near the end of a 1 MiB paste cost 0.17–8 ms, and chunked
+  they cost 0.4–52 µs.
+- `tendril-bench` (DESIGN.md §12.3) measures one command in a 1 MiB paste, and the grapheme
+  conversion the editor no longer makes on a keystroke (143–151 ms). CI's step 8 gates its
+  allocation against `tendril/bench/baseline/ghc-9.12.4.csv`.
+- Fixed in review of M2.4, each with a numbered regression case:
+  - A yank-pop moved the newest entry to the back of the kill ring, so a kill after yank-pops went
+    in front of a reordered ring. The ring now keeps a yank pointer, as Emacs's does (regression 19;
+    DESIGN.md §5.4).
+  - A kill of nothing ended a run of kills and left the selection active. It now does neither
+    (regression 20).
+  - A copy of an empty selection put an empty entry on the kill ring, so the next yank inserted
+    nothing. It now adds none (regression 21).
+  - A `KillSelection` with nothing selected ended a run of kills. It is now a kill of nothing, which
+    does not (regression 22).
+  - `clustersBefore` inside a long cluster of code points that each resume (a run of Hangul L)
+    stepped back one code point at a time, segmenting to the end each time: quadratic. It now steps
+    back twice as far each time (regression 23). `restart` reads only the new part of each doubled
+    window, and a `Buffer` literal is chunked like `fromText`'s.
+  - The editor's commands left a run of kills and a yank's claim on a yank-pop in place, and
+    `EditState` is abstract, so the editor could not end them. `Tendril.Edit.Command.interrupt`
+    does, and the editor calls it after each of its commands (regression 24).
+- Also changed in that review:
+  - `KillSelection` no longer has a direction: it can only follow a kill as a kill of nothing,
+    since every kill ends the selection (DESIGN.md §5.4).
+  - `Tendril.Text.Buffer.fromRope` is removed. Nothing used it, and it made a buffer whose rope
+    skipped the chunking.
+  - A vertical motion that cannot move keeps the goal it was given, so it no longer holds the old
+    buffer in an unevaluated column.
+  - `clustersBefore` segments 32 code points at a time after the nearest cluster, so a word back
+    allocates 24–34% less. The bench baseline is regenerated for it (DESIGN.md §12.3).
+  - Kill finds its motion's target once, and `Tendril.Text.Buffer` exports `clusterEnd`.
 
 ### M1: ghostty
 
