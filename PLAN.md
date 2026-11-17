@@ -6,7 +6,7 @@ lists of them): it builds with
 commit if it changes a decision (§2.9). Section references (§) are to DESIGN.md.
 
 M0 is done (PR #1), and M1 (PRs #2–#13; the performance work of D18–D21 followed in PR #30). M2 has
-started: M2.1–M2.4 are done. Steps
+started: M2.1–M2.5 are done. Steps
 are numbered `M<n>.<k>`
 and are in dependency order within a milestone.
 
@@ -251,6 +251,15 @@ Exit: decoder roundtrip and render-diff properties pass; `tendril-demo` usable a
 
 - `Tendril.Edit.Undo`: tree, coalescing by command kind and time.
 - Properties: undo/redo inverse; branches reachable.
+- `Undoable` is an `EditState` with its tree, and `edit` runs a command on both (D35). A step is
+  two snapshots of the persistent rope, before its first edit and after its last, so undo and redo
+  restore exactly. A command changed the text when `EditState`'s new `version` moved, which the
+  editor's revision will follow; a command that changed nothing (a deletion at the start, a yank-pop
+  round a ring of one) is no step. Typing one cluster at a time and single-cluster deletions back or
+  on coalesce within a second, unless anything came between; time is an argument, so M2.11's `step`
+  takes one. Undo restores the cursor from before the step, redo from after it, and both end a run
+  of kills and a yank's claim. `earlier`/`later` (vim's `g-`/`g+`) reach every branch; they are
+  functions until M6.1/M6.2 bind them. **Done.**
 
 ### M2.6 Keymaps: trie and Emacs
 
@@ -283,8 +292,8 @@ Exit: decoder roundtrip and render-diff properties pass; `tendril-demo` usable a
 ### M2.11 Editor core
 
 - `Tendril.Editor`: `EditorState`, `Plugins` with its defaults, `Request`, `Answer`, and
-  `step :: Plugins -> EditorInput -> EditorState app -> (EditorState app, [Request app])` (§5.5,
-  §5.8, D25). Pure: it comes before the widgets and the driver, which are built over it.
+  `step :: Plugins -> Time -> EditorInput -> EditorState app -> (EditorState app, [Request app])`
+  (§5.5, §5.8, D25), its `EditState` and undo tree held as `Tendril.Edit.Undo`'s `Undoable`. Pure: it comes before the widgets and the driver, which are built over it.
 - Tests, with no thread: an answer for an old revision is dropped; after a `NotReady`, later input
   is held and replayed in order when `Validated` arrives.
 

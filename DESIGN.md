@@ -1144,8 +1144,9 @@ would infer a phantom one, and `coerce` would move a command between modes.
 
 **T1 applies the edits** (M2.4). `Tendril.Edit.Command.apply :: Command app m -> EditState -> Maybe
 EditState` runs the commands that change the text, the cursor, the selection, the kill ring or the
-registers. It returns `Nothing` for the editor's commands: undo (M2.5), history, accepting,
-structural selection, `$EDITOR` and `App`, which `Tendril.Editor` handles (§5.8). After one, the
+registers. It returns `Nothing` for the editor's commands: undo and redo (`Tendril.Edit.Undo`'s,
+below), history, accepting, structural selection, `$EDITOR` and `App`, which `Tendril.Editor`
+handles (§5.8). After one, the
 editor passes its state through `interrupt`, which ends a run of kills, a yank's claim on a
 yank-pop and a run of vertical motions, as any other command does in Emacs. Besides §5.4's
 list, the edit commands are:
@@ -1165,10 +1166,38 @@ yank-pop moves a yank pointer and leaves the entries in their order. A kill puts
 and the pointer on it, so a kill after yank-pops does not reorder the ring. Vertical motions keep a
 goal column, counted in clusters from the start of the line, across a run of them. On the first line
 or the last, where one does not move, it keeps the goal it was given and counts nothing. `EditState` is
-`Tendril.Editor`'s `EditorState` without the parts that need the editor: the undo tree, the
-history, the revision and the widgets.
+`Tendril.Editor`'s `EditorState` without the parts that need the editor: the undo tree (which
+`Tendril.Edit.Undo`'s `Undoable` pairs with it), the history and the widgets. Its `version` is the
+editor's revision.
 
-**Undo** is a tree, not a stack (as in vim and helix), with edit coalescing by command kind and time.
+**Undo** is a tree, not a stack (as in vim and helix), with edit coalescing by command kind and time
+(M2.5, D35). `Tendril.Edit.Undo`'s `Undoable` is an `EditState` with its tree, and its `edit`
+runs a command on both: it applies an editing command, records a step if the text changed, and runs
+`Undo` and `Redo` itself. A step is two snapshots, the text and cursor before its first edit and
+after its last; the rope is persistent, so they share all but the edited part, and undo and redo
+are exact by construction, with no inverse edits to get wrong. An undo puts back the text and the
+cursor from before the step, a redo the text and cursor from after it, and neither keeps a
+selection or touches the kill ring and registers; both end a run of kills and a yank's claim,
+whose range was in the replaced text. A redo follows the step made or undone last; `earlier` and
+`later` walk every step in the order it was made (vim's `g-`/`g+`), so a branch left by an edit
+after an undo stays reachable. They are functions, not commands, until a keymap binds them (M6.1,
+M6.2).
+
+- **Did the text change** is `EditState`'s `version`, a count each command bumps only when it
+  changes the text, so a motion, a deletion at the start, a yank of an empty ring or a yank-pop
+  round a ring of one is no step, and nothing compares two texts. The editor's `Revision` (§5.5) is
+  taken from it.
+- **Coalescing.** A run of typing (inserting one cluster that is not a line break) is one step, as
+  is a run of deletions one cluster back, and one of deletions one cluster on. An edit joins the
+  step before it if both are of one of those kinds, nothing came between them (a motion, an undo,
+  a command that changed nothing, or one of the editor's, after which the editor calls
+  `interrupted`), and it came within a second of the step's last edit. A paste, a newline, a kill
+  and a yank are steps of their own.
+- **Time is an argument** (`Time`, milliseconds from any fixed origin), since tendril has no
+  clock: `Tendril.Editor`'s `step` takes it with each input, from the driver that reads the host
+  (§5.8). A time earlier than the last edit's counts as no gap.
+- The tree keeps every step until it is replaced, and the editor starts one for each input it
+  reads, and for a history entry recalled into the buffer.
 **History** is a request (§5.5): standalone it is answered by an effect whose default interpreter
 is an append-only file, and canopy answers it from SQLite, with context (§8.8).
 
@@ -1210,7 +1239,8 @@ data Answer
   | Recalled  HistoryQuery [HistoryEntry]
 ```
 
-**Slow plug-ins never block typing.** A `Revision` is a counter incremented on every buffer change,
+**Slow plug-ins never block typing.** A `Revision` is a counter incremented on every buffer change
+(`EditState`'s `version`, §5.4),
 and an answer whose revision is older than the buffer's is dropped (reedline lists exactly this as
 unsolved). The drop is a comparison inside `step`, so the rule is tested as a pure function, with
 no thread. **No signature carries an `Async`**: tendril depends on `effectful-core` alone (§2.7),
@@ -1289,9 +1319,11 @@ event comes back equal — is the strongest test in the package (§11.2).
 **The editor is one pure function** (`Tendril.Editor`, D25):
 
 ```haskell
-step :: Plugins -> EditorInput -> EditorState app -> (EditorState app, [Request app])
+step :: Plugins -> Time -> EditorInput -> EditorState app -> (EditorState app, [Request app])
 
 data EditorInput = Host InputEvent | Answer Answer     -- §5.7, §5.5
+-- Time: when the input arrived, for undo's coalescing (§5.4). runLineEditor reads the clock;
+-- canopy stamps each host-input event as its feeder reads it, and passes that on
 ```
 
 Everything the editor does is in it: keymaps, commands, the menu and hint widgets, dropping a stale
@@ -2798,6 +2830,7 @@ input; a per-session toggle hides them.
 | D32 | A hidden query in flight is a state (`Querying`), so a submission waits for it. A block has a status (`Succeeded`, `Failed`, `Unknown`), from `D` or a profile's recogniser, and `Unknown` is treated as success | §6.4, §7.3, §9.3 |
 | D33 | tendril's grapheme clusters are libghostty-vt's tailoring of UAX #29 (an emoji modifier continues only a modifier base; a stray variation selector is invisible to the rules), not UAX #29's own, since the terminal decides what it draws whole (M2.2) | §5.3 |
 | D34 | The editor's positions (cursor, anchor) are code point offsets kept on cluster boundaries, not grapheme offsets. A boundary near one is found by segmenting from the nearest code point after which the segmenter's state does not depend on the text before it, so a motion or edit reads the text near it, never the whole buffer. The buffer's rope is built in chunks of at most 4,096 code points, since `text-rope` splits within a chunk by walking it. Answers D-deferred-13 (M2.4) | §5.3, §5.4, §12.3 |
+| D35 | Undo is a tree of snapshots: each step keeps the text and cursor before its first edit and after its last, sharing the persistent rope, so undo and redo restore exactly. A command changed the text when `EditState`'s `version` moved, which the editor's revision also follows. Typing and single-cluster deletions coalesce within a second, unless anything came between; time is an argument, since tendril has no clock (M2.5) | §5.4, §5.5 |
 
 ### 15.2 Deferred
 

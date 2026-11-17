@@ -7,9 +7,9 @@
 -- bound in, so that a keymap of one mode cannot hold another's commands; and
 -- by the application's own commands, which tendril carries but does not
 -- interpret. 'apply' runs the commands that edit the text, the cursor, the
--- selection, the kill ring and the registers; the rest are the editor's
--- (undo, history, accepting the input, the application's), and it leaves
--- them to the editor (@Tendril.Editor@, §5.8).
+-- selection, the kill ring and the registers. It leaves undo and redo to
+-- "Tendril.Edit.Undo", and the rest (history, accepting the input, the
+-- application's) to the editor (@Tendril.Editor@, §5.8).
 --
 -- __Positions.__ An t'EditState' keeps its cursor and anchor as code point
 -- offsets, always on cluster boundaries: a motion moves between boundaries,
@@ -31,6 +31,11 @@ module Tendril.Edit.Command
     withBuffer,
     apply,
     interrupt,
+
+    -- * Undoing
+    Snapshot,
+    snapshot,
+    restore,
   )
 where
 
@@ -94,9 +99,9 @@ data Command app (m :: ModeKind) where
   CopyToRegister :: Register -> Command app m
   -- | Insert what a register holds.
   InsertRegister :: Register -> Command app m
-  -- | Undo the last edit (the editor's: M2.5).
+  -- | Undo the last edit ("Tendril.Edit.Undo"'s, not 'apply''s).
   Undo :: Command app m
-  -- | Redo an undone edit (the editor's: M2.5).
+  -- | Redo the edit undone last from here ("Tendril.Edit.Undo"'s).
   Redo :: Command app m
   -- | Submit the input if the validator finds it complete, or insert a line
   -- feed (the editor's, §5.5).
@@ -122,8 +127,14 @@ deriving stock instance (Show app) => Show (Command app m)
 -- | The text being edited, the cursor and selection in it, and what the
 -- editing commands keep between them. Read its parts as @s.buffer@,
 -- @s.cursor@, @s.selection@, @s.killRing@ and @s.registers@; only 'apply'
--- changes them, which keeps the cursor and the anchor on cluster
--- boundaries.
+-- and 'restore' change them, which keeps the cursor and the anchor on
+-- cluster boundaries.
+--
+-- @s.version@ counts the changes to the text: a command that changed it
+-- leaves a greater version, and one that did not (a motion, a deletion at
+-- the start, a yank of an empty ring) leaves the same. It is how the undo
+-- tree knows an edit happened, and the editor's revision (§5.5), without
+-- comparing texts. Two states are equal only with equal versions.
 data EditState = EditState
   { stateBuffer :: Buffer,
     stateSelection :: Selection,
@@ -133,7 +144,9 @@ data EditState = EditState
     stateRegisters :: Registers,
     -- | What the last command was, for the commands that act differently
     -- straight after another.
-    stateChain :: Chain
+    stateChain :: Chain,
+    -- | How many times the text has changed.
+    stateVersion :: Word
   }
   deriving stock (Eq, Show)
 
@@ -162,20 +175,25 @@ instance HasField "killRing" EditState KillRing where
 instance HasField "registers" EditState Registers where
   getField = (.stateRegisters)
 
+instance HasField "version" EditState Word where
+  getField = (.stateVersion)
+
 -- | A buffer to edit, with the cursor at its end, nothing selected, nothing
 -- killed and no register holding anything.
 editState :: Buffer -> EditState
-editState b = EditState b (collapsed (extent b)) Nothing emptyKillRing emptyRegisters Unchained
+editState b = EditState b (collapsed (extent b)) Nothing emptyKillRing emptyRegisters Unchained 0
 
 -- | The state with its text replaced (a history entry recalled), the cursor
--- at the end and nothing selected; the kill ring and registers stay.
+-- at the end and nothing selected; the kill ring and registers stay, and the
+-- version goes on counting.
 withBuffer :: Buffer -> EditState -> EditState
-withBuffer b s = (editState b) {stateKillRing = s.stateKillRing, stateRegisters = s.stateRegisters}
+withBuffer b s = (editState b) {stateKillRing = s.stateKillRing, stateRegisters = s.stateRegisters, stateVersion = s.stateVersion + 1}
 
 -- | The state after an editing command; or 'Nothing' for a command that is
--- the editor's, not an edit (undo, history, accepting the input, structural
--- selection, the external editor, the application's). After running one of
--- those, the editor passes its state through 'interrupt', so that a
+-- not an edit: undo and redo ("Tendril.Edit.Undo"'s), and the editor's
+-- (history, accepting the input, structural selection, the external editor,
+-- the application's). After running one of the editor's, it passes its
+-- state through 'interrupt', so that a
 -- yank-pop or a kill after it does not act as if straight after the yank or
 -- kill before it.
 --
@@ -259,6 +277,35 @@ apply cmd s0 = case cmd of
 interrupt :: EditState -> EditState
 interrupt s = s {stateGoal = Nothing, stateChain = Unchained}
 
+-- | A text and a cursor on one of its boundaries, taken together from a
+-- state, for the undo tree to put back. Read them as @p.buffer@ and
+-- @p.cursor@.
+data Snapshot = Snapshot Buffer (Offset 'CodePoint)
+  deriving stock (Eq, Show)
+
+instance HasField "buffer" Snapshot Buffer where
+  getField (Snapshot b _) = b
+
+instance HasField "cursor" Snapshot (Offset 'CodePoint) where
+  getField (Snapshot _ x) = x
+
+-- | The state's text and cursor.
+snapshot :: EditState -> Snapshot
+snapshot s = Snapshot s.stateBuffer s.stateSelection.cursor
+
+-- | The state with a snapshot's text and cursor put back, nothing selected,
+-- and its version counted on. Like 'interrupt', it ends a run of kills, a
+-- yank's claim on a yank-pop (whose range was in the text it replaces) and
+-- a run of vertical motions. The kill ring and the registers stay, as in
+-- Emacs, where undo does not unkill.
+--
+-- >>> s = editState "ab"
+-- >>> fmap (\s' -> (s'.buffer, s'.cursor)) (restore (snapshot s) <$> apply (Insert "c") s)
+-- Just ("ab",Offset 2)
+restore :: Snapshot -> EditState -> EditState
+restore (Snapshot b x) s =
+  (interrupt s) {stateBuffer = b, stateSelection = collapsed x, stateVersion = s.stateVersion + 1}
+
 -- | Which way a kill went from the cursor.
 data Direction = Backward | Forward
 
@@ -272,16 +319,36 @@ insert t s = insertOver (range x x) t s
 -- selection: on the boundary at or after the text's end, since the text may
 -- have joined the cluster after it.
 insertOver :: Range 'CodePoint -> Text -> EditState -> EditState
-insertOver r t s =
-  s {stateBuffer = b', stateSelection = collapsed (ceilingBoundary b' (plus r.start (len t)))}
+insertOver r t s
+  -- The same text over itself (an empty insertion, a yank-pop round a ring
+  -- of one) is no change, and leaves the version. Only a yank-pop replaces
+  -- a range, as long as the text it yanked, so the slice costs what the
+  -- insertion would; an insertion at a point is checked without one.
+  | unchanged = s {stateSelection = collapsed (ceilingBoundary s.stateBuffer r.end)}
+  | otherwise =
+      s
+        { stateBuffer = b',
+          stateSelection = collapsed (ceilingBoundary b' (plus r.start (len t))),
+          stateVersion = s.stateVersion + 1
+        }
   where
     b' = replace r t s.stateBuffer
+    unchanged
+      | r.start == r.end = T.null t
+      | otherwise = slice r s.stateBuffer == t
 
 -- | Delete a range, and put the cursor where it was, ending the selection:
 -- on the boundary at or before it, since the text on each side may have
 -- joined into one cluster.
 cut :: Range 'CodePoint -> EditState -> EditState
-cut r s = s {stateBuffer = b', stateSelection = collapsed (floorBoundary b' r.start)}
+cut r s
+  | r.start == r.end = s {stateSelection = collapsed r.start}
+  | otherwise =
+      s
+        { stateBuffer = b',
+          stateSelection = collapsed (floorBoundary b' r.start),
+          stateVersion = s.stateVersion + 1
+        }
   where
     b' = replace r "" s.stateBuffer
 
