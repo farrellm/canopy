@@ -56,6 +56,14 @@ tests =
               walked = map text (take (steps u + 1) (iterate (via later) (via (toStart earlier) u)))
            in cover 10 (any (isUndo . snd) es && length made > 2) "a branch" $
                 (steps u, walked) === (length made - 1, made),
+      testProperty "after any moves, redoing from the start passes through the current step" $
+        forAll (listOf genMoveOrCommand) $ \ms ->
+          let u = foldl' (\w m -> either (\mv -> via (move mv) w) (\(dt, c) -> after dt c w) m) (start "") ms
+              redone = redoChain (via (toStart undo) u)
+              moved = any isLeft ms
+           in cover 20 (moved && step u /= 0) "moved in the tree, not at the start" $
+                counterexample (show (map (\v -> (step v, text v)) redone)) $
+                  (step u, text u) `elem` map (\v -> (step v, text v)) redone,
       testProperty "the cursor stays on a boundary through undo, redo, earlier and later" $
         forAll genSession $ \(t, es) ->
           let us = scanl (\u (dt, c) -> after dt c u) (start t) es
@@ -65,6 +73,14 @@ tests =
                 | u <- us,
                   v <- u : map (`via` u) moves
                 ],
+      testCase "earlier onto an old branch redoes towards it from the start" $ do
+        -- Steps 0 → 1 → 2, then 3 made from 0. Step 1 still redoes to 2, but 0
+        -- redoes to 3 until the move to 2 points it back at 1. 'earlier' back
+        -- along 2's own branch leaves the redos alone (an undo would reset them).
+        let u = after (coalesceWindow + 1) (Insert "c") (edits 0 [Undo, Undo] (edits (coalesceWindow + 1) [Insert "a", Insert "b"] (start "")))
+            v = via earlier u
+        (text u, step u, text v, step v) @?= ("c", 3, "ab", 2)
+        map (\w -> (step w, text w)) (redoChain (via (toStart earlier) v)) @?= [(0, ""), (1, "a"), (2, "ab")],
       testCase "a run of typing is one step" $ do
         let u = typed 100 "abc" (start "")
         (text u, steps u) @?= ("abc", 1)
@@ -192,6 +208,15 @@ toStart f u
   | u.step == 0 = u
   | otherwise = toStart f (f u)
 
+-- | The states from redoing until there is nothing to redo, the first
+-- included.
+redoChain :: Clocked -> [Clocked]
+redoChain u
+  | step u' == step u = [u]
+  | otherwise = u : redoChain u'
+  where
+    u' = via redo u
+
 steps :: Clocked -> Int
 steps c = (tree c).steps
 
@@ -216,6 +241,25 @@ isEdit = \case
 -- | A text, and commands with the milliseconds before each.
 genSession :: Gen (Text, [(Word64, Command () 'Emacs)])
 genSession = (,) <$> genRunText <*> listOf ((,) <$> genGap <*> genCommand)
+
+-- | A move in the tree that is not a command.
+data Move = MoveUndo | MoveRedo | MoveEarlier | MoveLater
+  deriving stock (Bounded, Enum, Show)
+
+move :: Move -> Undoable -> Undoable
+move = \case
+  MoveUndo -> undo
+  MoveRedo -> redo
+  MoveEarlier -> earlier
+  MoveLater -> later
+
+-- | A move in the tree, or a command with the milliseconds before it.
+genMoveOrCommand :: Gen (Either Move (Word64, Command () 'Emacs))
+genMoveOrCommand =
+  frequency
+    [ (1, Left <$> elements [minBound .. maxBound]),
+      (3, Right <$> ((,) <$> genGap <*> genCommand))
+    ]
 
 -- | Gaps inside the window, at its edge, and past it.
 genGap :: Gen Word64

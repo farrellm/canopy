@@ -1185,8 +1185,10 @@ M6.2).
 
 - **Did the text change** is `EditState`'s `version`, a count each command bumps only when it
   changes the text, so a motion, a deletion at the start, a yank of an empty ring or a yank-pop
-  round a ring of one is no step, and nothing compares two texts. The editor's `Revision` (§5.5) is
-  taken from it.
+  round a ring of one is no step, and nothing compares two texts. An undo, a redo or a history
+  entry recalled always bumps it, even onto an equal text, since only a comparison would tell: an
+  equal version means an equal text, and a greater one at worst costs the revision a spurious
+  reparse. The editor's `Revision` (§5.5) is taken from it.
 - **Coalescing.** A run of typing (inserting one cluster that is not a line break) is one step, as
   is a run of deletions one cluster back, and one of deletions one cluster on. An edit joins the
   step before it if both are of one of those kinds, nothing came between them (a motion, an undo,

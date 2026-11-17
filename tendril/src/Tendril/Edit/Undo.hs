@@ -206,17 +206,29 @@ goTo n u = do
   pure
     u
       { undoState = restore st.after u.undoState,
-        undoSteps = towards n u.undoSteps,
+        undoSteps = towards n u.undoAt u.undoSteps,
         undoAt = n,
         undoOpen = Nothing
       }
 
--- | The steps with each one on the way from a step to the start redoing
--- towards it.
-towards :: Int -> IntMap.IntMap Step -> IntMap.IntMap Step
-towards n steps = case IntMap.lookup n steps of
-  Just st | n /= 0 -> towards st.parent (IntMap.adjust (\p -> p {next = Just n}) st.parent steps)
-  _ -> steps
+-- | The steps with each one on the way from a step (the first) up to where
+-- its branch meets the current step's (the second) redoing towards it.
+--
+-- The tree keeps every step on the way from the current one to the start
+-- redoing towards it ('undo', 'record' and 'goTo' each keep that), so the
+-- steps above the meeting point already redo towards the new step, and only
+-- those below it change: a 'redo', or an 'earlier' or 'later' along one
+-- branch, changes at most one. A step's parent has a smaller number, so the
+-- meeting point is found by moving the greater of the two up.
+towards :: Int -> Int -> IntMap.IntMap Step -> IntMap.IntMap Step
+towards n at steps = case compare n at of
+  EQ -> steps
+  GT -> case IntMap.lookup n steps of
+    Just st -> towards st.parent at (IntMap.adjust (\p -> p {next = Just n}) st.parent steps)
+    Nothing -> steps
+  LT -> case IntMap.lookup at steps of
+    Just st -> towards n st.parent steps
+    Nothing -> steps
 
 -- | The tree after an edit from one state to another: the edit joins the
 -- current step if it may, or is a new step made from it.

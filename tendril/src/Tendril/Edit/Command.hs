@@ -132,9 +132,13 @@ deriving stock instance (Show app) => Show (Command app m)
 --
 -- @s.version@ counts the changes to the text: a command that changed it
 -- leaves a greater version, and one that did not (a motion, a deletion at
--- the start, a yank of an empty ring) leaves the same. It is how the undo
--- tree knows an edit happened, and the editor's revision (§5.5), without
--- comparing texts. Two states are equal only with equal versions.
+-- the start, a yank of an empty ring) leaves the same. 'restore' and
+-- 'withBuffer' always count it on, even when the text they put in is the
+-- same, since only comparing the texts would tell. So an equal version
+-- means an equal text, though a greater one may not mean a different one.
+-- It is how the undo tree knows an edit happened, and the editor's
+-- revision (§5.5), without comparing texts. Two states are equal only with
+-- equal versions.
 data EditState = EditState
   { stateBuffer :: Buffer,
     stateSelection :: Selection,
