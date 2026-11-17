@@ -115,7 +115,12 @@ instance HasField "step" Undoable Int where
   getField = (.undoAt)
 
 instance HasField "steps" Undoable Int where
-  getField u = IntMap.size u.undoSteps - 1
+  getField u = newest u.undoSteps
+
+-- | The number of the newest step: the steps are numbered without a gap, so
+-- it is the greatest key ('IntMap.size' would walk the whole map).
+newest :: IntMap.IntMap Step -> Int
+newest = maybe 0 fst . IntMap.lookupMax
 
 -- | A state with nothing to undo.
 undoable :: EditState -> Undoable
@@ -234,7 +239,7 @@ record t k s s' u = case u.undoOpen of
         undoOpen = Just (k, t)
       }
   where
-    n = IntMap.size u.undoSteps
+    n = newest u.undoSteps + 1
     -- A time before the last edit's (a clock that must not, did) is no gap.
     within (Time t0) = let Time t1 = t in t1 < t0 || t1 - t0 <= coalesceWindow
 
