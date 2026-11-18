@@ -37,7 +37,9 @@ tries and Emacs keymap (M2.6).
 - **Build ropes with `Buffer.fromText` or `replace`, not `Rope.fromText`**: they chunk the text
   (D34). A rope of one large chunk makes every split near its end walk the chunk.
 - **Key chords have one normal form** (D36): build them with `chord`, `key` and the `with*`
-  functions, which drop shift from a character key. No binding starts with a printable chord; the
-  editor inserts what `typed` gives when no prefix is pending. A built-in keymap holds no `conflicts`, which its test checks.
+  functions, which apply shift to a letter and keep it on any other character, whose shifted form
+  depends on the layout. No binding starts with a printable chord; the editor inserts what `typed`
+  gives when no prefix is pending. A built-in keymap holds no `conflicts` and no `printableStarts`,
+  which its test checks.
 - **Benchmarks** (§12.3) are `tendril-bench`, in `bench/Bench/**`. CI gates their allocation
   against `bench/baseline/ghc-9.12.4.csv`.

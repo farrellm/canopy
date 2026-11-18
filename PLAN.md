@@ -270,7 +270,7 @@ Exit: decoder roundtrip and render-diff properties pass; `tendril-demo` usable a
   character with shift applied (`chord` applies it to a letter and keeps it on any other character), Enter/Tab/Backspace/Escape are never control
   characters, and Alt is never an ESC prefix (D36). No bound sequence is a prefix of another, so
   lookup (`Bound`, `Prefix`, `Unbound`) needs no timeout, and `conflicts` returns, as values for
-  M6.2's decoder, each binding a later one replaced. `Keymap app m` is a synonym over `Command`'s nominal mode; tests hold that
+  M6.2's decoder, each binding a later one replaced (`keymapWithConflicts` gives both from one fold, and `printableStarts` the bindings that break D36's printable rule). `Keymap app m` is a synonym over `Command`'s nominal mode; tests hold that
   neither a coercion nor binding a `'ViNormal` command into the Emacs keymap type-checks. A
   printable chord starts no binding: `typed` gives the text the editor inserts for it when no
   prefix is pending. The Emacs keymap

@@ -135,7 +135,7 @@ Written as changes land, not at release (DESIGN.md §2.9).
   `snapshot` and `restore` let the undo tree put a text and cursor back without breaking the
   boundary invariant; `restore` also ends a run of kills and a yank's claim on a yank-pop.
 - Keymaps (M2.6, DESIGN.md §5.4, D36): `Tendril.Keymap` has `KeyChord`, a logical key and its
-  modifiers in one normal form (a character key's chord holds the character typed and never shift),
+  modifiers in one normal form (a character key's chord holds the character typed, and shift only where it has no case),
   and `Trie`, where no bound sequence is a prefix of another: `follow` and `walk` find `Bound`,
   `Prefix` or `Unbound`, `bind` replaces what is in its way, and `conflicts` lists each binding a later one replaced.
   `typed` is the text a chord no binding takes types. `Keymap app m` is a trie of `Command app m`,
