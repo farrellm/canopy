@@ -204,6 +204,19 @@ Written as changes land, not at release (DESIGN.md §2.9).
     or a string sequence past 16 MiB, is now not one, complete or not (regression 33).
   - An SGR mouse report with button code 15 (bits 6 and 7 over a low 3) was a press of no button.
     Only a plain 3 is no button; the rest are `Unknown` (regression 34).
+  - An unfinished string sequence was copied and rescanned from its start on each read, so an
+    OSC 52 reply of megabytes in 4 KiB reads took quadratic time. It is held in pieces and each
+    read is scanned once, as a paste is (regression 35).
+  - An SS3 sequence whose final byte names no key was `Unknown`, so M-O then `a` typed quickly lost
+    both keys. It is now not SS3: alt on `O`, and the rest after it (regression 36).
+  - A DSR 6 the terminal never answered left a cursor report due for good, so every later
+    Ctrl+F3 (`CSI 1;5R`) was a cursor position. DA1's reply, the sentinel after the queries, now
+    ends every report due (regression 37).
+  - With Caps Lock and shift, kitty's shifted alternate key (the capital) was taken first, so the
+    chord was `A` where the key typed `a`. Caps Lock is now applied first (regression 38).
+  - xterm's `CSI u` (formatOtherKeys) sends the character shift typed, but shift was kept on a
+    character without case, so Shift+1 as `CSI 33;2u` was `S-!` and typed nothing. With shift
+    alone and no shifted key or text, the code is now the character typed (regression 39).
 - Also changed in that review: `csi` and `stringSequence` use `unsnoc` and `indexMaybe`, not the
   partial `last` and `index`, and one `safeToEnum` serves the kitty keys and mode reports.
 

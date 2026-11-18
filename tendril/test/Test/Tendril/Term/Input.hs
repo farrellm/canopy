@@ -7,7 +7,7 @@ import Data.ByteString qualified as BS
 import Tendril.Keymap (Key (..), KeyChord, MediaKey (..), ModifierKey (..), Mods (..), key, noMods, withAlt, withCtrl, withShift, withSuper)
 import Tendril.Term.Input
 import Test.QuickCheck (Gen, chooseInt, elements, forAll, listOf, vectorOf, (===))
-import Test.Tasty (TestTree, testGroup)
+import Test.Tasty (TestTree, localOption, mkTimeout, testGroup)
 import Test.Tasty.HUnit (Assertion, testCase, (@?=))
 import Test.Tasty.QuickCheck (testProperty)
 
@@ -85,6 +85,9 @@ escapes =
       let long = "\ESC[" <> BS.replicate 5000 0x31 <> "~"
       decodeAll [long] @?= decodeAll [BS.take 4100 long, BS.drop 4100 long]
       take 1 (decodeAll [long]) @?= [Key (keyEvent (aK '['))],
+    -- An SS3 final byte that names no key is not SS3, so M-O then a is not lost.
+    testCase "regression 36: ESC O before a byte that names no key is M-O" $
+      chords "\ESCOa\ESCO5z" [aK 'O', key (Char 'a'), aK 'O', key (Char '5'), key (Char 'z')],
     testCase "ESC ESC is M-ESC" $ chords "\ESC\ESC" [withAlt (key Escape)],
     testCase "ESC before a key sequence is alt on it" $ chords "\ESC\ESC[A\ESC\ESCOP" [withAlt (key ArrowUp), withAlt (key (F 1))],
     testCase "ESC before a non-key sequence is Escape" $ decodes "\ESC\ESC[I" [Key (keyEvent (key Escape)), Focus True],
@@ -156,6 +159,15 @@ kitty =
           Key (kittyEvent (key (Char 'a'))) {meta = True},
           Key (kittyEvent (key (Char 'a'))) {numLock = True}
         ],
+    -- The shifted key is the capital whatever the lock, so Caps Lock comes first.
+    testCase "regression 38: Caps Lock and shift with the shifted key give the small letter" $
+      decodes
+        "\ESC[97:65;66u\ESC[97:65;65u"
+        [Key (kittyEvent (key (Char 'a'))) {capsLock = True}, Key (kittyEvent (key (Char 'A'))) {capsLock = True}],
+    -- xterm's formatOtherKeys CSI u sends the character shift typed, as modifyOtherKeys does.
+    testCase "regression 39: shift alone on a character with no shifted key is applied" $ do
+      decodes "\ESC[33;2u\ESC[49;6u" [Key (kittyEvent (key (Char '!'))), Key (kittyEvent (withShift (cK '1')))]
+      [keyText e | Key e <- decodeAll ["\ESC[33;2u"]] @?= [Just "!"],
     testCase "Caps Lock applies to a letter with no other modifier" $
       decodes
         "\ESC[97;65u\ESC[97;66u\ESC[97;69u"
@@ -234,6 +246,19 @@ replies =
           (evs, d') = decode "\ESC[1;5R\ESC[1;5R" d
       evs @?= [Reply (CursorPosition 0 4), Key (keyEvent (withCtrl (key (F 3))))]
       waiting d' @?= False,
+    -- A terminal answers in order, so DA1's reply ends a report a terminal never sent.
+    testCase "regression 37: DA1's reply ends the cursor reports due" $
+      fst (decode "\ESC[?62c\ESC[1;5R" (expectCursorPosition decoder))
+        @?= [Reply (PrimaryAttributes [62]), Key (keyEvent (withCtrl (key (F 3))))],
+    -- A held reply is scanned once, not copied and rescanned on each read.
+    localOption (mkTimeout 20000000) $
+      testCase "regression 35: a large reply in small reads takes linear time" $ do
+        let payload = BS.replicate (4 * 1024 * 1024) 0x41
+            reply = "\ESC]52;c;" <> payload <> "\a"
+            chunks = cutAt [512, 1024 .. BS.length reply] reply
+            (evs, d) = foldl' (\(acc, dd) c -> first (acc <>) (decode c dd)) ([], decoder) chunks
+        map (\case Reply (Clipboard sel bytes) -> Just (sel, BS.length bytes); _ -> Nothing) evs @?= [Just ("c", 3 * 1024 * 1024)]
+        waiting d @?= False,
     testCase "colours" $
       decodes
         "\ESC]11;rgb:ffff/8000/0000\a\ESC]10;rgb:f/80/000\ESC\\\ESC]4;3;rgb:12/34/56\a"
@@ -286,6 +311,8 @@ genStream = listOf (elements corpus)
         "\ESC[?62;22c",
         "\ESC]11;rgb:ffff/0000/0000\a",
         "\ESC]52;c;aGk=\ESC\\",
+        "\ESC]52;c;" <> BS.replicate 300 0x41 <> "\a",
+        "\ESCOa",
         "\ESCP>|t 1\ESC\\",
         "\ESC\ESC[B",
         "\ESC[99x",

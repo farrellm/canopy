@@ -1368,13 +1368,18 @@ events decoding them at once does, which a property holds.
   first character (`ESC [` is `M-[`), and the rest is decoded after it. Once the kitty protocol is
   negotiated Escape is `CSI 27 u`, so the timeout only ends a sequence the terminal cut short. A
   bracketed paste waits for its end with no timeout, and keeps its bytes in pieces, so a large one
-  is not copied once per read.
+  is not copied once per read; so does an unfinished string sequence (an OSC 52 reply), which is
+  scanned once. A string sequence that is empty or holds a C0 control is no reply, so `ESC ]` then
+  BEL is `M-]` then `C-g` at once, and an SS3 final byte that names no key is not SS3 (`ESC O a` is
+  `M-O` then `a`). A sequence longer than its bound (4 KiB, or 16 MiB for a string) is not one,
+  whether it is complete or not.
 - **Keys arrive in D36's normal form.** A legacy byte is its named key or its letter with ctrl
   (0x08 is C-h, 0x7F Backspace), an ESC prefix is alt, and a character key is the character the
   terminal says it typed, with shift cleared, wherever it says (a legacy byte, modifyOtherKeys'
-  code, kitty's shifted alternate key); where it reports only the unshifted key, the chord keeps
-  shift (`C-S-/`). Caps Lock, which only kitty reports, gives a letter its other case when no other
-  modifier is held, so a C-a binding still holds with it on. Kitty's hyper and meta, its lock states,
+  code, kitty's shifted alternate key, xterm's `CSI u` with shift alone and no alternate key or
+  text); where it reports only the unshifted key, the chord keeps shift (`C-S-/`). Caps Lock, which
+  only kitty reports, gives a letter its other case when no other modifier is held, so a C-a
+  binding still holds with it on; with shift too it is the small letter, ahead of the shifted key. Kitty's hyper and meta, its lock states,
   its associated text and base-layout key are the event's, not the chord's; `keyText` is what an
   event types (nothing for a release or with a modifier held, else the reported text, else what the
   chord types). The keypad's keys are their logical keys (`1`, Enter, the arrows); `Key` gains
@@ -1382,7 +1387,8 @@ events decoding them at once does, which a property holds.
   modifier keys themselves, which kitty reports with its report-all-keys flag.
 - **What bytes cannot settle, the caller does.** `CSI 1 ; 5 R` is Ctrl+F3 in xterm's encoding and a
   cursor position report for row 1, column 5: it is a report when `expectCursorPosition` says one is
-  due or its row is not 1, and F3 otherwise. SGR and SGR-pixel reports are the same bytes, so
+  due or its row is not 1, and F3 otherwise. A DA1 reply ends every report due, since `Caps` sends
+  DA1 after its queries and a terminal answers in order. SGR and SGR-pixel reports are the same bytes, so
   `setPixelMouse` says which mode is set. xterm's Help and context menu keys share F15's and F16's
   `CSI 28 ~` and `CSI 29 ~`, and are read as F15 and F16. Positions are counted from 0.
 - **Nothing is dropped without a trace.** A complete sequence the decoder does not know, an

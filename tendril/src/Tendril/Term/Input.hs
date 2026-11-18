@@ -336,10 +336,11 @@ data ColorScheme
 -- * Decoding
 
 -- | The decoder's state: the bytes held while they wait for more, a paste
--- in progress, and what the caller has said to expect.
+-- or string sequence in progress, and what the caller has said to expect.
 data Decoder = Decoder
   { held :: ByteString,
     pasting :: Maybe Pasting,
+    stringing :: Maybe Stringing,
     pixelMouse :: Bool,
     cursorReports :: Int
   }
@@ -348,9 +349,15 @@ data Decoder = Decoder
 -- be the start of its end.
 data Pasting = Pasting [ByteString] ByteString
 
+-- | A string sequence held while it waits for its end: its kind (the byte
+-- after ESC), its bytes so far in reverse order, how many there are, and
+-- whether the last is an ESC that may start ST. It is kept in pieces and
+-- scanned once, so a large reply is not copied and rescanned on each read.
+data Stringing = Stringing Word8 [ByteString] Int Bool
+
 -- | A decoder with nothing held, cell mouse reports and no reply expected.
 decoder :: Decoder
-decoder = Decoder {held = "", pasting = Nothing, pixelMouse = False, cursorReports = 0}
+decoder = Decoder {held = "", pasting = Nothing, stringing = Nothing, pixelMouse = False, cursorReports = 0}
 
 -- | Whether mouse reports are in pixels (SGR-pixels, mode 1016) rather than
 -- cells: the bytes are the same, so the caller says which mode it set.
@@ -359,7 +366,9 @@ setPixelMouse p d = d {pixelMouse = p}
 
 -- | Say that a cursor position report is due (the caller sent DSR 6), so
 -- that the next @CSI row ; column R@ is read as one even where it could be
--- F3 with modifiers.
+-- F3 with modifiers. A DA1 reply ends every report due: a terminal answers
+-- in order, so the caller sends DA1 after its queries, and a DSR 6 not
+-- answered before DA1's reply never will be.
 expectCursorPosition :: Decoder -> Decoder
 expectCursorPosition d = d {cursorReports = d.cursorReports + 1}
 
@@ -367,7 +376,7 @@ expectCursorPosition d = d {cursorReports = d.cursorReports + 1}
 -- should call it if nothing arrives within its escape timeout. False inside
 -- a paste, which has no timeout.
 waiting :: Decoder -> Bool
-waiting d = isNothing d.pasting && not (BS.null d.held)
+waiting d = isNothing d.pasting && (not (BS.null d.held) || isJust d.stringing)
 
 -- | Decode the next bytes from the host: the events they complete, in
 -- order. Bytes that may start a longer sequence are held for the next
@@ -377,9 +386,10 @@ waiting d = isNothing d.pasting && not (BS.null d.held)
 -- >>> [e.chord | Key e <- fst (decode "a\ESC[A" decoder)] == map (Keymap.chord noMods) [Char 'a', ArrowUp]
 -- True
 decode :: ByteString -> Decoder -> ([InputEvent], Decoder)
-decode bytes d = case d.pasting of
-  Just p -> pasteMore bytes p d
-  Nothing -> run False (d.held <> bytes) d {held = ""}
+decode bytes d = case (d.pasting, d.stringing) of
+  (Just p, _) -> pasteMore bytes p d
+  (_, Just s) -> stringMore bytes s d
+  _ -> run False (d.held <> bytes) d {held = ""}
 
 -- | The escape timeout passed with bytes held: decode them as they are. A
 -- lone ESC is Escape, and an ESC before an unfinished sequence is alt with
@@ -391,7 +401,7 @@ decode bytes d = case d.pasting of
 expire :: Decoder -> ([InputEvent], Decoder)
 expire d
   | isJust d.pasting = ([], d)
-  | otherwise = run True d.held d {held = ""}
+  | otherwise = run True (d.held <> maybe "" stringBytes d.stringing) d {held = "", stringing = Nothing}
 
 -- | What one step of decoding found.
 data Step
@@ -408,12 +418,35 @@ run final = go []
     go acc bs d
       | BS.null bs = (reverse acc, d)
       | otherwise = case step final d bs of
-          Need -> (reverse acc, d {held = bs})
+          Need -> (reverse acc, holding bs d)
           Took evs n d' ->
             let rest = BS.drop n bs
              in case d'.pasting of
                   Just p -> first ((reverse acc <> evs) <>) (pasteMore rest p d')
                   Nothing -> go (reverse evs <> acc) rest d'
+
+-- | Hold bytes that wait for more: an unfinished string sequence in pieces
+-- ('Stringing'), anything else as they are.
+holding :: ByteString -> Decoder -> Decoder
+holding bs d = case BS.unpack (BS.take 2 bs) of
+  [0x1B, k]
+    | k `elem` stringKinds,
+      StringMore n esc <- scanString k 2 False (BS.drop 2 bs) ->
+        d {stringing = Just (Stringing k [bs] n esc)}
+  _ -> d {held = bs}
+
+-- | A held string sequence's bytes.
+stringBytes :: Stringing -> ByteString
+stringBytes (Stringing _ chunks _ _) = BS.concat (reverse chunks)
+
+-- | Bytes after an unfinished string sequence: scan only them while the
+-- sequence goes on, and once it ends (or is not one) decode it whole.
+stringMore :: ByteString -> Stringing -> Decoder -> ([InputEvent], Decoder)
+stringMore bytes s@(Stringing k chunks n esc) d
+  | BS.null bytes = ([], d)
+  | otherwise = case scanString k n esc bytes of
+      StringMore n' esc' -> ([], d {stringing = Just (Stringing k (bytes : chunks) n' esc')})
+      _ -> run False (stringBytes s <> bytes) d {stringing = Nothing}
 
 -- | The end of a bracketed paste.
 pasteEnd :: ByteString
@@ -457,7 +490,7 @@ escape final d bs = case BS.indexMaybe bs 1 of
   Just b
     | b == 0x5B -> sequenceOr (csi d bs)
     | b == 0x4F -> sequenceOr (ss3 d bs)
-    | b `elem` [0x5D, 0x50, 0x5F, 0x5E, 0x58] -> sequenceOr (stringSequence d bs)
+    | b `elem` stringKinds -> sequenceOr (stringSequence d b bs)
     | otherwise -> altChar
   where
     -- A sequence, or else ESC is alt on the character after it.
@@ -594,7 +627,11 @@ interpretCsi d raw n c = case (c.marker, c.intermediates, c.final) of
     | f == 0x4F, null c.params -> done [Focus False]
     | f == 0x74 -> only (windowReport c)
   (Nothing, "$", 0x79) -> only (modeReport AnsiMode c)
-  (Just 0x3F, "", 0x63) -> only (Reply . PrimaryAttributes <$> plain c)
+  (Just 0x3F, "", 0x63) -> case plain c of
+    -- DA1 is the sentinel after the caller's queries: no report is due
+    -- after it.
+    Just ps -> Parsed [Reply (PrimaryAttributes ps)] n d {cursorReports = 0}
+    Nothing -> unknown
   (Just 0x3F, "", 0x75) -> only (Reply . KittyKeyboardFlags <$> (plain c >>= single))
   (Just 0x3F, "$", 0x79) -> only (modeReport DecMode c)
   (Just 0x3F, "", 0x6E) -> only (colorScheme c)
@@ -740,14 +777,25 @@ kittyKey c = do
       baseKey = sub 0 2 c >>= scalar
       txt = T.pack (mapMaybe (>>= scalar) (fromMaybe [] (c.params !!? 2)))
       others = m.mods.ctrl || m.mods.alt || m.mods.super || m.hyperHeld || m.metaHeld
+      cased x = toUpper x /= x || toLower x /= x
       ch = case (k, shifted) of
-        (Char _, Just s) | m.mods.shift -> Keymap.chord m.mods {shift = False} (Char s)
         (Char x, _)
-          | m.capsOn && not others && (toUpper x /= x || toLower x /= x) ->
+          | m.capsOn && not others && cased x ->
               -- Caps Lock with no other modifier: the key types the other
-              -- case, as shift would.
+              -- case, as shift would, and shift with it the case it
+              -- would have without both (the shifted key is the capital
+              -- whatever the lock).
               let up = isLower x /= m.mods.shift
                in Keymap.chord m.mods {shift = False} (Char (if up then toUpper x else toLower x))
+        (Char _, Just s) | m.mods.shift -> Keymap.chord m.mods {shift = False} (Char s)
+        (Char x, Nothing)
+          | m.mods.shift && not others && not (cased x) && T.null txt ->
+              -- Shift alone, with neither the shifted key nor text: xterm's
+              -- CSI u (formatOtherKeys), whose code is the character shift
+              -- typed, as modifyOtherKeys' is. Kitty sends this only with
+              -- every key as an escape and neither alternate keys nor
+              -- text, which the decoder's caller does not ask for.
+              Keymap.chord m.mods {shift = False} k
         _ -> Keymap.chord m.mods k
   pure (Key (eventOf act m ch) {text = txt, base = baseKey})
 
@@ -886,13 +934,14 @@ ss3 d bs = go 2
       Just b
         | (b >= 0x30 && b <= 0x39) || b == 0x3B -> go (j + 1)
         | b >= 0x40 && b <= 0x7E ->
-            let raw = BS.take (j + 1) bs
-                ps = BS.split 0x3B (BS.take (j - 2) (BS.drop 2 bs))
+            let ps = BS.split 0x3B (BS.take (j - 2) (BS.drop 2 bs))
                 mods = case reverse ps of
                   p : _ | not (BS.null p), BS.length p <= 9 -> BS.foldl' (\a x -> a * 10 + fromIntegral (x - 0x30)) 0 p
                   _ -> 1
                 m = modifiers mods
-             in Parsed [maybe (Unknown raw) (Key . eventOf Press m . Keymap.chord m.mods) (ss3Key b)] (j + 1) d
+             in -- A final byte that names no key is not SS3: alt on O, and
+                -- the rest typed after it (@M-O@ then @a@).
+                maybe Malformed (\k -> Parsed [Key (eventOf Press m (Keymap.chord m.mods k))] (j + 1) d) (ss3Key b)
         | otherwise -> Malformed
 
 -- | The key an SS3 sequence's final byte names.
@@ -914,28 +963,51 @@ ss3Key b = case lookup b letterKeys of
 -- for an OSC also BEL. No reply is empty or holds another C0 control, so
 -- such bytes are not one: they are alt on the character after ESC, as the
 -- user typed them (@M-]@ then @C-g@ is not an empty OSC).
-stringSequence :: Decoder -> ByteString -> Parse
-stringSequence d bs = go 2
+stringSequence :: Decoder -> Word8 -> ByteString -> Parse
+stringSequence d kind bs = case scanString kind 2 False (BS.drop 2 bs) of
+  StringEnds len n ->
+    let body = BS.take len (BS.drop 2 bs)
+        ev = case kind of
+          0x5D -> osc body
+          0x50 -> dcs body
+          _ -> Nothing
+     in Parsed [fromMaybe (Unknown (BS.take n bs)) ev] n d
+  StringBad -> Malformed
+  StringMore {} -> Partial
+
+-- | The bytes after ESC that start a string sequence: OSC, DCS, APC, PM and
+-- SOS.
+stringKinds :: [Word8]
+stringKinds = [0x5D, 0x50, 0x5F, 0x5E, 0x58]
+
+-- | Where a scan of a string sequence got to.
+data StringScan
+  = -- | it ends: its body's length, and the sequence's
+    StringEnds Int Int
+  | -- | it is not one
+    StringBad
+  | -- | the bytes end first: how many the sequence has so far, and whether
+    -- the last is an ESC that may start ST
+    StringMore Int Bool
+
+-- | Scan bytes of a string sequence of a kind, the first of which is its
+-- byte at an index, after an ESC there or not. Counted from the sequence's
+-- start, so that a scan resumed on the next read agrees with one of the
+-- whole.
+scanString :: Word8 -> Int -> Bool -> ByteString -> StringScan
+scanString kind start = go 0
   where
-    kind = BS.indexMaybe bs 1
-    go j = case BS.indexMaybe bs j of
-      _ | j >= maxStringSequence -> Malformed
-      Nothing -> Partial
-      Just 0x07 | kind == Just 0x5D, j > 2 -> finish (BS.take (j - 2) (BS.drop 2 bs)) (j + 1)
-      Just 0x1B | j > 2 -> case BS.indexMaybe bs (j + 1) of
-        Nothing -> Partial
-        Just 0x5C -> finish (BS.take (j - 2) (BS.drop 2 bs)) (j + 2)
-        Just _ -> Malformed
-      Just b
-        | b < 0x20 -> Malformed
-        | otherwise -> go (j + 1)
-    finish body n =
-      let raw = BS.take n bs
-          ev = case kind of
-            Just 0x5D -> osc body
-            Just 0x50 -> dcs body
-            _ -> Nothing
-       in Parsed [fromMaybe (Unknown raw) ev] n d
+    go i esc bytes =
+      let j = start + i
+       in case BS.indexMaybe bytes i of
+            _ | j >= maxStringSequence -> StringBad
+            Nothing -> StringMore j esc
+            Just b
+              | esc -> if b == 0x5C then StringEnds (j - 3) (j + 1) else StringBad
+              | b == 0x07, kind == 0x5D, j > 2 -> StringEnds (j - 2) (j + 1)
+              | b == 0x1B, j > 2 -> go (i + 1) True bytes
+              | b < 0x20 -> StringBad
+              | otherwise -> go (i + 1) False bytes
 
 -- | An OSC's body: colour and clipboard replies.
 osc :: ByteString -> Maybe InputEvent
