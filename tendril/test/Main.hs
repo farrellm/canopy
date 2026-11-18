@@ -6,6 +6,8 @@ import Test.Tendril.Edit.Command qualified
 import Test.Tendril.Edit.KillRing qualified
 import Test.Tendril.Edit.Mode qualified
 import Test.Tendril.Edit.Undo qualified
+import Test.Tendril.Keymap qualified
+import Test.Tendril.Keymap.Emacs qualified
 import Test.Tendril.Text.Buffer qualified
 import Test.Tendril.Text.Grapheme qualified
 import Test.Tendril.Text.Oracle qualified
@@ -28,5 +30,7 @@ main =
         Test.Tendril.Edit.KillRing.tests,
         Test.Tendril.Edit.Command.tests,
         Test.Tendril.Edit.Mode.tests,
-        Test.Tendril.Edit.Undo.tests
+        Test.Tendril.Edit.Undo.tests,
+        Test.Tendril.Keymap.tests,
+        Test.Tendril.Keymap.Emacs.tests
       ]

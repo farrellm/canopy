@@ -6,7 +6,7 @@ lists of them): it builds with
 commit if it changes a decision (§2.9). Section references (§) are to DESIGN.md.
 
 M0 is done (PR #1), and M1 (PRs #2–#13; the performance work of D18–D21 followed in PR #30). M2 has
-started: M2.1–M2.5 are done. Steps
+started: M2.1–M2.6 are done. Steps
 are numbered `M<n>.<k>`
 and are in dependency order within a milestone.
 
@@ -265,11 +265,31 @@ Exit: decoder roundtrip and render-diff properties pass; `tendril-demo` usable a
 
 - `Tendril.Keymap` (`Trie KeyChord (Command app m)`), `Tendril.Keymap.Emacs`.
 - Built-in keymaps are mode-checked at compile time.
+- A `KeyChord` is a logical key (W3C `key` names; tendril cannot see ghostty's physical codes) and
+  its modifiers in one normal form, which M2.7's decoder must reach: a character key's chord is the
+  character with shift applied (`chord` applies it to a letter and keeps it on any other character), Enter/Tab/Backspace/Escape are never control
+  characters, and Alt is never an ESC prefix (D36). No bound sequence is a prefix of another, so
+  lookup (`Bound`, `Prefix`, `Unbound`) needs no timeout, and `conflicts` returns, as values for
+  M6.2's decoder, each binding a later one replaced (`keymapWithConflicts` gives both from one fold, and `printableStarts` the bindings that break D36's printable rule). `Keymap app m` is a synonym over `Command`'s nominal mode; tests hold that
+  neither a coercion nor binding a `'ViNormal` command into the Emacs keymap type-checks. A
+  printable chord starts no binding: `typed` gives the text the editor inserts for it when no
+  prefix is pending. The Emacs keymap
+  binds every command that exists. Up and C-p are `Move LineUp`, and M2.11's editor recalls
+  history when one does not move, on the first line (M-p and M-n always do). C-d is `Delete
+  NextCluster`, and M2.11's editor ends input on it when the input is empty; C-c is the editor's,
+  not a command. Registers' commands
+  and a quoted insert take the next key as an argument, so they wait for M2.11. Tab's menu and
+  C-r's search come with their widgets in M2.12. **Done.**
 
 ### M2.7 Input decoder
 
 - `Tendril.Term.Input`: incremental pure decoder — legacy with ESC timeout, CSI-u / kitty with all
   flags, modifyOtherKeys, bracketed paste, SGR and SGR-pixel mouse, focus, terminal replies (§5.7).
+- A legacy 0x08 is C-h, never C-Backspace, though many terminals send C-Backspace as it; and 0x7F is
+  Backspace, never C-? (D36).
+- A character key gets the shifted character the terminal reports (legacy's byte, kitty's alternate
+  keys, which the decoder requests) and its shift cleared; only where none is reported does the
+  chord keep shift, as `C-S-/` (D36).
 - Unit tests per encoding.
 
 ### M2.8 Decoder roundtrip
