@@ -6,7 +6,7 @@ lists of them): it builds with
 commit if it changes a decision (§2.9). Section references (§) are to DESIGN.md.
 
 M0 is done (PR #1), and M1 (PRs #2–#13; the performance work of D18–D21 followed in PR #30). M2 has
-started: M2.1–M2.7 are done. Steps
+started: M2.1–M2.8 are done. Steps
 are numbered `M<n>.<k>`
 and are in dependency order within a milestone.
 
@@ -310,6 +310,17 @@ Exit: decoder roundtrip and render-diff properties pass; `tendril-demo` usable a
 
 - Property: random key/mouse events under random modes, encoded by libghostty, decoded by tendril,
   come back equal (§11.2). **Half of M2's exit condition.**
+- `Test.Tendril.Term.Roundtrip`. "Equal" is what the mode can carry: the test's model of each
+  encoding gives the event in D36's normal form, or names why the mode cannot carry it (super or a
+  release outside kitty, alt without mode 1036, xterm's C0 table, Caps Lock with a modifier
+  outside kitty, modifiers on the legacy keypad, DECBKM's Backspace, shift alone as an
+  xterm-like `CSI u`), and then the bytes must still decode cleanly (DESIGN.md §11.2). The model
+  was checked exhaustively first, on 2.6 million key, modifier, lock, action and mode
+  combinations; the property runs 100,000 keys and 10,000 SGR and SGR-pixel mouse reports. It
+  found two decoder bugs: regression 39's xterm reading took kitty's releases, repeats and keypad
+  codes (regression 40), and a keypad key's base layout key repeated the key (regression 41).
+  libghostty-vt 1.0 encodes no media key, no menu key under kitty and no mouse button past 9, so
+  the unit tests alone cover those (§14.2). **Done.**
 
 ### M2.9 T4 layout and screen goldens
 

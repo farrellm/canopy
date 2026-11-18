@@ -91,6 +91,12 @@ escapes =
     testCase "ESC ESC is M-ESC" $ chords "\ESC\ESC" [withAlt (key Escape)],
     testCase "ESC before a key sequence is alt on it" $ chords "\ESC\ESC[A\ESC\ESCOP" [withAlt (key ArrowUp), withAlt (key (F 1))],
     testCase "ESC before a non-key sequence is Escape" $ decodes "\ESC\ESC[I" [Key (keyEvent (key Escape)), Focus True],
+    -- A reply that arrives just after Escape is a reply, not M-ESC and its bytes typed.
+    testCase "regression 42: ESC before a string sequence is Escape, whole or in pieces" $ do
+      let bytes = "\ESC\ESC]11;rgb:ffff/8000/0000\a\ESC\ESCP>|t 1\ESC\\"
+          expected = [Key (keyEvent (key Escape)), Reply (ColorReport BackgroundColor (Rgb 255 128 0)), Key (keyEvent (key Escape)), Reply (TerminalVersion "t 1")]
+      decodes bytes expected
+      decodeAll ["\ESC", "\ESC]11;rgb:ff", "ff/8000/0000\a\ESC", "\ESCP>|t 1\ESC\\"] @?= expected,
     testCase "an incomplete UTF-8 character waits" $ do
       let (evs, d) = decode "\xc3" decoder
       evs @?= []
@@ -168,6 +174,19 @@ kitty =
     testCase "regression 39: shift alone on a character with no shifted key is applied" $ do
       decodes "\ESC[33;2u\ESC[49;6u" [Key (kittyEvent (key (Char '!'))), Key (kittyEvent (withShift (cK '1')))]
       [keyText e | Key e <- decodeAll ["\ESC[33;2u"]] @?= [Just "!"],
+    -- xterm's CSI u has no event type and no functional code: with either it
+    -- is kitty's, whose code is the unshifted key (found by M2.8's roundtrip).
+    testCase "regression 40: shift alone with an event type or a keypad code is kept" $
+      decodes
+        "\ESC[32;2:3u\ESC[49;2:2u\ESC[57399;2u\ESC[57399;2:3u"
+        [ Key (acting Release (kittyEvent (withShift (key (Char ' '))))),
+          Key (acting Repeat (kittyEvent (withShift (key (Char '1'))))),
+          Key (kittyEvent (withShift (key (Char '0')))),
+          Key (acting Release (kittyEvent (withShift (key (Char '0')))))
+        ],
+    -- The keypad's 5 is the key '5' here, so its base layout key says nothing.
+    testCase "regression 41: a base layout key that is the key is not reported" $
+      decodes "\ESC[57404::53u\ESC[1081::113u" [Key (kittyEvent (key (Char '5'))), Key (kittyEvent (key (Char 'й'))) {base = Just 'q'}],
     testCase "Caps Lock applies to a letter with no other modifier" $
       decodes
         "\ESC[97;65u\ESC[97;66u\ESC[97;69u"
@@ -259,6 +278,16 @@ replies =
             (evs, d) = foldl' (\(acc, dd) c -> first (acc <>) (decode c dd)) ([], decoder) chunks
         map (\case Reply (Clipboard sel bytes) -> Just (sel, BS.length bytes); _ -> Nothing) evs @?= [Just ("c", 3 * 1024 * 1024)]
         waiting d @?= False,
+    -- So is one held just after Escape (regression 42's ESC ESC ]).
+    localOption (mkTimeout 20000000) $
+      testCase "regression 43: a large reply after Escape in small reads takes linear time" $ do
+        let payload = BS.replicate (4 * 1024 * 1024) 0x41
+            bytes = "\ESC\ESC]52;c;" <> payload <> "\a"
+            chunks = cutAt [512, 1024 .. BS.length bytes] bytes
+            (evs, d) = foldl' (\(acc, dd) c -> first (acc <>) (decode c dd)) ([], decoder) chunks
+        take 1 evs @?= [Key (keyEvent (key Escape))]
+        map (\case Reply (Clipboard sel b) -> Just (sel, BS.length b); _ -> Nothing) (drop 1 evs) @?= [Just ("c", 3 * 1024 * 1024)]
+        waiting d @?= False,
     testCase "colours" $
       decodes
         "\ESC]11;rgb:ffff/8000/0000\a\ESC]10;rgb:f/80/000\ESC\\\ESC]4;3;rgb:12/34/56\a"
@@ -315,6 +344,7 @@ genStream = listOf (elements corpus)
         "\ESCOa",
         "\ESCP>|t 1\ESC\\",
         "\ESC\ESC[B",
+        "\ESC\ESC]11;rgb:0000/ffff/0000\a",
         "\ESC[99x",
         "\xff"
       ]

@@ -5,7 +5,7 @@
 --
 -- @ghostty_unicode_grapheme_width@ leaves a cluster of controls (GCB
 -- @Control@, @CR@, @LF@) unspecified, so the texts compared have none.
-module Test.Tendril.Text.Oracle (tests) where
+module Test.Tendril.Text.Oracle (tests, oracle) where
 
 import Data.Text qualified as T
 import Effectful (Eff, IOE, runEff)
@@ -70,6 +70,7 @@ sameAsGhostty =
 noControls :: Gen Text
 noControls = T.filter (\c -> graphemeBreak c `notElem` [Control, CR, LF]) <$> genText
 
+-- | Run libghostty-vt, and fail the test if it refuses.
 oracle :: Eff '[Ghostty, IOE] a -> IO a
 oracle act =
   runEff (runGhostty act) >>= \case

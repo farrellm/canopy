@@ -80,6 +80,8 @@ import Tendril.Keymap
     Mods (..),
     noMods,
     typed,
+    withAlt,
+    withShift,
   )
 import Tendril.Keymap qualified as Keymap
 
@@ -350,7 +352,8 @@ data Decoder = Decoder
 data Pasting = Pasting [ByteString] ByteString
 
 -- | A string sequence held while it waits for its end: its kind (the byte
--- after ESC), its bytes so far in reverse order, how many there are, and
+-- after ESC), its bytes so far in reverse order (after an Escape, if one
+-- came just before it), how many the sequence has, and
 -- whether the last is an ESC that may start ST. It is kept in pieces and
 -- scanned once, so a large reply is not copied and rescanned on each read.
 data Stringing = Stringing Word8 [ByteString] Int Bool
@@ -428,12 +431,18 @@ run final = go []
 -- | Hold bytes that wait for more: an unfinished string sequence in pieces
 -- ('Stringing'), anything else as they are.
 holding :: ByteString -> Decoder -> Decoder
-holding bs d = case BS.unpack (BS.take 2 bs) of
-  [0x1B, k]
-    | k `elem` stringKinds,
-      StringMore n esc <- scanString k 2 False (BS.drop 2 bs) ->
-        d {stringing = Just (Stringing k [bs] n esc)}
-  _ -> d {held = bs}
+holding bs d
+  | Just (k, from) <- stringStart,
+    StringMore n esc <- scanString k 2 False (BS.drop from bs) =
+      d {stringing = Just (Stringing k [bs] n esc)}
+  | otherwise = d {held = bs}
+  where
+    -- The sequence may follow an Escape (@ESC ESC ]@), which is held with
+    -- it; the count is the sequence's own, as 'escape' scans it.
+    stringStart = case BS.unpack (BS.take 3 bs) of
+      [0x1B, 0x1B, k] | k `elem` stringKinds -> Just (k, 3)
+      0x1B : k : _ | k `elem` stringKinds -> Just (k, 2)
+      _ -> Nothing
 
 -- | A held string sequence's bytes.
 stringBytes :: Stringing -> ByteString
@@ -499,27 +508,30 @@ escape final d bs = case BS.indexMaybe bs 1 of
       Partial | not final -> Need
       _ -> altChar
     altChar = case utf8 (BS.drop 1 bs) of
-      Decoded c n -> Took [press (withAltMod (Keymap.chord noMods (Char c)))] (n + 1) d
+      Decoded c n -> Took [press (withAlt (Keymap.chord noMods (Char c)))] (n + 1) d
       Short | not final -> Need
       _ -> Took [press (Keymap.chord noMods Escape)] 1 d
-    -- ESC ESC: alt on a key sequence after it, or else Alt+Escape.
+    -- ESC ESC: alt on a key sequence after it, Escape before any other
+    -- sequence (a reply that arrived just after Escape), or else
+    -- Alt+Escape.
     escEsc = case BS.indexMaybe bs 2 of
       Nothing
-        | final -> Took [press (withAltMod (Keymap.chord noMods Escape))] 2 d
+        | final -> Took [press altEscape] 2 d
         | otherwise -> Need
       Just b
-        | b == 0x5B || b == 0x4F ->
-            let inner = BS.drop 1 bs
-             in case (if b == 0x5B then csi d inner else ss3 d inner) of
-                  Parsed [Key e] n d' -> Took [Key e {chord = withAltMod e.chord}] (n + 1) d'
-                  Parsed {} -> Took [press (Keymap.chord noMods Escape)] 1 d
-                  Partial | not final -> Need
-                  _ -> Took [press (withAltMod (Keymap.chord noMods Escape))] 2 d
-      Just _ -> Took [press (withAltMod (Keymap.chord noMods Escape))] 2 d
-
--- | The chord with alt held.
-withAltMod :: KeyChord -> KeyChord
-withAltMod c = Keymap.chord c.mods {alt = True} c.key
+        | Just parse <- innerSequence b ->
+            case parse (BS.drop 1 bs) of
+              Parsed [Key e] n d' -> Took [Key e {chord = withAlt e.chord}] (n + 1) d'
+              Parsed {} -> Took [press (Keymap.chord noMods Escape)] 1 d
+              Partial | not final -> Need
+              _ -> Took [press altEscape] 2 d
+      Just _ -> Took [press altEscape] 2 d
+    altEscape = withAlt (Keymap.chord noMods Escape)
+    innerSequence b
+      | b == 0x5B = Just (csi d)
+      | b == 0x4F = Just (ss3 d)
+      | b `elem` stringKinds = Just (stringSequence d b)
+      | otherwise = Nothing
 
 -- | What parsing a sequence found.
 data Parse
@@ -590,14 +602,17 @@ parseParams bytes = do
   ps <-
     if BS.null rest
       then Just []
-      else traverse (traverse number . BS.split 0x3A) (BS.split 0x3B rest)
+      else traverse (traverse decimal . BS.split 0x3A) (BS.split 0x3B rest)
   pure (mk, ps)
-  where
-    number b
-      | BS.null b = Just Nothing
-      | BS.length b <= 9 && BS.all (\x -> x >= 0x30 && x <= 0x39) b =
-          Just (Just (BS.foldl' (\a x -> a * 10 + fromIntegral (x - 0x30)) 0 b))
-      | otherwise = Nothing
+
+-- | A parameter's digits: 'Nothing' inside for none, and 'Nothing' for
+-- anything but digits, or a number too long to be one.
+decimal :: ByteString -> Maybe (Maybe Int)
+decimal b
+  | BS.null b = Just Nothing
+  | BS.length b <= 9 && BS.all (\x -> x >= 0x30 && x <= 0x39) b =
+      Just (Just (BS.foldl' (\a x -> a * 10 + fromIntegral (x - 0x30)) 0 b))
+  | otherwise = Nothing
 
 -- | A parameter's sub-parameter, by index.
 sub :: Int -> Int -> Csi -> Maybe Int
@@ -645,7 +660,7 @@ interpretCsi d raw n c = case (c.marker, c.intermediates, c.final) of
     single [x] = Just x
     single _ = Nothing
     addShift = \case
-      Key e -> Just (Key e {chord = Keymap.chord e.chord.mods {shift = True} e.chord.key})
+      Key e -> Just (Key e {chord = withShift e.chord})
       _ -> Nothing
     tilde = case param 0 c of
       Just 200 | length c.params == 1 -> Parsed [] n d {pasting = Just (Pasting [] "")}
@@ -774,9 +789,16 @@ kittyKey c = do
   k <- codeKey code
   let m = modifiers (fromMaybe 1 (param 1 c))
       shifted = sub 0 1 c >>= scalar
-      baseKey = sub 0 2 c >>= scalar
+      -- The base layout key, unless it is the key: kitty reports the
+      -- keypad's 5 as its own code with base key 5, which is 'Char' '5'
+      -- here.
+      baseKey = mfilter ((/= k) . Char) (sub 0 2 c >>= scalar)
       txt = T.pack (mapMaybe (>>= scalar) (fromMaybe [] (c.params !!? 2)))
       others = m.mods.ctrl || m.mods.alt || m.mods.super || m.hyperHeld || m.metaHeld
+      -- xterm's CSI u is a character's own code and no event type: an event
+      -- type, or one of kitty's functional codes (the keypad's), is kitty's,
+      -- whose code is the unshifted key.
+      xtermForm = code < 57344 && isNothing (sub 1 1 c)
       cased x = toUpper x /= x || toLower x /= x
       ch = case (k, shifted) of
         (Char x, _)
@@ -789,7 +811,7 @@ kittyKey c = do
                in Keymap.chord m.mods {shift = False} (Char (if up then toUpper x else toLower x))
         (Char _, Just s) | m.mods.shift -> Keymap.chord m.mods {shift = False} (Char s)
         (Char x, Nothing)
-          | m.mods.shift && not others && not (cased x) && T.null txt ->
+          | m.mods.shift && not others && not (cased x) && T.null txt && xtermForm ->
               -- Shift alone, with neither the shifted key nor text: xterm's
               -- CSI u (formatOtherKeys), whose code is the character shift
               -- typed, as modifyOtherKeys' is. Kitty sends this only with
@@ -936,7 +958,7 @@ ss3 d bs = go 2
         | b >= 0x40 && b <= 0x7E ->
             let ps = BS.split 0x3B (BS.take (j - 2) (BS.drop 2 bs))
                 mods = case reverse ps of
-                  p : _ | not (BS.null p), BS.length p <= 9 -> BS.foldl' (\a x -> a * 10 + fromIntegral (x - 0x30)) 0 p
+                  p : _ | Just (Just v) <- decimal p -> v
                   _ -> 1
                 m = modifiers mods
              in -- A final byte that names no key is not SS3: alt on O, and

@@ -219,6 +219,36 @@ Written as changes land, not at release (DESIGN.md §2.9).
     alone and no shifted key or text, the code is now the character typed (regression 39).
 - Also changed in that review: `csi` and `stringSequence` use `unsnoc` and `indexMaybe`, not the
   partial `last` and `index`, and one `safeToEnum` serves the kitty keys and mode reports.
+- The decoder's roundtrip (M2.8, DESIGN.md §11.2): `Test.Tendril.Term.Roundtrip` generates a key
+  event as a platform reports it (a US key, its modifiers and locks, press, repeat or release)
+  under random key-encoder options (legacy, cursor and keypad application modes, mode 1036,
+  modifyOtherKeys, DECBKM, any kitty flags), has libghostty-vt encode it, and decodes the bytes
+  alone. They must give the event the mode can carry, in D36's normal form, as the test's model of
+  each encoding says; where the model says a mode cannot carry it, the reason is tabulated and the
+  bytes must decode to one key at most and nothing `Unknown`. The same for SGR and SGR-pixel
+  mouse reports under each tracking mode. The model was first checked against every key, modifier
+  set, lock state, action and mode, 2.6 million combinations, and the property runs 100,000 keys
+  and 10,000 mouse reports in about 1.3 seconds. libghostty-vt 1.0 encodes no media key, no
+  context-menu key under kitty and no mouse button past 9 (§14.2).
+- Fixed, found by the roundtrip, each with a numbered regression case:
+  - Regression 39's reading of xterm's `CSI u` (shift alone, no shifted key or text: the code is
+    the character typed) also took kitty's releases and repeats, and the keypad's functional
+    codes, so a Shift+Space release was a Space release and Shift+keypad 0 was `0`. It now needs
+    a character's own code and no event type, which xterm's has; anything else is kitty's and
+    keeps shift (regression 40).
+  - Kitty reports the keypad's 5 as its functional code with base layout key `5`, which the
+    decoder reads as the key `5` itself, so the event's `base` repeated its key. A base layout
+    key that is the key is now dropped (regression 41).
+- Fixed in review of M2.7's decoder, with a numbered regression case:
+  - ESC ESC was alt on a following CSI or SS3 key, or Escape before any other CSI, but before an
+    OSC or DCS it was M-ESC, so a colour or XTVERSION reply that arrived just after Escape had its
+    bytes typed as keys. A string sequence after ESC is now read as one, and the first ESC is
+    Escape (regression 42).
+  - A string sequence after ESC ESC that had not ended was held as bytes, not in pieces, so each
+    read copied and rescanned it, as regression 35 was: a large reply just after Escape took
+    quadratic time. It is now held as a string sequence after an Escape (regression 43).
+- Also changed in that review: the decoder builds alt and shift chords with `Tendril.Keymap`'s
+  `withAlt` and `withShift`, and SS3 reads its modifier with the CSI parameters' `decimal`.
 
 ### M1: ghostty
 
