@@ -277,9 +277,9 @@ keymap = fst . build
 build :: (Ord k) => [(NonEmpty k, v)] -> (Trie k v, [Conflict k])
 build = second (concat . reverse) . foldl' step (emptyTrie, [])
   where
-    step (t, cs) (ks, v) =
-      let (t', gone) = insert ks v t
-       in (t', [Conflict g ks | g <- gone] : cs)
+    -- The trie is forced at each step, so the fold leaves no chain of thunks.
+    step (t, cs) (ks, v) = case insert ks v t of
+      (t', gone) -> t' `seq` (t', [Conflict g ks | g <- gone] : cs)
 
 -- | Every bound sequence with its value, in the keys' order.
 --

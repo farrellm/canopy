@@ -35,7 +35,15 @@ tests =
         r <- try (evaluate (length (show @String viInEmacs)))
         case r of
           Left (TypeError _) -> pass
-          Right _ -> assertFailure "a Command () 'ViNormal was bound in a Keymap () 'Emacs"
+          Right _ -> assertFailure "a Command () 'ViNormal was bound in a Keymap () 'Emacs",
+      -- The control: with every error deferred (out-of-scope names too), the
+      -- tests above would pass on any error, so the same binding of an Emacs
+      -- command must evaluate.
+      testCase "an Emacs command can be bound in the Emacs keymap" $ do
+        r <- try (evaluate (length (show @String emacsInEmacs)))
+        case r of
+          Left (TypeError e) -> assertFailure e
+          Right _ -> pass
     ]
 
 -- Its own binding, so its deferred error is a thunk the test forces.
@@ -50,3 +58,6 @@ viNormal = Move NextCluster
 
 viInEmacs :: Keymap () 'Emacs
 viInEmacs = bind (key (Char 'l') :| []) viNormal emacs
+
+emacsInEmacs :: Keymap () 'Emacs
+emacsInEmacs = bind (key (Char 'l') :| []) (Move NextCluster) emacs

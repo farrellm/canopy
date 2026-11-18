@@ -6,7 +6,7 @@ module Test.Tendril.Keymap (tests) where
 
 import Data.Char (isControl)
 import Data.List (partition)
-import Tendril.Keymap (Conflict (..), Key (..), KeyChord, Lookup (..), Mods (..), bind, chord, conflicts, describe, emptyTrie, key, keymap, toBindings, typed, walk, withAlt, withCtrl, withShift, withSuper)
+import Tendril.Keymap (Conflict (..), Key (..), KeyChord, Lookup (..), Mods (..), bind, chord, conflicts, describe, emptyTrie, key, keymap, noMods, toBindings, typed, walk, withAlt, withCtrl, withShift, withSuper)
 import Test.QuickCheck (Gen, choose, conjoin, counterexample, forAll, listOf, (.&&.), (===))
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, testCase, (@?=))
@@ -103,7 +103,7 @@ tests =
       Prefix _ -> True
       _ -> False
     inits' xs = [take n xs | n <- [0 .. length xs - 1]]
-    shiftOnly = Mods {ctrl = False, alt = False, shift = True, super = False}
+    shiftOnly = noMods {shift = True}
     isControlKey :: KeyChord -> Bool
     isControlKey ch = case ch.key of
       Char c -> isControl c
