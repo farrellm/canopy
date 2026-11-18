@@ -96,6 +96,7 @@ test-suite tendril-test
     Test.Tendril.Keymap
     Test.Tendril.Keymap.Emacs
     Test.Tendril.Term.Input
+    Test.Tendril.Term.Roundtrip
     Test.Tendril.Text.Buffer
     Test.Tendril.Text.Gen
     Test.Tendril.Text.Grapheme

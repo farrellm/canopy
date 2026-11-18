@@ -168,6 +168,19 @@ kitty =
     testCase "regression 39: shift alone on a character with no shifted key is applied" $ do
       decodes "\ESC[33;2u\ESC[49;6u" [Key (kittyEvent (key (Char '!'))), Key (kittyEvent (withShift (cK '1')))]
       [keyText e | Key e <- decodeAll ["\ESC[33;2u"]] @?= [Just "!"],
+    -- xterm's CSI u has no event type and no functional code: with either it
+    -- is kitty's, whose code is the unshifted key (found by M2.8's roundtrip).
+    testCase "regression 40: shift alone with an event type or a keypad code is kept" $
+      decodes
+        "\ESC[32;2:3u\ESC[49;2:2u\ESC[57399;2u\ESC[57399;2:3u"
+        [ Key (acting Release (kittyEvent (withShift (key (Char ' '))))),
+          Key (acting Repeat (kittyEvent (withShift (key (Char '1'))))),
+          Key (kittyEvent (withShift (key (Char '0')))),
+          Key (acting Release (kittyEvent (withShift (key (Char '0')))))
+        ],
+    -- The keypad's 5 is the key '5' here, so its base layout key says nothing.
+    testCase "regression 41: a base layout key that is the key is not reported" $
+      decodes "\ESC[57404::53u\ESC[1081::113u" [Key (kittyEvent (key (Char '5'))), Key (kittyEvent (key (Char 'й'))) {base = Just 'q'}],
     testCase "Caps Lock applies to a letter with no other modifier" $
       decodes
         "\ESC[97;65u\ESC[97;66u\ESC[97;69u"

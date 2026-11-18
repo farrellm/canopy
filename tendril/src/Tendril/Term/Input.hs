@@ -774,9 +774,16 @@ kittyKey c = do
   k <- codeKey code
   let m = modifiers (fromMaybe 1 (param 1 c))
       shifted = sub 0 1 c >>= scalar
-      baseKey = sub 0 2 c >>= scalar
+      -- The base layout key, unless it is the key: kitty reports the
+      -- keypad's 5 as its own code with base key 5, which is 'Char' '5'
+      -- here.
+      baseKey = mfilter ((/= k) . Char) (sub 0 2 c >>= scalar)
       txt = T.pack (mapMaybe (>>= scalar) (fromMaybe [] (c.params !!? 2)))
       others = m.mods.ctrl || m.mods.alt || m.mods.super || m.hyperHeld || m.metaHeld
+      -- xterm's CSI u is a character's own code and no event type: an event
+      -- type, or one of kitty's functional codes (the keypad's), is kitty's,
+      -- whose code is the unshifted key.
+      xtermForm = code < 57344 && isNothing (sub 1 1 c)
       cased x = toUpper x /= x || toLower x /= x
       ch = case (k, shifted) of
         (Char x, _)
@@ -789,7 +796,7 @@ kittyKey c = do
                in Keymap.chord m.mods {shift = False} (Char (if up then toUpper x else toLower x))
         (Char _, Just s) | m.mods.shift -> Keymap.chord m.mods {shift = False} (Char s)
         (Char x, Nothing)
-          | m.mods.shift && not others && not (cased x) && T.null txt ->
+          | m.mods.shift && not others && not (cased x) && T.null txt && xtermForm ->
               -- Shift alone, with neither the shifted key nor text: xterm's
               -- CSI u (formatOtherKeys), whose code is the character shift
               -- typed, as modifyOtherKeys' is. Kitty sends this only with

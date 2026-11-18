@@ -1377,10 +1377,12 @@ events decoding them at once does, which a property holds.
   (0x08 is C-h, 0x7F Backspace), an ESC prefix is alt, and a character key is the character the
   terminal says it typed, with shift cleared, wherever it says (a legacy byte, modifyOtherKeys'
   code, kitty's shifted alternate key, xterm's `CSI u` with shift alone and no alternate key or
-  text); where it reports only the unshifted key, the chord keeps shift (`C-S-/`). Caps Lock, which
+  text); where it reports only the unshifted key, the chord keeps shift (`C-S-/`). xterm's `CSI u`
+  is a character's own code with no event type, so a release, a repeat or one of kitty's
+  functional codes (the keypad's) is kitty's, and keeps shift (M2.8). Caps Lock, which
   only kitty reports, gives a letter its other case when no other modifier is held, so a C-a
   binding still holds with it on; with shift too it is the small letter, ahead of the shifted key. Kitty's hyper and meta, its lock states,
-  its associated text and base-layout key are the event's, not the chord's; `keyText` is what an
+  its associated text and base-layout key (where it is not the key itself) are the event's, not the chord's; `keyText` is what an
   event types (nothing for a release or with a modifier held, else the reported text, else what the
   chord types). The keypad's keys are their logical keys (`1`, Enter, the arrows); `Key` gains
   Begin, the lock keys, Print Screen, Pause, the context menu key, kitty's media keys and the
@@ -2544,6 +2546,16 @@ A complete terminal emulator available as a library is a test asset as much as a
   encoded by libghostty and decoded by tendril; the event must come back equal. A generated text
   key carries its unshifted character, as a platform's events do: ghostty's Kitty encoder finds a
   text key by it, and without one sends the press as its text and no release (found in M1.9).
+  "Equal" is what the mode can carry: the test's model of each encoding says what comes back, in
+  D36's normal form, and names what a mode cannot carry (super, or a release, outside the kitty
+  protocol; alt without mode 1036; xterm's C0 table for ctrl on a digit or punctuation; Caps Lock
+  with a modifier outside kitty; modifiers on the legacy keypad; shift alone as `CSI u` with
+  neither the shifted key nor text, which xterm's own `CSI u` cannot be told from). Those must
+  still decode cleanly: one key at most, nothing `Unknown`. The model was checked on every key,
+  modifier set, lock state, action and mode, 2.6 million combinations, before it became the
+  property (M2.8). libghostty-vt 1.0 encodes no media key, no context-menu key under kitty, and
+  no mouse button past 9, so the unit tests alone cover those. An SGR-pixel report rounds the
+  position and an SGR one floors it to a cell.
 - **Widths**: tendril's width tables agree with libghostty's for every codepoint, and for a corpus of
   grapheme clusters (emoji ZWJ sequences, flags, combining marks, Hangul).
 
@@ -2844,6 +2856,7 @@ reading the pinned sources. A ✗ changed the design, in the section named.
 | `text-rope` splits a large text in time logarithmic in its length | ✗ 2026-11-15, 0.3: `fromText` makes one chunk of the whole text, and a split walks its chunk to the offset, so an edit near the end of a 1 MiB paste took up to 8 ms; tendril builds its ropes in chunks of 4,096 code points (D34, M2.4) | §5.3, §12.3 |
 | libghostty-vt segments grapheme clusters by UAX #29 | ✗ 2026-11-15, 1.0.0: two tailorings (an emoji modifier continues only a modifier base; a stray VS15 or VS16 is invisible to the rules), which tendril copies; a probe agreed on a million generated texts with controls left out, whose clusters the header leaves unspecified (M2.2) | §5.3, D33 |
 | `unicode-data` provides grapheme-break and width data | ✗ neither, in 0.9.0, and nothing else on Hackage does without ICU; tendril generates its own tables | §5.3 |
+| libghostty-vt's encoders can produce what tendril's decoder reads, so they can be its oracle | ✓ 2026-11-18, 1.0.0: every key encoding the decoder reads (legacy, SS3 and the keypad, modifyOtherKeys, kitty under all 32 flag sets), and SGR and SGR-pixel mouse reports, except media keys, the context-menu key under kitty and buttons 10 and 11, which it never sends (M2.8) | §5.7, §11.2 |
 | unicode.org's UCD files at libghostty-vt's Unicode version are the ones it builds from, and a width rule computed from them agrees with `codepointWidth` | ✓ 2026-11-14, libghostty-vt 1.0.0: its uucode's 18.0.0 copies have the sums the generator pins, and a probe of the generated `width` against `codepointWidth` agreed on all 1,114,112 code points (M2.1; `tendril-test` checks every code point, M2.3) | §5.3 |
 
 Still open, each to be checked when its milestone starts: the node and julia setups (§7.2); musl

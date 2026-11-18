@@ -9,6 +9,7 @@ import Test.Tendril.Edit.Undo qualified
 import Test.Tendril.Keymap qualified
 import Test.Tendril.Keymap.Emacs qualified
 import Test.Tendril.Term.Input qualified
+import Test.Tendril.Term.Roundtrip qualified
 import Test.Tendril.Text.Buffer qualified
 import Test.Tendril.Text.Grapheme qualified
 import Test.Tendril.Text.Oracle qualified
@@ -34,5 +35,6 @@ main =
         Test.Tendril.Edit.Undo.tests,
         Test.Tendril.Keymap.tests,
         Test.Tendril.Keymap.Emacs.tests,
-        Test.Tendril.Term.Input.tests
+        Test.Tendril.Term.Input.tests,
+        Test.Tendril.Term.Roundtrip.tests
       ]
