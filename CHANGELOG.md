@@ -244,6 +244,9 @@ Written as changes land, not at release (DESIGN.md §2.9).
     OSC or DCS it was M-ESC, so a colour or XTVERSION reply that arrived just after Escape had its
     bytes typed as keys. A string sequence after ESC is now read as one, and the first ESC is
     Escape (regression 42).
+  - A string sequence after ESC ESC that had not ended was held as bytes, not in pieces, so each
+    read copied and rescanned it, as regression 35 was: a large reply just after Escape took
+    quadratic time. It is now held as a string sequence after an Escape (regression 43).
 - Also changed in that review: the decoder builds alt and shift chords with `Tendril.Keymap`'s
   `withAlt` and `withShift`, and SS3 reads its modifier with the CSI parameters' `decimal`.
 

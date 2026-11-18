@@ -352,7 +352,8 @@ data Decoder = Decoder
 data Pasting = Pasting [ByteString] ByteString
 
 -- | A string sequence held while it waits for its end: its kind (the byte
--- after ESC), its bytes so far in reverse order, how many there are, and
+-- after ESC), its bytes so far in reverse order (after an Escape, if one
+-- came just before it), how many the sequence has, and
 -- whether the last is an ESC that may start ST. It is kept in pieces and
 -- scanned once, so a large reply is not copied and rescanned on each read.
 data Stringing = Stringing Word8 [ByteString] Int Bool
@@ -430,12 +431,18 @@ run final = go []
 -- | Hold bytes that wait for more: an unfinished string sequence in pieces
 -- ('Stringing'), anything else as they are.
 holding :: ByteString -> Decoder -> Decoder
-holding bs d = case BS.unpack (BS.take 2 bs) of
-  [0x1B, k]
-    | k `elem` stringKinds,
-      StringMore n esc <- scanString k 2 False (BS.drop 2 bs) ->
-        d {stringing = Just (Stringing k [bs] n esc)}
-  _ -> d {held = bs}
+holding bs d
+  | Just (k, from) <- stringStart,
+    StringMore n esc <- scanString k 2 False (BS.drop from bs) =
+      d {stringing = Just (Stringing k [bs] n esc)}
+  | otherwise = d {held = bs}
+  where
+    -- The sequence may follow an Escape (@ESC ESC ]@), which is held with
+    -- it; the count is the sequence's own, as 'escape' scans it.
+    stringStart = case BS.unpack (BS.take 3 bs) of
+      [0x1B, 0x1B, k] | k `elem` stringKinds -> Just (k, 3)
+      0x1B : k : _ | k `elem` stringKinds -> Just (k, 2)
+      _ -> Nothing
 
 -- | A held string sequence's bytes.
 stringBytes :: Stringing -> ByteString

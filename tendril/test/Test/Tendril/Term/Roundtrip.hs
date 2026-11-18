@@ -21,8 +21,6 @@ import Data.ByteString qualified as BS
 import Data.Char (isAlpha, isLower)
 import Data.List (zipWith3)
 import Data.Text qualified as T
-import Effectful (Eff, IOE, runEff)
-import Ghostty.Effectful (Ghostty, runGhostty)
 import Ghostty.Effectful.Encode qualified as G
 import Ghostty.Effectful.Terminal (GridSize (..), extent, fromExtent)
 import Ghostty.Effectful.Terminal.Keys (KittyFlags (..))
@@ -46,6 +44,7 @@ import Test.QuickCheck
   )
 import Test.Tasty (TestTree, adjustOption, testGroup)
 import Test.Tasty.QuickCheck (QuickCheckTests (..), testProperty)
+import Test.Tendril.Text.Oracle (oracle)
 
 tests :: TestTree
 tests =
@@ -351,9 +350,10 @@ keysRoundtrip =
   forAllShow ((,) <$> genKeyOptions <*> genStroke) show $ \(o, s) -> ioProperty $ do
     bytes <- oracle (G.withKeyEncoder o (\enc -> G.encodeKey enc (platform s)))
     let got = decodeAlone bytes
+        want = expected o s
         shown = counterexample ("bytes: " <> show bytes)
-    pure . checkCoverage . cover 60 (isDecodes (expected o s)) "carried" $ case expected o s of
-      Decodes want -> tabulate "carried" [if null want then "nothing sent" else "an event"] . shown $ got === want
+    pure . checkCoverage . cover 60 (isDecodes want) "carried" $ case want of
+      Decodes evs -> tabulate "carried" [if null evs then "nothing sent" else "an event"] . shown $ got === evs
       Lost why ->
         tabulate "lost" [toString why] . shown . counterexample ("decoded: " <> show got) $
           clean got
@@ -512,9 +512,3 @@ decodeAloneWith :: I.Decoder -> ByteString -> [I.InputEvent]
 decodeAloneWith d0 b =
   let (evs, d) = I.decode b d0
    in evs <> fst (I.expire d)
-
-oracle :: Eff '[Ghostty, IOE] a -> IO a
-oracle act =
-  runEff (runGhostty act) >>= \case
-    Left e -> fail ("libghostty-vt refused: " <> show e)
-    Right a -> pure a

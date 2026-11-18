@@ -2549,7 +2549,8 @@ A complete terminal emulator available as a library is a test asset as much as a
   "Equal" is what the mode can carry: the test's model of each encoding says what comes back, in
   D36's normal form, and names what a mode cannot carry (super, or a release, outside the kitty
   protocol; alt without mode 1036; xterm's C0 table for ctrl on a digit or punctuation; Caps Lock
-  with a modifier outside kitty; modifiers on the legacy keypad; shift alone as `CSI u` with
+  with a modifier outside kitty; modifiers on the legacy keypad; DECBKM's Backspace, and ctrl or
+  shift on xterm's; the menu key, which is xterm's F16; shift alone as `CSI u` with
   neither the shifted key nor text, which xterm's own `CSI u` cannot be told from). Those must
   still decode cleanly: one key at most, nothing `Unknown`. The model was checked on every key,
   modifier set, lock state, action and mode, 2.6 million combinations, before it became the

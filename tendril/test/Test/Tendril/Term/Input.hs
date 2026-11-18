@@ -278,6 +278,16 @@ replies =
             (evs, d) = foldl' (\(acc, dd) c -> first (acc <>) (decode c dd)) ([], decoder) chunks
         map (\case Reply (Clipboard sel bytes) -> Just (sel, BS.length bytes); _ -> Nothing) evs @?= [Just ("c", 3 * 1024 * 1024)]
         waiting d @?= False,
+    -- So is one held just after Escape (regression 42's ESC ESC ]).
+    localOption (mkTimeout 20000000) $
+      testCase "regression 43: a large reply after Escape in small reads takes linear time" $ do
+        let payload = BS.replicate (4 * 1024 * 1024) 0x41
+            bytes = "\ESC\ESC]52;c;" <> payload <> "\a"
+            chunks = cutAt [512, 1024 .. BS.length bytes] bytes
+            (evs, d) = foldl' (\(acc, dd) c -> first (acc <>) (decode c dd)) ([], decoder) chunks
+        take 1 evs @?= [Key (keyEvent (key Escape))]
+        map (\case Reply (Clipboard sel b) -> Just (sel, BS.length b); _ -> Nothing) (drop 1 evs) @?= [Just ("c", 3 * 1024 * 1024)]
+        waiting d @?= False,
     testCase "colours" $
       decodes
         "\ESC]11;rgb:ffff/8000/0000\a\ESC]10;rgb:f/80/000\ESC\\\ESC]4;3;rgb:12/34/56\a"
