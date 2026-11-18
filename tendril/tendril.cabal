@@ -39,6 +39,8 @@ library
     Tendril.Edit.Register
     Tendril.Edit.Selection
     Tendril.Edit.Undo
+    Tendril.Keymap
+    Tendril.Keymap.Emacs
     Tendril.Text.Buffer
     Tendril.Text.Grapheme
     Tendril.Text.Unicode.Tables
@@ -90,6 +92,8 @@ test-suite tendril-test
     Test.Tendril.Edit.KillRing
     Test.Tendril.Edit.Mode
     Test.Tendril.Edit.Undo
+    Test.Tendril.Keymap
+    Test.Tendril.Keymap.Emacs
     Test.Tendril.Text.Buffer
     Test.Tendril.Text.Gen
     Test.Tendril.Text.Grapheme

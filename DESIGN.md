@@ -1142,6 +1142,36 @@ commands (canopy's "rewind", "select previous block") are bound in the same trie
 checks. The mode's role is declared nominal (D30): while every command is polymorphic in it, GHC
 would infer a phantom one, and `coerce` would move a command between modes.
 
+**Keymaps** (M2.6, D36). `Tendril.Keymap`'s `Keymap app m` is a synonym for
+`Trie KeyChord (Command app m)`, so `Command`'s nominal mode keeps a keymap in its mode too; a test
+holds that neither coercion nor binding a `'ViNormal` command into the Emacs keymap type-checks.
+
+- **A chord has one normal form**, which the decoder (§5.7) reaches from every encoding: a key that
+  types a character is that character with shift applied, and its chord never holds shift (`M-<`
+  is `'<'` with alt; Ctrl-Shift-A is `'A'` with ctrl, apart from C-a only under the kitty protocol).
+  Enter, Tab, Backspace and Escape are keys of their own, never C-m, C-i, C-? or C-[, and Alt is a
+  modifier, never an Escape before the key: the decoder reads a legacy byte as the named key and
+  folds an ESC prefix into alt. The keys are logical (W3C `key` values), not ghostty's physical
+  `code`s, which tendril cannot see (§2.6).
+- **No bound sequence is a prefix of another**, as in Emacs, so a chord either completes a binding
+  or waits for the next, with no timeout. Lookup is three-way (`Bound`, `Prefix`, `Unbound`).
+  Binding replaces what is in the way, and `conflicts` lists every clash as a value; a test holds
+  that the built-in keymaps have none, and the user-file decoder (M6.2) reports them with its other
+  errors.
+- **No binding starts with a printable character.** With no prefix pending, a chord no binding
+  takes types its character if it holds neither ctrl, alt nor super (`typed`), and the editor
+  inserts it (§5.8). After a prefix one may be bound (`C-x u`).
+- **The Emacs keymap** is Emacs's bindings for the commands that exist, with readline's C-u (tendril
+  has no prefix argument), shift-select, Emacs 28's undo-redo on `C-M-_` (and on `M-_`, for its
+  `C-?`, which a legacy terminal sends as DEL), M-RET, S-RET and C-j for `ForceNewline`, `C-x C-e`
+  for `$EDITOR`, and Helix's `M-<up>`/`M-<down>` for structural selection. Up and C-p are `Move
+  LineUp`, Down and C-n `Move LineDown`; on the first line, or the last, where they do not move, the
+  editor recalls history instead (M2.11), as prompt_toolkit and reedline do, and M-p and M-n always
+  recall it. C-d is `Delete NextCluster`, and on an empty input the editor ends input instead, as
+  readline does; C-c interrupts, and is the editor's, not a command (M2.11). Registers' commands and
+  a quoted insert read their argument from the next key, which a trie of commands cannot say, so
+  they wait for the editor; Tab's menu and C-r's search wait for their widgets (M2.12).
+
 **T1 applies the edits** (M2.4). `Tendril.Edit.Command.apply :: Command app m -> EditState -> Maybe
 EditState` runs the commands that change the text, the cursor, the selection, the kill ring or the
 registers. It returns `Nothing` for the editor's commands: undo and redo (`Tendril.Edit.Undo`'s,
@@ -2833,6 +2863,7 @@ input; a per-session toggle hides them.
 | D33 | tendril's grapheme clusters are libghostty-vt's tailoring of UAX #29 (an emoji modifier continues only a modifier base; a stray variation selector is invisible to the rules), not UAX #29's own, since the terminal decides what it draws whole (M2.2) | §5.3 |
 | D34 | The editor's positions (cursor, anchor) are code point offsets kept on cluster boundaries, not grapheme offsets. A boundary near one is found by segmenting from the nearest code point after which the segmenter's state does not depend on the text before it, so a motion or edit reads the text near it, never the whole buffer. The buffer's rope is built in chunks of at most 4,096 code points, since `text-rope` splits within a chunk by walking it. Answers D-deferred-13 (M2.4) | §5.3, §5.4, §12.3 |
 | D35 | Undo is a tree of snapshots: each step keeps the text and cursor before its first edit and after its last, sharing the persistent rope, so undo and redo restore exactly. A command changed the text when `EditState`'s `version` moved, which the editor's revision also follows. Typing and single-cluster deletions coalesce within a second, unless anything came between; time is an argument, since tendril has no clock (M2.5) | §5.4, §5.5 |
+| D36 | A key chord has one normal form (a character key's chord is the character with shift applied and never holds shift; Enter, Tab, Backspace and Escape are never control characters; Alt is never an ESC prefix), and no bound sequence is a prefix of another, so lookup needs no timeout and clashes are values (`conflicts`). No binding starts with a printable character, which the editor inserts (M2.6) | §5.4 |
 
 ### 15.2 Deferred
 

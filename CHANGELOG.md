@@ -134,6 +134,18 @@ Written as changes land, not at release (DESIGN.md §2.9).
   of the same text over itself (a yank-pop round a ring of one) no longer counts as one. `Snapshot`,
   `snapshot` and `restore` let the undo tree put a text and cursor back without breaking the
   boundary invariant; `restore` also ends a run of kills and a yank's claim on a yank-pop.
+- Keymaps (M2.6, DESIGN.md §5.4, D36): `Tendril.Keymap` has `KeyChord`, a logical key and its
+  modifiers in one normal form (a character key's chord holds the character typed and never shift),
+  and `Trie`, where no bound sequence is a prefix of another: `follow` and `walk` find `Bound`,
+  `Prefix` or `Unbound`, `bind` replaces what is in its way, and `conflicts` lists every clash.
+  `typed` is the text a chord no binding takes types. `Keymap app m` is a trie of `Command app m`,
+  so its mode is checked at compile time and no coercion changes it. `Tendril.Keymap.Emacs.emacs`
+  binds Emacs's keys (readline's C-u, shift-select, Emacs 28's undo-redo on `C-M-_` and `M-_`,
+  `C-x C-e`) for every command so far; Up and C-p move a line, and the editor will recall history
+  where they cannot, and end input on C-d with an empty input.
+  Properties: a binding is found where it was made, its prefixes wait for more, and `conflicts` is
+  the naive pairwise check. Tests: the Emacs keymap has no conflicts and no binding that starts
+  with a printable chord, and binding a vi normal-mode command into it does not type-check.
 
 ### M1: ghostty
 
