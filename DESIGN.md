@@ -1339,21 +1339,56 @@ data Surface = Surface
 
 ### 5.7 Host input
 
-`Tendril.Term.Input` is a pure, incremental decoder from host bytes to events:
+`Tendril.Term.Input` is a pure, incremental decoder from host bytes to events (M2.7, D37):
 
 ```haskell
 data InputEvent
-  = Key KeyEvent            -- with modifiers, press/repeat/release, text, shifted/base keys
+  = Key KeyEvent            -- a chord in D36's normal form, press/repeat/release, text, base key
   | Paste Text              -- bracketed paste, already un-bracketed
-  | Mouse MouseEvent        -- SGR (1006) and SGR-pixels
+  | Mouse MouseEvent        -- SGR (1006) and SGR-pixels (1016)
   | Focus Bool
-  | Resize Size
-  | Reply TerminalReply     -- DA, DECRQM, colour queries, kitty-keyboard query, OSC 52 read
+  | Resize Size             -- in-band resize reports (2048)
+  | Reply TerminalReply     -- DA1/DA2, DECRPM, colour queries, kitty-keyboard query, OSC 52 read,
+                            -- XTVERSION, cursor position, colour scheme, XTWINOPS sizes
+  | Unknown ByteString      -- a complete sequence it does not know, or bytes that are not UTF-8
+
+decode  :: ByteString -> Decoder -> ([InputEvent], Decoder)
+waiting :: Decoder -> Bool                       -- bytes held that a timeout would decode
+expire  :: Decoder -> ([InputEvent], Decoder)    -- the escape timeout passed
 ```
 
-It understands legacy encodings (with the usual ESC-timeout ambiguity resolved by a configurable
-timeout, and *not needed* once the kitty keyboard protocol is negotiated), CSI-u / the kitty keyboard
-protocol with all enhancement flags, xterm's modifyOtherKeys, bracketed paste, SGR mouse and focus.
+It understands legacy encodings, CSI-u / the kitty keyboard protocol with all enhancement flags,
+xterm's modifyOtherKeys, bracketed paste, SGR mouse and focus. Decoding bytes in pieces gives the
+events decoding them at once does, which a property holds.
+
+- **The ESC timeout is the driver's, not the decoder's.** The decoder has no clock: it holds bytes
+  that may start a longer sequence (a lone ESC, `ESC [`, an unfinished OSC), says so with
+  `waiting`, and the driver calls `expire` when nothing more has arrived within its timeout. The
+  held bytes are then keys: a lone ESC is Escape, an ESC before an unfinished sequence is alt on its
+  first character (`ESC [` is `M-[`), and the rest is decoded after it. Once the kitty protocol is
+  negotiated Escape is `CSI 27 u`, so the timeout only ends a sequence the terminal cut short. A
+  bracketed paste waits for its end with no timeout, and keeps its bytes in pieces, so a large one
+  is not copied once per read.
+- **Keys arrive in D36's normal form.** A legacy byte is its named key or its letter with ctrl
+  (0x08 is C-h, 0x7F Backspace), an ESC prefix is alt, and a character key is the character the
+  terminal says it typed, with shift cleared, wherever it says (a legacy byte, modifyOtherKeys'
+  code, kitty's shifted alternate key); where it reports only the unshifted key, the chord keeps
+  shift (`C-S-/`). Caps Lock, which only kitty reports, gives a letter its other case when no other
+  modifier is held, so a C-a binding still holds with it on. Kitty's hyper and meta, its lock states,
+  its associated text and base-layout key are the event's, not the chord's; `keyText` is what an
+  event types (nothing for a release or with a modifier held, else the reported text, else what the
+  chord types). The keypad's keys are their logical keys (`1`, Enter, the arrows); `Key` gains
+  Begin, the lock keys, Print Screen, Pause, the context menu key, kitty's media keys and the
+  modifier keys themselves, which kitty reports with its report-all-keys flag.
+- **What bytes cannot settle, the caller does.** `CSI 1 ; 5 R` is Ctrl+F3 in xterm's encoding and a
+  cursor position report for row 1, column 5: it is a report when `expectCursorPosition` says one is
+  due or its row is not 1, and F3 otherwise. SGR and SGR-pixel reports are the same bytes, so
+  `setPixelMouse` says which mode is set. xterm's Help and context menu keys share F15's and F16's
+  `CSI 28 ~` and `CSI 29 ~`, and are read as F15 and F16. Positions are counted from 0.
+- **Nothing is dropped without a trace.** A complete sequence the decoder does not know, an
+  unassigned kitty code, or a byte that is not UTF-8 is `Unknown` with its bytes; the editor
+  ignores it.
+
 `Tendril.Term.Caps` probes the host at startup (DA1 as a sentinel after DECRQM/kitty queries, so
 unanswered probes time out deterministically) and enables the best protocol available.
 
@@ -2879,6 +2914,7 @@ input; a per-session toggle hides them.
 | D34 | The editor's positions (cursor, anchor) are code point offsets kept on cluster boundaries, not grapheme offsets. A boundary near one is found by segmenting from the nearest code point after which the segmenter's state does not depend on the text before it, so a motion or edit reads the text near it, never the whole buffer. The buffer's rope is built in chunks of at most 4,096 code points, since `text-rope` splits within a chunk by walking it. Answers D-deferred-13 (M2.4) | §5.3, §5.4, §12.3 |
 | D35 | Undo is a tree of snapshots: each step keeps the text and cursor before its first edit and after its last, sharing the persistent rope, so undo and redo restore exactly. A command changed the text when `EditState`'s `version` moved, which the editor's revision also follows. Typing and single-cluster deletions coalesce within a second, unless anything came between; time is an argument, since tendril has no clock (M2.5) | §5.4, §5.5 |
 | D36 | A key chord has one normal form (a character key's chord is the character with shift applied; shift is applied by `chord` only to a letter with a case and kept on any other character, whose shifted form depends on the layout; Enter, Tab, Backspace and Escape are never control characters; Alt is never an ESC prefix), and no bound sequence is a prefix of another, so lookup needs no timeout and clashes are values (`conflicts`). No binding starts with a printable character, which the editor inserts, and `printableStarts` reports one that does (M2.6) | §5.4 |
+| D37 | The host-input decoder is pure and has no clock: it holds bytes that may start a longer sequence and says so (`waiting`), and the driver calls `expire` after its escape timeout, which reads them as keys (ESC is Escape, ESC before a cut sequence is alt). What bytes cannot settle the caller does (`expectCursorPosition` for `CSI 1;m R`, `setPixelMouse`), and what it cannot read is `Unknown` with its bytes, never dropped (M2.7) | §5.7 |
 
 ### 15.2 Deferred
 

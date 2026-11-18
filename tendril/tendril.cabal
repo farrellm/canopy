@@ -41,6 +41,7 @@ library
     Tendril.Edit.Undo
     Tendril.Keymap
     Tendril.Keymap.Emacs
+    Tendril.Term.Input
     Tendril.Text.Buffer
     Tendril.Text.Grapheme
     Tendril.Text.Unicode.Tables
@@ -94,6 +95,7 @@ test-suite tendril-test
     Test.Tendril.Edit.Undo
     Test.Tendril.Keymap
     Test.Tendril.Keymap.Emacs
+    Test.Tendril.Term.Input
     Test.Tendril.Text.Buffer
     Test.Tendril.Text.Gen
     Test.Tendril.Text.Grapheme
@@ -106,6 +108,7 @@ test-suite tendril-test
 
   build-depends:
     , base ^>=4.21.2.0
+    , bytestring ^>=0.12
     , canopy-prelude
     , effectful-core ^>=2.7.1
     , ghostty-effectful

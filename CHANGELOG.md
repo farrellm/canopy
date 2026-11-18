@@ -181,6 +181,19 @@ Written as changes land, not at release (DESIGN.md §2.9).
     thunks. The mode test, built with deferred type errors, has a control that must type-check, so
     its negative cases cannot pass on an unrelated error.
   - Every `Key` constructor has Haddock.
+- The host-input decoder (M2.7, DESIGN.md §5.7, D37): `Tendril.Term.Input` decodes host bytes to
+  `InputEvent`s, incrementally and purely: legacy keys (C0 bytes as their named keys or ctrl
+  letters, 0x08 as C-h, 0x7F as Backspace, an ESC prefix as alt), xterm's PC-style keys, SS3 and
+  the application keypad, modifyOtherKeys, fixterms' and the kitty protocol's `CSI u` with every
+  flag (events, alternate keys, all keys as escapes, associated text), bracketed paste, SGR and
+  SGR-pixel mouse, focus, in-band resize, and the replies `Tendril.Term.Caps` will ask for (DA1,
+  DA2, DECRPM, kitty flags, cursor position, OSC colours, OSC 52, XTVERSION, colour scheme,
+  XTWINOPS sizes). Keys come out in D36's normal form. The decoder has no clock: `waiting` says it
+  holds bytes a timeout would decode, and the driver calls `expire`. `CSI 1 ; m R` is a cursor
+  report only when one is expected or its row is not 1. What it cannot read is `Unknown` with its
+  bytes. Tests per encoding, and a property that bytes decoded in pieces give the events decoded
+  whole. `Tendril.Keymap.Key` gains Begin, the lock keys, Print Screen, Pause, the menu key,
+  `Media` and `Modifier` keys, which the kitty protocol reports, and `describe` names them.
 
 ### M1: ghostty
 
