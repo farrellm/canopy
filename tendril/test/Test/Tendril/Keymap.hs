@@ -3,7 +3,7 @@
 -- sequences where one starts the other.
 module Test.Tendril.Keymap (tests) where
 
-import Tendril.Keymap (Conflict (..), Key (..), Lookup (..), Mods (..), bind, conflicts, describe, emptyTrie, key, keymap, toBindings, typed, walk, withAlt, withCtrl, withShift)
+import Tendril.Keymap (Conflict (..), Key (..), Lookup (..), Mods (..), bind, conflicts, describe, emptyTrie, key, keymap, toBindings, typed, walk, withAlt, withCtrl, withShift, withSuper)
 import Test.QuickCheck (Gen, choose, conjoin, counterexample, forAll, listOf, (.&&.), (===))
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=))
@@ -39,11 +39,12 @@ tests =
           case viaNonEmpty last bs of
             Nothing -> walk [] (keymap bs) === walk [] emptyTrie
             Just (ks, v) -> walk (toList ks) (keymap bs) === Bound v,
-      testProperty "conflicts are the pairs where one sequence starts the other" $
+      testProperty "conflicts are the pairs that a trie of just the two cannot both hold" $
         forAll genBindings $ \bs ->
-          let seqs = zip [0 :: Int ..] (map (toList . fst) bs)
-              naive = [(a, b) | (i, a) <- seqs, (j, b) <- seqs, i < j, a `isPrefixOf` b || b `isPrefixOf` a]
-           in [(toList x.earlier, toList x.later) | x <- conflicts bs] === naive,
+          let seqs = zip [0 :: Int ..] (map fst bs)
+              clash a b = length (toBindings (keymap [(a, ()), (b, ())])) < 2
+              expected = [(a, b) | (i, a) <- seqs, (j, b) <- seqs, i < j, clash a b]
+           in [(x.earlier, x.later) | x <- conflicts bs] === expected,
       testCase "shift is dropped from a character key, kept on others" $ do
         withShift (key (Char 'a')) @?= key (Char 'a')
         (withShift (key Tab)).mods.shift @?= True,
@@ -51,6 +52,10 @@ tests =
         describe (withCtrl (key (Char ' '))) @?= "C-SPC"
         describe (withAlt (key Backspace)) @?= "M-DEL"
         describe (withCtrl (withShift (key (F 5)))) @?= "C-S-<f5>",
+      -- Regression 25 (DESIGN.md §5.4): describe put super before shift,
+      -- where Emacs's order (A-C-H-M-S-s) puts shift first.
+      testCase "regression 25: describe puts shift before super, as Emacs does" $
+        describe (withSuper (withShift (key ArrowLeft))) @?= "S-s-<left>",
       testCase "typed: only a character key, with no ctrl, alt or super" $ do
         typed (key (Char 'é')) @?= Just "é"
         typed (withShift (key (Char 'A'))) @?= Just "A"

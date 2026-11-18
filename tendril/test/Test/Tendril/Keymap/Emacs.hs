@@ -17,7 +17,7 @@ tests =
     [ testCase "no two bindings conflict" $
         conflicts (bindings @()) @?= [],
       testCase "every binding is in the keymap" $
-        length (toBindings (emacs @())) @?= length (bindings @()),
+        sortOn fst (toBindings (emacs @())) @?= sortOn fst (bindings @()),
       testCase "no binding starts with a chord that types a character" $
         sequence_
           [ assertBool (toString (describe k)) (isNothing (typed k))

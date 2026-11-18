@@ -146,6 +146,14 @@ Written as changes land, not at release (DESIGN.md §2.9).
   Properties: a binding is found where it was made, its prefixes wait for more, and `conflicts` is
   the naive pairwise check. Tests: the Emacs keymap has no conflicts and no binding that starts
   with a printable chord, and binding a vi normal-mode command into it does not type-check.
+- Fixed in review of M2.6, with a numbered regression case:
+  - `describe` put super before shift (`s-S-<left>`), where Emacs's order puts shift first
+    (`S-s-<left>`) (regression 25).
+- Also changed in that review:
+  - The `conflicts` property's oracle copied the implementation, so it could not fail. It now
+    checks that a pair conflicts exactly when a keymap of just the two keeps fewer than two.
+  - The Emacs keymap's test compares its bindings with the list, not just their count.
+  - Every `Key` constructor has Haddock, and `conflicts` converts each sequence to a list once.
 
 ### M1: ghostty
 

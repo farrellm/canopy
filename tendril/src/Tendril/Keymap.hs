@@ -66,23 +66,35 @@ import Tendril.Edit.Command (Command)
 data Key
   = -- | A key that types this character, with shift applied.
     Char Char
-  | Enter
-  | Tab
-  | Backspace
-  | Escape
+  | -- | Enter or Return
+    Enter
+  | -- | Tab
+    Tab
+  | -- | Backspace, which deletes back
+    Backspace
+  | -- | Escape
+    Escape
   | -- | Insert, named apart from the 'Tendril.Edit.Command.Insert' command
     InsertKey
   | -- | Delete (forward), named apart from the 'Tendril.Edit.Command.Delete'
     -- command
     DeleteKey
-  | Home
-  | End
-  | PageUp
-  | PageDown
-  | ArrowUp
-  | ArrowDown
-  | ArrowLeft
-  | ArrowRight
+  | -- | Home
+    Home
+  | -- | End
+    End
+  | -- | Page Up
+    PageUp
+  | -- | Page Down
+    PageDown
+  | -- | The up arrow
+    ArrowUp
+  | -- | The down arrow
+    ArrowDown
+  | -- | The left arrow
+    ArrowLeft
+  | -- | The right arrow
+    ArrowRight
   | -- | A function key, F1 as 1.
     F Word8
   deriving stock (Eq, Ord, Show)
@@ -160,15 +172,15 @@ typed (KeyChord k m) = case k of
   Char c | not (m.ctrl || m.alt || m.super) -> Just (T.singleton c)
   _ -> Nothing
 
--- | A chord in Emacs's notation: @C-@ for ctrl, @M-@ for alt, @s-@ for
--- super and @S-@ for shift, then the key.
+-- | A chord in Emacs's notation: @C-@ for ctrl, @M-@ for alt, @S-@ for
+-- shift and @s-@ for super, in Emacs's order, then the key.
 --
 -- >>> describe (withAlt (withCtrl (key (Char '_'))))
 -- "C-M-_"
 -- >>> describe (withShift (key ArrowLeft))
 -- "S-<left>"
 describe :: KeyChord -> Text
-describe (KeyChord k m) = foldMap prefix [(m.ctrl, "C-"), (m.alt, "M-"), (m.super, "s-"), (m.shift, "S-")] <> name
+describe (KeyChord k m) = foldMap prefix [(m.ctrl, "C-"), (m.alt, "M-"), (m.shift, "S-"), (m.super, "s-")] <> name
   where
     prefix (held, p) = if held then p else ""
     name = case k of
@@ -287,13 +299,13 @@ data Conflict k = Conflict
 conflicts :: (Ord k) => [(NonEmpty k, v)] -> [Conflict k]
 conflicts bs =
   [ Conflict a b
-  | (i, a) <- seqs,
-    (j, b) <- seqs,
+  | (i, a, as) <- seqs,
+    (j, b, bs') <- seqs,
     i < j,
-    toList a `isPrefixOf` toList b || toList b `isPrefixOf` toList a
+    as `isPrefixOf` bs' || bs' `isPrefixOf` as
   ]
   where
-    seqs = zip [0 :: Int ..] (map fst bs)
+    seqs = [(i, ks, toList ks) | (i, (ks, _)) <- zip [0 :: Int ..] bs]
 
 -- | A keymap for modes of kind @m@: the mode is 'Command''s, whose role is
 -- nominal (D30), so no coercion moves a keymap between modes either.
