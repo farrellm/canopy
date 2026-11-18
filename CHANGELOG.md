@@ -181,6 +181,44 @@ Written as changes land, not at release (DESIGN.md §2.9).
     thunks. The mode test, built with deferred type errors, has a control that must type-check, so
     its negative cases cannot pass on an unrelated error.
   - Every `Key` constructor has Haddock.
+- The host-input decoder (M2.7, DESIGN.md §5.7, D37): `Tendril.Term.Input` decodes host bytes to
+  `InputEvent`s, incrementally and purely: legacy keys (C0 bytes as their named keys or ctrl
+  letters, 0x08 as C-h, 0x7F as Backspace, an ESC prefix as alt), xterm's PC-style keys, SS3 and
+  the application keypad, modifyOtherKeys, fixterms' and the kitty protocol's `CSI u` with every
+  flag (events, alternate keys, all keys as escapes, associated text), bracketed paste, SGR and
+  SGR-pixel mouse, focus, in-band resize, and the replies `Tendril.Term.Caps` will ask for (DA1,
+  DA2, DECRPM, kitty flags, cursor position, OSC colours, OSC 52, XTVERSION, colour scheme,
+  XTWINOPS sizes). Keys come out in D36's normal form. The decoder has no clock: `waiting` says it
+  holds bytes a timeout would decode, and the driver calls `expire`. `CSI 1 ; m R` is a cursor
+  report only when one is expected or its row is not 1. What it cannot read is `Unknown` with its
+  bytes. Tests per encoding, and a property that bytes decoded in pieces give the events decoded
+  whole. `Tendril.Keymap.Key` gains Begin, the lock keys, Print Screen, Pause, the menu key,
+  `Media` and `Modifier` keys, which the kitty protocol reports, and `describe` names them.
+- Fixed in review of M2.7, each with a numbered regression case:
+  - `ESC ]`, `ESC P`, `ESC X`, `ESC _` and `ESC ^` always began a string sequence, so M-] then C-g
+    was an empty OSC, `Unknown`, and both keys were lost; until the timeout, all typed after M-]
+    was held. A body that is empty or holds a C0 control is now alt on the character after ESC at
+    once, since no reply has one (regression 32).
+  - The length bounds were checked only while a sequence was incomplete, so a long sequence decoded
+    whole and in pieces gave different events, and SS3 had no bound. A CSI or SS3 past 4096 bytes,
+    or a string sequence past 16 MiB, is now not one, complete or not (regression 33).
+  - An SGR mouse report with button code 15 (bits 6 and 7 over a low 3) was a press of no button.
+    Only a plain 3 is no button; the rest are `Unknown` (regression 34).
+  - An unfinished string sequence was copied and rescanned from its start on each read, so an
+    OSC 52 reply of megabytes in 4 KiB reads took quadratic time. It is held in pieces and each
+    read is scanned once, as a paste is (regression 35).
+  - An SS3 sequence whose final byte names no key was `Unknown`, so M-O then `a` typed quickly lost
+    both keys. It is now not SS3: alt on `O`, and the rest after it (regression 36).
+  - A DSR 6 the terminal never answered left a cursor report due for good, so every later
+    Ctrl+F3 (`CSI 1;5R`) was a cursor position. DA1's reply, the sentinel after the queries, now
+    ends every report due (regression 37).
+  - With Caps Lock and shift, kitty's shifted alternate key (the capital) was taken first, so the
+    chord was `A` where the key typed `a`. Caps Lock is now applied first (regression 38).
+  - xterm's `CSI u` (formatOtherKeys) sends the character shift typed, but shift was kept on a
+    character without case, so Shift+1 as `CSI 33;2u` was `S-!` and typed nothing. With shift
+    alone and no shifted key or text, the code is now the character typed (regression 39).
+- Also changed in that review: `csi` and `stringSequence` use `unsnoc` and `indexMaybe`, not the
+  partial `last` and `index`, and one `safeToEnum` serves the kitty keys and mode reports.
 
 ### M1: ghostty
 

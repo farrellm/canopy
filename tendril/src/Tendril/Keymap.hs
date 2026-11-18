@@ -36,6 +36,8 @@
 module Tendril.Keymap
   ( -- * Chords
     Key (..),
+    MediaKey (..),
+    ModifierKey (..),
     Mods (..),
     noMods,
     KeyChord,
@@ -109,7 +111,88 @@ data Key
     ArrowRight
   | -- | A function key, F1 as 1.
     F Word8
+  | -- | Begin: the keypad's 5 with Num Lock off (X's @KP_Begin@)
+    Begin
+  | -- | Caps Lock
+    CapsLock
+  | -- | Scroll Lock
+    ScrollLock
+  | -- | Num Lock
+    NumLock
+  | -- | Print Screen
+    PrintScreen
+  | -- | Pause
+    Pause
+  | -- | The context menu key
+    ContextMenu
+  | -- | A media key
+    Media MediaKey
+  | -- | A modifier key on its own, which only the kitty keyboard protocol
+    -- reports, and only with its report-all-keys flag
+    Modifier ModifierKey
   deriving stock (Eq, Ord, Show)
+
+-- | A media key, as the kitty keyboard protocol names them.
+data MediaKey
+  = -- | Play
+    MediaPlay
+  | -- | Pause
+    MediaPause
+  | -- | Play or pause
+    MediaPlayPause
+  | -- | Reverse
+    MediaReverse
+  | -- | Stop
+    MediaStop
+  | -- | Fast forward
+    MediaFastForward
+  | -- | Rewind
+    MediaRewind
+  | -- | The next track
+    MediaTrackNext
+  | -- | The previous track
+    MediaTrackPrevious
+  | -- | Record
+    MediaRecord
+  | -- | Volume down
+    VolumeDown
+  | -- | Volume up
+    VolumeUp
+  | -- | Mute
+    VolumeMute
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
+
+-- | A modifier key, by side, as the kitty keyboard protocol names them.
+data ModifierKey
+  = -- | The left Shift
+    LeftShift
+  | -- | The left Control
+    LeftControl
+  | -- | The left Alt
+    LeftAlt
+  | -- | The left Super
+    LeftSuper
+  | -- | The left Hyper
+    LeftHyper
+  | -- | The left Meta
+    LeftMeta
+  | -- | The right Shift
+    RightShift
+  | -- | The right Control
+    RightControl
+  | -- | The right Alt
+    RightAlt
+  | -- | The right Super
+    RightSuper
+  | -- | The right Hyper
+    RightHyper
+  | -- | The right Meta
+    RightMeta
+  | -- | ISO Level 3 Shift (AltGr)
+    IsoLevel3Shift
+  | -- | ISO Level 5 Shift
+    IsoLevel5Shift
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
 
 -- | The modifiers held with a key.
 data Mods = Mods
@@ -216,7 +299,8 @@ typed (KeyChord k m) = case k of
 -- small letter. Enter, Tab, Backspace and Escape are @RET@, @TAB@, @DEL@
 -- and @ESC@ alone or with alt, which Emacs takes them to, and @\<return\>@,
 -- @\<tab\>@, @\<backspace\>@ and @\<escape\>@ with ctrl, shift or super,
--- which it does not.
+-- which it does not. A key Emacs has no name for is written as X names its
+-- keysym (@\<Caps_Lock\>@, @\<Shift_L\>@, @\<XF86AudioPlay\>@).
 --
 -- >>> describe (withAlt (withCtrl (key (Char '_'))))
 -- "C-M-_"
@@ -253,6 +337,44 @@ describe (KeyChord k m) = foldMap prefix [(m.ctrl, "C-"), (m.alt, "M-"), (m.shif
       ArrowLeft -> "<left>"
       ArrowRight -> "<right>"
       F n -> "<f" <> show n <> ">"
+      Begin -> "<begin>"
+      CapsLock -> "<Caps_Lock>"
+      ScrollLock -> "<Scroll_Lock>"
+      NumLock -> "<Num_Lock>"
+      PrintScreen -> "<print>"
+      Pause -> "<pause>"
+      ContextMenu -> "<menu>"
+      Media mk -> "<XF86Audio" <> mediaName mk <> ">"
+      Modifier mk -> "<" <> modifierName mk <> ">"
+    mediaName = \case
+      MediaPlay -> "Play"
+      MediaPause -> "Pause"
+      MediaPlayPause -> "PlayPause"
+      MediaReverse -> "Reverse"
+      MediaStop -> "Stop"
+      MediaFastForward -> "Forward"
+      MediaRewind -> "Rewind"
+      MediaTrackNext -> "Next"
+      MediaTrackPrevious -> "Prev"
+      MediaRecord -> "Record"
+      VolumeDown -> "LowerVolume"
+      VolumeUp -> "RaiseVolume"
+      VolumeMute -> "Mute"
+    modifierName = \case
+      LeftShift -> "Shift_L"
+      LeftControl -> "Control_L"
+      LeftAlt -> "Alt_L"
+      LeftSuper -> "Super_L"
+      LeftHyper -> "Hyper_L"
+      LeftMeta -> "Meta_L"
+      RightShift -> "Shift_R"
+      RightControl -> "Control_R"
+      RightAlt -> "Alt_R"
+      RightSuper -> "Super_R"
+      RightHyper -> "Hyper_R"
+      RightMeta -> "Meta_R"
+      IsoLevel3Shift -> "ISO_Level3_Shift"
+      IsoLevel5Shift -> "ISO_Level5_Shift"
 
 -- | Sequences of keys of type @k@ bound to values of type @v@, where no
 -- bound sequence is a prefix of another.

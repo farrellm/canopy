@@ -6,7 +6,7 @@ lists of them): it builds with
 commit if it changes a decision (§2.9). Section references (§) are to DESIGN.md.
 
 M0 is done (PR #1), and M1 (PRs #2–#13; the performance work of D18–D21 followed in PR #30). M2 has
-started: M2.1–M2.6 are done. Steps
+started: M2.1–M2.7 are done. Steps
 are numbered `M<n>.<k>`
 and are in dependency order within a milestone.
 
@@ -291,6 +291,20 @@ Exit: decoder roundtrip and render-diff properties pass; `tendril-demo` usable a
   keys, which the decoder requests) and its shift cleared; only where none is reported does the
   chord keep shift, as `C-S-/` (D36).
 - Unit tests per encoding.
+- The decoder has no clock (D37): it holds bytes that may start a longer sequence, `waiting` says
+  so, and the driver calls `expire` after its timeout, which reads them as keys (a lone ESC is
+  Escape, `ESC [` is `M-[`). A paste waits with no timeout, kept in pieces. `CSI 1 ; m R` is a
+  cursor position report when `expectCursorPosition` says one is due or its row is not 1, and F3
+  otherwise; `setPixelMouse` says whether SGR reports are pixels. Caps Lock (kitty's) gives a
+  letter its other case only with no other modifier; hyper, meta, the locks, kitty's associated
+  text and base key are the event's, and `keyText` is what an event types. `Key` gains Begin, the
+  lock keys, Print Screen, Pause, the menu key, media and modifier keys; the keypad's keys are
+  logical. Replies: DA1, DA2, DECRPM, kitty flags, cursor position, OSC 4/10/11/12 colours, OSC 52
+  (base64 decoded), XTVERSION, the colour scheme, XTWINOPS sizes; in-band resize is `Resize`. A
+  sequence it does not know is `Unknown` with its bytes. A property holds that bytes decoded in
+  pieces give the events decoded whole. Read from ghostty's encoders for M2.8: it sends Help and
+  the menu key as F15's and F16's `CSI 28 ~`/`29 ~` (read as F15, F16), and SGR-pixel positions
+  from 0. **Done.**
 
 ### M2.8 Decoder roundtrip
 
