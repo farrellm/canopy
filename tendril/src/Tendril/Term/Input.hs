@@ -522,22 +522,23 @@ data Csi = Csi
 -- | A sequence that starts with @ESC [@.
 csi :: Decoder -> ByteString -> Parse
 csi d bs = case scan 2 of
-  Nothing -> if BS.length bs > maxSequence then Malformed else Partial
+  Nothing -> Partial
   Just (Left ()) -> Malformed
   Just (Right n) ->
     let body = BS.take (n - 2) (BS.drop 2 bs)
         (paramBytes, rest) = BS.span (\b -> b >= 0x30 && b <= 0x3F) body
-        inter = BS.take (BS.length rest - 1) rest
-        fin = BS.last body
         raw = BS.take n bs
-     in case parseParams paramBytes of
-          Nothing -> Parsed [Unknown raw] n d
-          Just (mk, ps) -> interpretCsi d raw n Csi {marker = mk, params = ps, intermediates = inter, final = fin}
+     in case (BS.unsnoc rest, parseParams paramBytes) of
+          (Just (inter, fin), Just (mk, ps)) -> interpretCsi d raw n Csi {marker = mk, params = ps, intermediates = inter, final = fin}
+          _ -> Parsed [Unknown raw] n d
   where
     -- The length of the sequence, or Left at a byte that cannot be in one.
+    -- A sequence longer than 'maxSequence' is not one, complete or not, so
+    -- that bytes decoded in pieces and whole agree.
     scan i = go i False
       where
         go j inInter = case BS.indexMaybe bs j of
+          _ | j >= maxSequence -> Just (Left ())
           Nothing -> Nothing
           Just b
             | b >= 0x30 && b <= 0x3F && not inInter -> go (j + 1) False
@@ -774,12 +775,10 @@ functionalKey :: Int -> Maybe Key
 functionalKey n
   | n >= 57376 && n <= 57398 = Just (F (fromIntegral (n - 57376 + 13)))
   | n >= 57399 && n <= 57408 = Just (Char (chr (fromEnum '0' + n - 57399)))
-  | n >= 57428 && n <= 57440 = Media <$> toEnumMaybe (n - 57428)
-  | n >= 57441 && n <= 57454 = Modifier <$> toEnumMaybe (n - 57441)
+  | n >= 57428 && n <= 57440 = Media <$> safeToEnum (n - 57428)
+  | n >= 57441 && n <= 57454 = Modifier <$> safeToEnum (n - 57441)
   | otherwise = lookup n table
   where
-    toEnumMaybe :: (Enum a, Bounded a) => Int -> Maybe a
-    toEnumMaybe i = find ((== i) . fromEnum) [minBound .. maxBound]
     table =
       [ (57358, CapsLock),
         (57359, ScrollLock),
@@ -808,6 +807,10 @@ functionalKey n
         (57427, Begin)
       ]
 
+-- | The value of a bounded enumeration at an index, if there is one.
+safeToEnum :: (Enum a, Bounded a) => Int -> Maybe a
+safeToEnum i = find ((== i) . fromEnum) [minBound .. maxBound]
+
 -- | An SGR mouse report: @CSI < button ; x ; y M@, or @m@ for a release.
 sgrMouse :: Bool -> Csi -> Maybe InputEvent
 sgrMouse pixels c = do
@@ -823,8 +826,9 @@ sgrMouse pixels c = do
         | otherwise = MousePress
       position = if pixels then AtPixel x y else AtCell (x - 1) (y - 1)
       mods = noMods {shift = testBit b 2, alt = testBit b 3, ctrl = testBit b 4}
-  -- Bits above 7 mean nothing; a button number past 11 is not one.
-  guard (b < 256 && (low == 3 || isJust button))
+  -- Bits above 7 mean nothing; a button number past 11 is not one, and
+  -- only a plain 3 is no button.
+  guard (b < 256 && (isJust button || number == 3))
   pure (Mouse MouseEvent {action = act, button, mods, position})
   where
     toEnumMaybe :: Int -> Maybe MouseButton
@@ -857,7 +861,7 @@ windowReport c =
 modeReport :: ModeFamily -> Csi -> Maybe InputEvent
 modeReport family c = do
   [mode, s] <- plain c
-  setting <- find ((== s) . fromEnum) [minBound .. maxBound]
+  setting <- safeToEnum s
   pure (Reply (ModeReport family mode setting))
 
 -- | The colour scheme: @CSI ? 997 ; 1 n@ (dark) or @2 n@ (light).
@@ -877,6 +881,7 @@ ss3 :: Decoder -> ByteString -> Parse
 ss3 d bs = go 2
   where
     go j = case BS.indexMaybe bs j of
+      _ | j >= maxSequence -> Malformed
       Nothing -> Partial
       Just b
         | (b >= 0x30 && b <= 0x39) || b == 0x3B -> go (j + 1)
@@ -906,24 +911,29 @@ ss3Key b = case lookup b letterKeys of
 
 -- | A sequence that starts with @ESC ]@ (OSC), @ESC P@ (DCS), @ESC _@
 -- (APC), @ESC ^@ (PM) or @ESC X@ (SOS), and ends with ST (@ESC \\@), or
--- for an OSC also BEL.
+-- for an OSC also BEL. No reply is empty or holds another C0 control, so
+-- such bytes are not one: they are alt on the character after ESC, as the
+-- user typed them (@M-]@ then @C-g@ is not an empty OSC).
 stringSequence :: Decoder -> ByteString -> Parse
 stringSequence d bs = go 2
   where
-    kind = BS.index bs 1
+    kind = BS.indexMaybe bs 1
     go j = case BS.indexMaybe bs j of
-      Nothing -> if j > maxStringSequence then Malformed else Partial
-      Just 0x07 | kind == 0x5D -> finish (BS.take (j - 2) (BS.drop 2 bs)) (j + 1)
-      Just 0x1B -> case BS.indexMaybe bs (j + 1) of
+      _ | j >= maxStringSequence -> Malformed
+      Nothing -> Partial
+      Just 0x07 | kind == Just 0x5D, j > 2 -> finish (BS.take (j - 2) (BS.drop 2 bs)) (j + 1)
+      Just 0x1B | j > 2 -> case BS.indexMaybe bs (j + 1) of
         Nothing -> Partial
         Just 0x5C -> finish (BS.take (j - 2) (BS.drop 2 bs)) (j + 2)
         Just _ -> Malformed
-      Just _ -> go (j + 1)
+      Just b
+        | b < 0x20 -> Malformed
+        | otherwise -> go (j + 1)
     finish body n =
       let raw = BS.take n bs
           ev = case kind of
-            0x5D -> osc body
-            0x50 -> dcs body
+            Just 0x5D -> osc body
+            Just 0x50 -> dcs body
             _ -> Nothing
        in Parsed [fromMaybe (Unknown raw) ev] n d
 

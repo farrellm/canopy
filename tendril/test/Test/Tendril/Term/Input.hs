@@ -78,6 +78,13 @@ escapes =
     testCase "ESC [ at the timeout is M-[" $ chords "\ESC[" [aK '['],
     testCase "ESC O at the timeout is M-O" $ chords "\ESCO" [aK 'O'],
     testCase "ESC ] at the timeout is M-], and the rest is read as keys" $ chords "\ESC]1" [aK ']', key (Char '1')],
+    -- A control byte cannot be in a reply, so M-] then C-g is not an empty OSC.
+    testCase "regression 32: ESC ] before a control byte is M-], at once" $
+      fst (decode "\ESC]\a\ESCPx\r" decoder) @?= map (Key . keyEvent) [aK ']', cK 'g', aK 'P', key (Char 'x'), key Enter],
+    testCase "regression 33: a sequence past the longest is not one, whole or in pieces" $ do
+      let long = "\ESC[" <> BS.replicate 5000 0x31 <> "~"
+      decodeAll [long] @?= decodeAll [BS.take 4100 long, BS.drop 4100 long]
+      take 1 (decodeAll [long]) @?= [Key (keyEvent (aK '['))],
     testCase "ESC ESC is M-ESC" $ chords "\ESC\ESC" [withAlt (key Escape)],
     testCase "ESC before a key sequence is alt on it" $ chords "\ESC\ESC[A\ESC\ESCOP" [withAlt (key ArrowUp), withAlt (key (F 1))],
     testCase "ESC before a non-key sequence is Escape" $ decodes "\ESC\ESC[I" [Key (keyEvent (key Escape)), Focus True],
@@ -202,6 +209,8 @@ mice =
           Mouse MouseEvent {action = MousePress, button = Just Button9, mods = noMods, position = AtCell 0 0},
           Mouse MouseEvent {action = MousePress, button = Just MiddleButton, mods = noMods {alt = True}, position = AtCell 0 0}
         ],
+    testCase "regression 34: button bits that name no button are unknown" $
+      decodes "\ESC[<195;1;1M" [Unknown "\ESC[<195;1;1M"],
     testCase "SGR pixels" $
       fst (decode "\ESC[<0;0;37M" (setPixelMouse True decoder))
         @?= [Mouse MouseEvent {action = MousePress, button = Just LeftButton, mods = noMods, position = AtPixel 0 37}]

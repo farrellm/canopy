@@ -194,6 +194,18 @@ Written as changes land, not at release (DESIGN.md §2.9).
   bytes. Tests per encoding, and a property that bytes decoded in pieces give the events decoded
   whole. `Tendril.Keymap.Key` gains Begin, the lock keys, Print Screen, Pause, the menu key,
   `Media` and `Modifier` keys, which the kitty protocol reports, and `describe` names them.
+- Fixed in review of M2.7, each with a numbered regression case:
+  - `ESC ]`, `ESC P`, `ESC X`, `ESC _` and `ESC ^` always began a string sequence, so M-] then C-g
+    was an empty OSC, `Unknown`, and both keys were lost; until the timeout, all typed after M-]
+    was held. A body that is empty or holds a C0 control is now alt on the character after ESC at
+    once, since no reply has one (regression 32).
+  - The length bounds were checked only while a sequence was incomplete, so a long sequence decoded
+    whole and in pieces gave different events, and SS3 had no bound. A CSI or SS3 past 4096 bytes,
+    or a string sequence past 16 MiB, is now not one, complete or not (regression 33).
+  - An SGR mouse report with button code 15 (bits 6 and 7 over a low 3) was a press of no button.
+    Only a plain 3 is no button; the rest are `Unknown` (regression 34).
+- Also changed in that review: `csi` and `stringSequence` use `unsnoc` and `indexMaybe`, not the
+  partial `last` and `index`, and one `safeToEnum` serves the kitty keys and mode reports.
 
 ### M1: ghostty
 
