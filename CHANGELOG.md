@@ -120,6 +120,20 @@ Written as changes land, not at release (DESIGN.md §2.9).
   - `clustersBefore` segments 32 code points at a time after the nearest cluster, so a word back
     allocates 24–34% less. The bench baseline is regenerated for it (DESIGN.md §12.3).
   - Kill finds its motion's target once, and `Tendril.Text.Buffer` exports `clusterEnd`.
+- The undo tree (M2.5, DESIGN.md §5.4, D35): `Tendril.Edit.Undo`'s `Undoable` is an `EditState`
+  with its tree, and `edit` runs a command on both, running `Undo` and `Redo` itself. A step keeps
+  two snapshots of the persistent rope, before its first edit and after its last. Typing one
+  cluster at a time and single-cluster deletions back or on coalesce within a second
+  (`coalesceWindow`), unless a motion, an undo or an editor's command came between; time is an
+  argument (`Time`). An undo puts back the cursor from before the step, a redo from after it.
+  `earlier` and `later` walk every step in the order it was made, so branches stay reachable.
+  Properties: undo and redo are inverses, an undo puts back the text and cursor from before the
+  step, every step is reached in order, and the cursor stays on a boundary.
+- `Tendril.Edit.Command`: `EditState` gains `version`, which a command bumps only when it changes
+  the text, so the undo tree and the editor's revision (§5.5) need not compare texts; an insertion
+  of the same text over itself (a yank-pop round a ring of one) no longer counts as one. `Snapshot`,
+  `snapshot` and `restore` let the undo tree put a text and cursor back without breaking the
+  boundary invariant; `restore` also ends a run of kills and a yank's claim on a yank-pop.
 
 ### M1: ghostty
 

@@ -30,6 +30,14 @@ tests =
               [ counterexample (show (c, s.buffer, s.selection)) (wellFormed s)
               | (c, s) <- zip (Nothing : map Just cs) (run (editState (fromText t)) cs)
               ],
+      testProperty "a command moves the version exactly when it changes the text" $
+        forAll genRunText $ \t ->
+          forAll (listOf genCommand) $ \cs ->
+            let ss = run (editState (fromText t)) cs
+             in conjoin
+                  [ counterexample (show c) ((s'.version /= s.version) === (toText s'.buffer /= toText s.buffer))
+                  | (c, s, s') <- zip3 cs ss (drop 1 ss)
+                  ],
       testProperty "NextCluster from the start visits every boundary" $
         forAll genRunText $ \t ->
           let s0 = edits (editState (fromText t)) [Move BufferStart]

@@ -38,6 +38,7 @@ library
     Tendril.Edit.Motion
     Tendril.Edit.Register
     Tendril.Edit.Selection
+    Tendril.Edit.Undo
     Tendril.Text.Buffer
     Tendril.Text.Grapheme
     Tendril.Text.Unicode.Tables
@@ -88,6 +89,7 @@ test-suite tendril-test
     Test.Tendril.Edit.Command
     Test.Tendril.Edit.KillRing
     Test.Tendril.Edit.Mode
+    Test.Tendril.Edit.Undo
     Test.Tendril.Text.Buffer
     Test.Tendril.Text.Gen
     Test.Tendril.Text.Grapheme
