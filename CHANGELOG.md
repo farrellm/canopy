@@ -239,6 +239,13 @@ Written as changes land, not at release (DESIGN.md §2.9).
   - Kitty reports the keypad's 5 as its functional code with base layout key `5`, which the
     decoder reads as the key `5` itself, so the event's `base` repeated its key. A base layout
     key that is the key is now dropped (regression 41).
+- Fixed in review of M2.7's decoder, with a numbered regression case:
+  - ESC ESC was alt on a following CSI or SS3 key, or Escape before any other CSI, but before an
+    OSC or DCS it was M-ESC, so a colour or XTVERSION reply that arrived just after Escape had its
+    bytes typed as keys. A string sequence after ESC is now read as one, and the first ESC is
+    Escape (regression 42).
+- Also changed in that review: the decoder builds alt and shift chords with `Tendril.Keymap`'s
+  `withAlt` and `withShift`, and SS3 reads its modifier with the CSI parameters' `decimal`.
 
 ### M1: ghostty
 

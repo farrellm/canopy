@@ -91,6 +91,12 @@ escapes =
     testCase "ESC ESC is M-ESC" $ chords "\ESC\ESC" [withAlt (key Escape)],
     testCase "ESC before a key sequence is alt on it" $ chords "\ESC\ESC[A\ESC\ESCOP" [withAlt (key ArrowUp), withAlt (key (F 1))],
     testCase "ESC before a non-key sequence is Escape" $ decodes "\ESC\ESC[I" [Key (keyEvent (key Escape)), Focus True],
+    -- A reply that arrives just after Escape is a reply, not M-ESC and its bytes typed.
+    testCase "regression 42: ESC before a string sequence is Escape, whole or in pieces" $ do
+      let bytes = "\ESC\ESC]11;rgb:ffff/8000/0000\a\ESC\ESCP>|t 1\ESC\\"
+          expected = [Key (keyEvent (key Escape)), Reply (ColorReport BackgroundColor (Rgb 255 128 0)), Key (keyEvent (key Escape)), Reply (TerminalVersion "t 1")]
+      decodes bytes expected
+      decodeAll ["\ESC", "\ESC]11;rgb:ff", "ff/8000/0000\a\ESC", "\ESCP>|t 1\ESC\\"] @?= expected,
     testCase "an incomplete UTF-8 character waits" $ do
       let (evs, d) = decode "\xc3" decoder
       evs @?= []
@@ -328,6 +334,7 @@ genStream = listOf (elements corpus)
         "\ESCOa",
         "\ESCP>|t 1\ESC\\",
         "\ESC\ESC[B",
+        "\ESC\ESC]11;rgb:0000/ffff/0000\a",
         "\ESC[99x",
         "\xff"
       ]

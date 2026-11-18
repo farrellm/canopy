@@ -80,6 +80,8 @@ import Tendril.Keymap
     Mods (..),
     noMods,
     typed,
+    withAlt,
+    withShift,
   )
 import Tendril.Keymap qualified as Keymap
 
@@ -499,27 +501,30 @@ escape final d bs = case BS.indexMaybe bs 1 of
       Partial | not final -> Need
       _ -> altChar
     altChar = case utf8 (BS.drop 1 bs) of
-      Decoded c n -> Took [press (withAltMod (Keymap.chord noMods (Char c)))] (n + 1) d
+      Decoded c n -> Took [press (withAlt (Keymap.chord noMods (Char c)))] (n + 1) d
       Short | not final -> Need
       _ -> Took [press (Keymap.chord noMods Escape)] 1 d
-    -- ESC ESC: alt on a key sequence after it, or else Alt+Escape.
+    -- ESC ESC: alt on a key sequence after it, Escape before any other
+    -- sequence (a reply that arrived just after Escape), or else
+    -- Alt+Escape.
     escEsc = case BS.indexMaybe bs 2 of
       Nothing
-        | final -> Took [press (withAltMod (Keymap.chord noMods Escape))] 2 d
+        | final -> Took [press altEscape] 2 d
         | otherwise -> Need
       Just b
-        | b == 0x5B || b == 0x4F ->
-            let inner = BS.drop 1 bs
-             in case (if b == 0x5B then csi d inner else ss3 d inner) of
-                  Parsed [Key e] n d' -> Took [Key e {chord = withAltMod e.chord}] (n + 1) d'
-                  Parsed {} -> Took [press (Keymap.chord noMods Escape)] 1 d
-                  Partial | not final -> Need
-                  _ -> Took [press (withAltMod (Keymap.chord noMods Escape))] 2 d
-      Just _ -> Took [press (withAltMod (Keymap.chord noMods Escape))] 2 d
-
--- | The chord with alt held.
-withAltMod :: KeyChord -> KeyChord
-withAltMod c = Keymap.chord c.mods {alt = True} c.key
+        | Just parse <- innerSequence b ->
+            case parse (BS.drop 1 bs) of
+              Parsed [Key e] n d' -> Took [Key e {chord = withAlt e.chord}] (n + 1) d'
+              Parsed {} -> Took [press (Keymap.chord noMods Escape)] 1 d
+              Partial | not final -> Need
+              _ -> Took [press altEscape] 2 d
+      Just _ -> Took [press altEscape] 2 d
+    altEscape = withAlt (Keymap.chord noMods Escape)
+    innerSequence b
+      | b == 0x5B = Just (csi d)
+      | b == 0x4F = Just (ss3 d)
+      | b `elem` stringKinds = Just (stringSequence d b)
+      | otherwise = Nothing
 
 -- | What parsing a sequence found.
 data Parse
@@ -590,14 +595,17 @@ parseParams bytes = do
   ps <-
     if BS.null rest
       then Just []
-      else traverse (traverse number . BS.split 0x3A) (BS.split 0x3B rest)
+      else traverse (traverse decimal . BS.split 0x3A) (BS.split 0x3B rest)
   pure (mk, ps)
-  where
-    number b
-      | BS.null b = Just Nothing
-      | BS.length b <= 9 && BS.all (\x -> x >= 0x30 && x <= 0x39) b =
-          Just (Just (BS.foldl' (\a x -> a * 10 + fromIntegral (x - 0x30)) 0 b))
-      | otherwise = Nothing
+
+-- | A parameter's digits: 'Nothing' inside for none, and 'Nothing' for
+-- anything but digits, or a number too long to be one.
+decimal :: ByteString -> Maybe (Maybe Int)
+decimal b
+  | BS.null b = Just Nothing
+  | BS.length b <= 9 && BS.all (\x -> x >= 0x30 && x <= 0x39) b =
+      Just (Just (BS.foldl' (\a x -> a * 10 + fromIntegral (x - 0x30)) 0 b))
+  | otherwise = Nothing
 
 -- | A parameter's sub-parameter, by index.
 sub :: Int -> Int -> Csi -> Maybe Int
@@ -645,7 +653,7 @@ interpretCsi d raw n c = case (c.marker, c.intermediates, c.final) of
     single [x] = Just x
     single _ = Nothing
     addShift = \case
-      Key e -> Just (Key e {chord = Keymap.chord e.chord.mods {shift = True} e.chord.key})
+      Key e -> Just (Key e {chord = withShift e.chord})
       _ -> Nothing
     tilde = case param 0 c of
       Just 200 | length c.params == 1 -> Parsed [] n d {pasting = Just (Pasting [] "")}
@@ -943,7 +951,7 @@ ss3 d bs = go 2
         | b >= 0x40 && b <= 0x7E ->
             let ps = BS.split 0x3B (BS.take (j - 2) (BS.drop 2 bs))
                 mods = case reverse ps of
-                  p : _ | not (BS.null p), BS.length p <= 9 -> BS.foldl' (\a x -> a * 10 + fromIntegral (x - 0x30)) 0 p
+                  p : _ | Just (Just v) <- decimal p -> v
                   _ -> 1
                 m = modifiers mods
              in -- A final byte that names no key is not SS3: alt on O, and
