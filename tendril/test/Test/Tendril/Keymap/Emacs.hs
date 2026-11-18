@@ -5,10 +5,10 @@ module Test.Tendril.Keymap.Emacs (tests) where
 
 import Tendril.Edit.Command (Command (..))
 import Tendril.Edit.Motion (Motion (..))
-import Tendril.Keymap (Key (..), KeyChord, Lookup (..), conflicts, describe, key, toBindings, typed, walk, withAlt, withCtrl, withShift)
+import Tendril.Keymap (Key (..), KeyChord, Lookup (..), conflicts, describe, key, printableStarts, toBindings, walk, withAlt, withCtrl, withShift)
 import Tendril.Keymap.Emacs (bindings, emacs)
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
+import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 tests :: TestTree
 tests =
@@ -19,10 +19,7 @@ tests =
       testCase "every binding is in the keymap" $
         sortOn fst (toBindings (emacs @())) @?= sortOn fst (bindings @()),
       testCase "no binding starts with a chord that types a character" $
-        sequence_
-          [ assertBool (toString (describe k)) (isNothing (typed k))
-          | (k :| _, _) <- bindings @()
-          ],
+        map (map describe . toList) (printableStarts (emacs @())) @?= [],
       testCase "keys" $
         sequence_
           [ (describeAll ks, walk ks (emacs @())) @?= (describeAll ks, Bound cmd)

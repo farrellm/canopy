@@ -156,6 +156,14 @@ Written as changes land, not at release (DESIGN.md §2.9).
     letter with ctrl, and `typed` gives no control character (regression 27).
   - `M-_` was bound to `Redo` for Emacs's `C-?`, but Emacs 28 binds undo-redo to `C-?` and `C-M-_`
     only. `M-_` is unbound and `C-?` is `Redo` (regression 28).
+  - `chord` dropped shift from every character key, so a decoder given the unshifted key with
+    shift lost it: Ctrl+Shift+/ as `'/'` with ctrl and shift was `C-/` (Undo, not Redo), and Shift+a
+    as `'a'` typed "a". `chord` now applies shift to a letter with a case and keeps it on any other
+    character (`C-S-/`), and a chord that holds shift types nothing (regression 29).
+  - `describe` wrote Enter, Tab, Backspace and Escape with ctrl, shift or super as `C-DEL`, `S-RET`,
+    which Emacs reads as other keys. They are now `C-<backspace>`, `S-<return>`; alone or with alt
+    they stay `RET`, `TAB`, `DEL`, `ESC`, which Emacs translates them to (regression 30).
+  - `typed` gave a surrogate as text, which became U+FFFD. It now gives nothing (regression 31).
 - Also changed in that review:
   - `conflicts` comes from the fold that builds the trie, so it cannot disagree with `bind`: it
     lists each binding a later one replaced, not every clashing pair, and a binding already
@@ -166,6 +174,12 @@ Written as changes land, not at release (DESIGN.md §2.9).
   - Many terminals send C-Backspace as C-h's byte, so there `C-<backspace>` deletes a cluster, and
     `M-DEL` is the word's kill. DESIGN.md §5.4 and PLAN.md's M2.7 record it.
   - The Emacs keymap's test compares its bindings with the list, not just their count.
+  - `keymapWithConflicts` gives the keymap and its conflicts from one fold, for a caller that wants
+    both (M6.2's decoder), and `printableStarts` reports the bindings that start with a chord that
+    types, which D36 rules out, as values.
+  - `Tendril.Keymap`'s fold forces the trie at each step, so building a keymap leaves no chain of
+    thunks. The mode test, built with deferred type errors, has a control that must type-check, so
+    its negative cases cannot pass on an unrelated error.
   - Every `Key` constructor has Haddock.
 
 ### M1: ghostty

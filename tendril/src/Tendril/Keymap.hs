@@ -8,12 +8,17 @@
 -- from every encoding it reads:
 --
 -- * A key that types a character is 'Char' of the character it types with
---   shift applied, and its chord never holds shift: @M-<@ is @\'<\'@ with
---   alt, not @\',\'@ with shift and alt, and Ctrl-Shift-A is @\'A\'@ with
---   ctrl, apart from @\'a\'@ with ctrl (which only the kitty keyboard
---   protocol can tell apart). A control character is its letter with ctrl:
---   C-a is @\'a\'@ with ctrl, and C-Space is @\' \'@ with ctrl. 'chord'
---   reaches this from a control character too, so no chord holds one.
+--   shift applied: @M-<@ is @\'<\'@ with alt, not @\',\'@ with shift and
+--   alt, and Ctrl-Shift-A is @\'A\'@ with ctrl, apart from @\'a\'@ with
+--   ctrl (which only the kitty keyboard protocol can tell apart). Which
+--   character shift gives depends on the layout, so 'chord' applies it only
+--   where no layout is needed: a letter with a case becomes its capital and
+--   drops shift. Any other character keeps shift, so a decoder that is given
+--   the unshifted key (kitty without its alternate keys) makes @C-S-/@, never
+--   @C-/@; the decoder gives the shifted character wherever the terminal
+--   reports it. A control character is its letter with ctrl: C-a is
+--   @\'a\'@ with ctrl, and C-Space is @\' \'@ with ctrl. 'chord' reaches
+--   this from a control character too, so no chord holds one.
 -- * 'Enter', 'Tab', 'Backspace' and 'Escape' are keys of their own, never
 --   C-m, C-i, C-? or C-[. A legacy terminal sends one byte for each pair, and
 --   the decoder reads it as the named key; a keymap that wants C-h binds it
@@ -48,6 +53,7 @@ module Tendril.Keymap
     emptyTrie,
     bind,
     keymap,
+    keymapWithConflicts,
     toBindings,
     Lookup (..),
     follow,
@@ -57,10 +63,11 @@ module Tendril.Keymap
 
     -- * Keymaps
     Keymap,
+    printableStarts,
   )
 where
 
-import Data.Char (isAsciiUpper, isControl, toLower)
+import Data.Char (GeneralCategory (Surrogate), generalCategory, isAsciiUpper, isControl, isUpper, toLower, toUpper)
 import Data.Map.Strict qualified as Map
 import Data.Text qualified as T
 import GHC.Records (HasField (..))
@@ -110,7 +117,8 @@ data Mods = Mods
     ctrl :: Bool,
     -- | Alt, Option or Meta
     alt :: Bool,
-    -- | Shift; never set on a 'Char' key's chord
+    -- | Shift; on a 'Char' key's chord, only with a character that has no
+    -- case, whose shifted form tendril cannot know
     shift :: Bool,
     -- | Super, Command or Windows
     super :: Bool
@@ -132,12 +140,15 @@ instance HasField "key" KeyChord Key where
 instance HasField "mods" KeyChord Mods where
   getField (KeyChord _ m) = m
 
--- | A key with modifiers, in normal form: shift is dropped from a 'Char'
--- key, whose character already says it, and a control character is its
--- named key ('Tab', 'Enter', 'Escape', 'Backspace') or its letter with ctrl.
+-- | A key with modifiers, in normal form: shift on a 'Char' key with a case
+-- is applied (the capital) and dropped, and kept on any other, and a control
+-- character is its named key ('Tab', 'Enter', 'Escape', 'Backspace') or its
+-- letter with ctrl.
 --
--- >>> chord noMods {shift = True} (Char '<') == key (Char '<')
+-- >>> chord noMods {shift = True} (Char 'a') == key (Char 'A')
 -- True
+-- >>> describe (chord noMods {shift = True, ctrl = True} (Char '/'))
+-- "C-S-/"
 -- >>> chord noMods (Char '\t') == key Tab
 -- True
 -- >>> chord noMods (Char '\SOH') == withCtrl (key (Char 'a'))
@@ -152,10 +163,12 @@ chord m = \case
     | c == '\NUL' -> ctrlChar ' '
     | c < '\ESC' -> ctrlChar (toEnum (fromEnum c + 0x60))
     | c < ' ' -> ctrlChar (toEnum (fromEnum c + 0x40))
-    | otherwise -> KeyChord (Char c) m {shift = False}
+    | m.shift && (isUpper c || toUpper c /= c) -> KeyChord (Char (toUpper c)) m {shift = False}
+    | otherwise -> KeyChord (Char c) m
   k -> KeyChord k m
   where
-    ctrlChar c = KeyChord (Char c) m {ctrl = True, shift = False}
+    -- A printable character, so this is the case above.
+    ctrlChar c = chord m {ctrl = True} (Char c)
 
 -- | A key with no modifier.
 key :: Key -> KeyChord
@@ -169,8 +182,8 @@ withCtrl (KeyChord k m) = chord m {ctrl = True} k
 withAlt :: KeyChord -> KeyChord
 withAlt (KeyChord k m) = chord m {alt = True} k
 
--- | The chord with shift held too; a 'Char' key's is unchanged, since its
--- character already says whether shift was held.
+-- | The chord with shift held too; a letter's is its capital, as 'chord'
+-- applies shift.
 withShift :: KeyChord -> KeyChord
 withShift (KeyChord k m) = chord m {shift = True} k
 
@@ -179,8 +192,10 @@ withSuper :: KeyChord -> KeyChord
 withSuper (KeyChord k m) = chord m {super = True} k
 
 -- | The text a chord types when no keymap binds it and no prefix is
--- pending: a 'Char' key's character, with neither ctrl, alt nor super held,
--- unless it is a control character (a C1 one, since 'chord' leaves no other).
+-- pending: a 'Char' key's character, with no modifier held, unless it is a
+-- control character (a C1 one, since 'chord' leaves no other) or a surrogate.
+-- A chord that still holds shift types nothing: its character is the key's
+-- unshifted one, not the one shift gives.
 -- The editor inserts it (§5.8), so no binding starts with a printable
 -- character; after a prefix one may be bound (@C-x u@).
 --
@@ -190,13 +205,18 @@ withSuper (KeyChord k m) = chord m {super = True} k
 -- Nothing
 typed :: KeyChord -> Maybe Text
 typed (KeyChord k m) = case k of
-  Char c | not (m.ctrl || m.alt || m.super || isControl c) -> Just (T.singleton c)
+  Char c
+    | not (m.ctrl || m.alt || m.shift || m.super || isControl c || generalCategory c == Surrogate) ->
+        Just (T.singleton c)
   _ -> Nothing
 
 -- | A chord in Emacs's notation: @C-@ for ctrl, @M-@ for alt, @S-@ for
 -- shift and @s-@ for super, in Emacs's order, then the key. Emacs reads
 -- @C-A@ as @C-a@, so an ASCII capital with ctrl is written with @S-@ and its
--- small letter.
+-- small letter. Enter, Tab, Backspace and Escape are @RET@, @TAB@, @DEL@
+-- and @ESC@ alone or with alt, which Emacs takes them to, and @\<return\>@,
+-- @\<tab\>@, @\<backspace\>@ and @\<escape\>@ with ctrl, shift or super,
+-- which it does not.
 --
 -- >>> describe (withAlt (withCtrl (key (Char '_'))))
 -- "C-M-_"
@@ -204,10 +224,13 @@ typed (KeyChord k m) = case k of
 -- "S-<left>"
 -- >>> describe (withCtrl (key (Char 'A')))
 -- "C-S-a"
+-- >>> map describe [withAlt (key Backspace), withCtrl (key Backspace)]
+-- ["M-DEL","C-<backspace>"]
 describe :: KeyChord -> Text
 describe (KeyChord k m) = foldMap prefix [(m.ctrl, "C-"), (m.alt, "M-"), (m.shift || folded, "S-"), (m.super, "s-")] <> name
   where
     prefix (held, p) = if held then p else ""
+    special plain named = if m.ctrl || m.shift || m.super then named else plain
     folded = case k of
       Char c -> m.ctrl && isAsciiUpper c
       _ -> False
@@ -215,10 +238,10 @@ describe (KeyChord k m) = foldMap prefix [(m.ctrl, "C-"), (m.alt, "M-"), (m.shif
       Char c | folded -> T.singleton (toLower c)
       Char ' ' -> "SPC"
       Char c -> T.singleton c
-      Enter -> "RET"
-      Tab -> "TAB"
-      Backspace -> "DEL"
-      Escape -> "ESC"
+      Enter -> special "RET" "<return>"
+      Tab -> special "TAB" "<tab>"
+      Backspace -> special "DEL" "<backspace>"
+      Escape -> special "ESC" "<escape>"
       InsertKey -> "<insert>"
       DeleteKey -> "<deletechar>"
       Home -> "<home>"
@@ -270,12 +293,15 @@ insert (k :| ks) v (Trie m) = (Trie (Map.insert k node m), map (k :|) gone)
 -- | A trie of bindings, each made in turn by 'bind', so a later one replaces
 -- an earlier one in its way; 'conflicts' says whether any did.
 keymap :: (Ord k) => [(NonEmpty k, v)] -> Trie k v
-keymap = fst . build
+keymap = fst . keymapWithConflicts
 
--- | The trie of 'keymap', and the 'conflicts': both come from one fold of
--- 'insert', so they cannot disagree on what a binding replaces.
-build :: (Ord k) => [(NonEmpty k, v)] -> (Trie k v, [Conflict k])
-build = second (concat . reverse) . foldl' step (emptyTrie, [])
+-- | 'keymap' and 'conflicts' from one fold of the bindings, for a caller
+-- that wants both: they cannot disagree on what a binding replaces.
+--
+-- >>> keymapWithConflicts [('a' :| "", 'x'), ('a' :| "b", 'y')]
+-- (Trie (fromList [('a',Branch (Trie (fromList [('b',Leaf 'y')])))]),[Conflict {earlier = 'a' :| "", later = 'a' :| "b"}])
+keymapWithConflicts :: (Ord k) => [(NonEmpty k, v)] -> (Trie k v, [Conflict k])
+keymapWithConflicts = second (concat . reverse) . foldl' step (emptyTrie, [])
   where
     -- The trie is forced at each step, so the fold leaves no chain of thunks.
     step (t, cs) (ks, v) = case insert ks v t of
@@ -345,7 +371,18 @@ data Conflict k = Conflict
 -- >>> map (.earlier) (conflicts [('a' :| "b", 'x'), ('a' :| "c", 'y'), ('a' :| "", 'z')])
 -- ['a' :| "b",'a' :| "c"]
 conflicts :: (Ord k) => [(NonEmpty k, v)] -> [Conflict k]
-conflicts = snd . build
+conflicts = snd . keymapWithConflicts
+
+-- | The bound sequences that start with a chord that types ('typed'), which
+-- D36 rules out: with no prefix pending, the binding would take the chord,
+-- and typing its character would run the command. The built-in keymaps have
+-- none, which a test holds; the user-file decoder (M6.2) reports them as it
+-- does conflicts.
+--
+-- >>> map (map describe . toList) (printableStarts (keymap [(key (Char 'a') :| [], ()), (withCtrl (key (Char 'a')) :| [], ())]))
+-- [["a"]]
+printableStarts :: Trie KeyChord v -> [NonEmpty KeyChord]
+printableStarts t = [ks | (ks@(k :| _), _) <- toBindings t, isJust (typed k)]
 
 -- | A keymap for modes of kind @m@: the mode is 'Command''s, whose role is
 -- nominal (D30), so no coercion moves a keymap between modes either.

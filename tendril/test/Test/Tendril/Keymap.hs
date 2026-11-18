@@ -6,10 +6,10 @@ module Test.Tendril.Keymap (tests) where
 
 import Data.Char (isControl)
 import Data.List (partition)
-import Tendril.Keymap (Conflict (..), Key (..), KeyChord, Lookup (..), Mods (..), bind, chord, conflicts, describe, emptyTrie, key, keymap, noMods, toBindings, typed, walk, withAlt, withCtrl, withShift, withSuper)
+import Tendril.Keymap (Conflict (..), Key (..), KeyChord, Lookup (..), Mods (..), bind, chord, conflicts, describe, emptyTrie, key, keymap, keymapWithConflicts, noMods, printableStarts, toBindings, typed, walk, withAlt, withCtrl, withShift, withSuper)
 import Test.QuickCheck (Gen, choose, conjoin, counterexample, forAll, listOf, (.&&.), (===))
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (assertBool, testCase, (@?=))
+import Test.Tasty.HUnit (assertBool, testCase, (@?), (@?=))
 import Test.Tasty.QuickCheck (testProperty)
 
 tests :: TestTree
@@ -52,13 +52,39 @@ tests =
         forAll genBindings $ \bs ->
           let seqs = zip [0 :: Int ..] (map fst bs)
            in null (conflicts bs) === and [not (clash a b) | (i, a) <- seqs, (j, b) <- seqs, i < j],
-      testCase "shift is dropped from a character key, kept on others" $ do
-        withShift (key (Char 'a')) @?= key (Char 'a')
+      testProperty "keymapWithConflicts is keymap and conflicts" $
+        forAll genBindings $ \bs ->
+          keymapWithConflicts bs === (keymap bs, conflicts bs),
+      testCase "shift is applied to a letter, and kept on other keys" $ do
+        withShift (key (Char 'A')) @?= key (Char 'A')
+        withShift (key (Char 'é')) @?= key (Char 'É')
+        (withShift (key (Char '1'))).mods.shift @?= True
         (withShift (key Tab)).mods.shift @?= True,
+      -- Regression 29 (DESIGN.md §5.4, D36): chord dropped shift from every
+      -- character key, so Ctrl+Shift+/ given as '/' with ctrl and shift was
+      -- C-/ (Undo, not Redo), and Shift+a given as 'a' typed "a".
+      testCase "regression 29: chord applies shift to a letter and keeps it on others" $ do
+        withShift (key (Char 'a')) @?= key (Char 'A')
+        typed (withShift (key (Char 'a'))) @?= Just "A"
+        withCtrl (withShift (key (Char '/'))) /= withCtrl (key (Char '/')) @? "C-S-/ is not C-/"
+        describe (withCtrl (withShift (key (Char '/')))) @?= "C-S-/"
+        typed (withShift (key (Char '/'))) @?= Nothing
+        chord shiftOnly (Char '\SOH') @?= withCtrl (key (Char 'A')),
       testCase "describe" $ do
         describe (withCtrl (key (Char ' '))) @?= "C-SPC"
         describe (withAlt (key Backspace)) @?= "M-DEL"
-        describe (withCtrl (withShift (key (F 5)))) @?= "C-S-<f5>",
+        describe (withCtrl (withShift (key (F 5)))) @?= "C-S-<f5>"
+        describe (key Enter) @?= "RET"
+        describe (withAlt (key Tab)) @?= "M-TAB",
+      -- Regression 30 (DESIGN.md §5.4): describe wrote Enter, Tab, Backspace
+      -- and Escape with ctrl, shift or super in their control characters'
+      -- names (C-DEL, S-RET), which Emacs reads as other keys.
+      testCase "regression 30: modified Enter, Tab, Backspace and Escape have their own names" $ do
+        describe (withCtrl (key Backspace)) @?= "C-<backspace>"
+        describe (withShift (key Enter)) @?= "S-<return>"
+        describe (withCtrl (key Tab)) @?= "C-<tab>"
+        describe (withSuper (key Escape)) @?= "s-<escape>"
+        describe (withAlt (withCtrl (key Backspace))) @?= "C-M-<backspace>",
       -- Regression 25 (DESIGN.md §5.4): describe put super before shift,
       -- where Emacs's order (A-C-H-M-S-s) puts shift first.
       testCase "regression 25: describe puts shift before super, as Emacs does" $
@@ -92,7 +118,22 @@ tests =
             ms <- allMods,
             let ch = chord ms (Char c)
           ],
-      testCase "typed: only a character key, with no ctrl, alt or super" $ do
+      -- Regression 31 (DESIGN.md §5.4): typed gave a surrogate as text, which
+      -- T.singleton replaces with U+FFFD.
+      testCase "regression 31: a surrogate types nothing" $ do
+        typed (key (Char '\xD800')) @?= Nothing
+        typed (key (Char '\xDFFF')) @?= Nothing,
+      testCase "printableStarts: the bindings that start with a chord that types" $
+        printableStarts
+          ( keymap
+              [ (key (Char 'a') :| [], 'x'),
+                (withCtrl (key (Char 'a')) :| [], 'y'),
+                (withCtrl (key (Char 'x')) :| [key (Char 'u')], 'z'),
+                (withShift (key (Char '1')) :| [], 'w')
+              ]
+          )
+          @?= [key (Char 'a') :| []],
+      testCase "typed: only a character key, with no modifier" $ do
         typed (key (Char 'é')) @?= Just "é"
         typed (withShift (key (Char 'A'))) @?= Just "A"
         typed (withAlt (key (Char 'a'))) @?= Nothing

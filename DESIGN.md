@@ -1147,28 +1147,38 @@ would infer a phantom one, and `coerce` would move a command between modes.
 holds that neither coercion nor binding a `'ViNormal` command into the Emacs keymap type-checks.
 
 - **A chord has one normal form**, which the decoder (§5.7) reaches from every encoding: a key that
-  types a character is that character with shift applied, and its chord never holds shift (`M-<`
-  is `'<'` with alt; Ctrl-Shift-A is `'A'` with ctrl, apart from C-a only under the kitty protocol).
+  types a character is that character with shift applied (`M-<` is `'<'` with alt; Ctrl-Shift-A is
+  `'A'` with ctrl, apart from C-a only under the kitty protocol). Which character shift gives
+  depends on the layout, which tendril cannot see, so `chord` applies it only to a letter with a
+  case (its capital, and shift is dropped) and keeps it on any other character: a decoder given the
+  unshifted key (kitty without its alternate keys) makes `C-S-/`, never `C-/`, and the decoder gives
+  the shifted character wherever the terminal reports it. A chord that still holds shift types
+  nothing.
   Enter, Tab, Backspace and Escape are keys of their own, never C-m, C-i, C-? or C-[, and Alt is a
   modifier, never an Escape before the key: the decoder reads a legacy byte as the named key and
   folds an ESC prefix into alt, and `chord` takes any other control character to its letter with
   ctrl, so no chord holds one. Many terminals send C-Backspace as C-h's byte, which reads as C-h:
   only a terminal that tells them apart (the kitty protocol) delivers C-Backspace. `describe`
-  writes a chord as Emacs reads it, so Ctrl-Shift-A is `C-S-a`, since Emacs reads `C-A` as `C-a`. The keys are logical (W3C `key` values), not ghostty's physical
+  writes a chord as Emacs reads it, so Ctrl-Shift-A is `C-S-a`, since Emacs reads `C-A` as `C-a`,
+  and Enter, Tab, Backspace and Escape are `RET`, `TAB`, `DEL` and `ESC` alone or with alt (which
+  Emacs translates them to) but `<return>`, `<tab>`, `<backspace>` and `<escape>` with ctrl, shift or
+  super (`C-<backspace>`, `S-<return>`), which it does not. The keys are logical (W3C `key` values), not ghostty's physical
   `code`s, which tendril cannot see (§2.6).
 - **No bound sequence is a prefix of another**, as in Emacs, so a chord either completes a binding
   or waits for the next, with no timeout. Lookup is three-way (`Bound`, `Prefix`, `Unbound`).
   Binding replaces what is in the way, and `conflicts` lists, as values, each binding a later one
-  replaced, from the same fold that builds the trie, so it is empty exactly when no two clash; a test holds
+  replaced, from the same fold that builds the trie (`keymapWithConflicts` gives both from one fold), so it is empty exactly when no two clash; a test holds
   that the built-in keymaps have none, and the user-file decoder (M6.2) reports them with its other
   errors.
 - **No binding starts with a printable character.** With no prefix pending, a chord no binding
   takes types its character if it holds neither ctrl, alt nor super (`typed`), and the editor
-  inserts it (§5.8). After a prefix one may be bound (`C-x u`).
+  inserts it (§5.8). After a prefix one may be bound (`C-x u`). `printableStarts` lists, as values,
+  the bindings that break this rule: the built-in keymaps have none, which a test holds, and the
+  user-file decoder (M6.2) reports them with conflicts.
 - **The Emacs keymap** is Emacs's bindings for the commands that exist, with readline's C-u (tendril
   has no prefix argument), shift-select, Emacs 28's undo-redo on `C-?` and `C-M-_` (a legacy
   terminal sends `C-?` as DEL, so there `C-M-_` is the one), `C-<backspace>` and `M-DEL` for a
-  word's kill (where `C-<backspace>` arrives as C-h, only `M-DEL`), M-RET, S-RET and C-j for `ForceNewline`, `C-x C-e`
+  word's kill (where `C-<backspace>` arrives as C-h, only `M-DEL`), M-RET, `S-<return>` and C-j for `ForceNewline`, `C-x C-e`
   for `$EDITOR`, and Helix's `M-<up>`/`M-<down>` for structural selection. Up and C-p are `Move
   LineUp`, Down and C-n `Move LineDown`; on the first line, or the last, where they do not move, the
   editor recalls history instead (M2.11), as prompt_toolkit and reedline do, and M-p and M-n always
@@ -2868,7 +2878,7 @@ input; a per-session toggle hides them.
 | D33 | tendril's grapheme clusters are libghostty-vt's tailoring of UAX #29 (an emoji modifier continues only a modifier base; a stray variation selector is invisible to the rules), not UAX #29's own, since the terminal decides what it draws whole (M2.2) | §5.3 |
 | D34 | The editor's positions (cursor, anchor) are code point offsets kept on cluster boundaries, not grapheme offsets. A boundary near one is found by segmenting from the nearest code point after which the segmenter's state does not depend on the text before it, so a motion or edit reads the text near it, never the whole buffer. The buffer's rope is built in chunks of at most 4,096 code points, since `text-rope` splits within a chunk by walking it. Answers D-deferred-13 (M2.4) | §5.3, §5.4, §12.3 |
 | D35 | Undo is a tree of snapshots: each step keeps the text and cursor before its first edit and after its last, sharing the persistent rope, so undo and redo restore exactly. A command changed the text when `EditState`'s `version` moved, which the editor's revision also follows. Typing and single-cluster deletions coalesce within a second, unless anything came between; time is an argument, since tendril has no clock (M2.5) | §5.4, §5.5 |
-| D36 | A key chord has one normal form (a character key's chord is the character with shift applied and never holds shift; Enter, Tab, Backspace and Escape are never control characters; Alt is never an ESC prefix), and no bound sequence is a prefix of another, so lookup needs no timeout and clashes are values (`conflicts`). No binding starts with a printable character, which the editor inserts (M2.6) | §5.4 |
+| D36 | A key chord has one normal form (a character key's chord is the character with shift applied; shift is applied by `chord` only to a letter with a case and kept on any other character, whose shifted form depends on the layout; Enter, Tab, Backspace and Escape are never control characters; Alt is never an ESC prefix), and no bound sequence is a prefix of another, so lookup needs no timeout and clashes are values (`conflicts`). No binding starts with a printable character, which the editor inserts, and `printableStarts` reports one that does (M2.6) | §5.4 |
 
 ### 15.2 Deferred
 
