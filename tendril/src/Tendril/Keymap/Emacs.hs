@@ -98,17 +98,19 @@ bindings =
              (m 'd', Kill NextWord),
              (withCtrl (key DeleteKey), Kill NextWord),
              (withAlt (key Backspace), Kill PrevWord),
+             -- Many terminals send C-<backspace> as C-h, which deletes a
+             -- cluster there; M-DEL kills a word in any terminal.
              (withCtrl (key Backspace), Kill PrevWord),
              (c 'y', Yank),
              (m 'y', YankPop)
            ]
-        -- Undo, and Emacs 28's undo-redo on C-M-_; and on M-_ for its C-?,
-        -- which a legacy terminal sends as DEL. A legacy terminal sends C-/
-        -- as C-_.
+        -- Undo, and Emacs 28's undo-redo on C-? and C-M-_. A legacy terminal
+        -- sends C-/ as C-_, and C-? as DEL ('Backspace'), so there C-M-_ is
+        -- the redo.
         <> [ (c '/', Undo),
              (c '_', Undo),
-             (withAlt (c '_'), Redo),
-             (m '_', Redo)
+             (c '?', Redo),
+             (withAlt (c '_'), Redo)
            ]
         -- The input, and history
         <> [ (key Enter, AcceptOrNewline),

@@ -269,8 +269,8 @@ Exit: decoder roundtrip and render-diff properties pass; `tendril-demo` usable a
   its modifiers in one normal form, which M2.7's decoder must reach: a character key's chord is the
   character with shift applied and never holds shift, Enter/Tab/Backspace/Escape are never control
   characters, and Alt is never an ESC prefix (D36). No bound sequence is a prefix of another, so
-  lookup (`Bound`, `Prefix`, `Unbound`) needs no timeout, and `conflicts` returns clashes as values
-  for M6.2's decoder. `Keymap app m` is a synonym over `Command`'s nominal mode; tests hold that
+  lookup (`Bound`, `Prefix`, `Unbound`) needs no timeout, and `conflicts` returns, as values for
+  M6.2's decoder, each binding a later one replaced. `Keymap app m` is a synonym over `Command`'s nominal mode; tests hold that
   neither a coercion nor binding a `'ViNormal` command into the Emacs keymap type-checks. A
   printable chord starts no binding: `typed` gives the text the editor inserts for it when no
   prefix is pending. The Emacs keymap
@@ -285,6 +285,8 @@ Exit: decoder roundtrip and render-diff properties pass; `tendril-demo` usable a
 
 - `Tendril.Term.Input`: incremental pure decoder — legacy with ESC timeout, CSI-u / kitty with all
   flags, modifyOtherKeys, bracketed paste, SGR and SGR-pixel mouse, focus, terminal replies (§5.7).
+- A legacy 0x08 is C-h, never C-Backspace, though many terminals send C-Backspace as it; and 0x7F is
+  Backspace, never C-? (D36).
 - Unit tests per encoding.
 
 ### M2.8 Decoder roundtrip

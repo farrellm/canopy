@@ -137,23 +137,36 @@ Written as changes land, not at release (DESIGN.md §2.9).
 - Keymaps (M2.6, DESIGN.md §5.4, D36): `Tendril.Keymap` has `KeyChord`, a logical key and its
   modifiers in one normal form (a character key's chord holds the character typed and never shift),
   and `Trie`, where no bound sequence is a prefix of another: `follow` and `walk` find `Bound`,
-  `Prefix` or `Unbound`, `bind` replaces what is in its way, and `conflicts` lists every clash.
+  `Prefix` or `Unbound`, `bind` replaces what is in its way, and `conflicts` lists each binding a later one replaced.
   `typed` is the text a chord no binding takes types. `Keymap app m` is a trie of `Command app m`,
   so its mode is checked at compile time and no coercion changes it. `Tendril.Keymap.Emacs.emacs`
-  binds Emacs's keys (readline's C-u, shift-select, Emacs 28's undo-redo on `C-M-_` and `M-_`,
+  binds Emacs's keys (readline's C-u, shift-select, Emacs 28's undo-redo on `C-?` and `C-M-_`,
   `C-x C-e`) for every command so far; Up and C-p move a line, and the editor will recall history
   where they cannot, and end input on C-d with an empty input.
   Properties: a binding is found where it was made, its prefixes wait for more, and `conflicts` is
-  the naive pairwise check. Tests: the Emacs keymap has no conflicts and no binding that starts
+  what a list model of the live bindings drops. Tests: the Emacs keymap has no conflicts and no binding that starts
   with a printable chord, and binding a vi normal-mode command into it does not type-check.
-- Fixed in review of M2.6, with a numbered regression case:
+- Fixed in review of M2.6, each with a numbered regression case:
   - `describe` put super before shift (`s-S-<left>`), where Emacs's order puts shift first
     (`S-s-<left>`) (regression 25).
+  - `describe` wrote Ctrl-Shift-A as `C-A`, which Emacs reads as `C-a`. It now writes `C-S-a`
+    (regression 26).
+  - `chord` kept a control character, so `key (Char '\t')` was not `key Tab` and `typed` gave it
+    as text. `chord` now takes Tab, CR, ESC and DEL to their keys and any other C0 character to its
+    letter with ctrl, and `typed` gives no control character (regression 27).
+  - `M-_` was bound to `Redo` for Emacs's `C-?`, but Emacs 28 binds undo-redo to `C-?` and `C-M-_`
+    only. `M-_` is unbound and `C-?` is `Redo` (regression 28).
 - Also changed in that review:
-  - The `conflicts` property's oracle copied the implementation, so it could not fail. It now
-    checks that a pair conflicts exactly when a keymap of just the two keeps fewer than two.
+  - `conflicts` comes from the fold that builds the trie, so it cannot disagree with `bind`: it
+    lists each binding a later one replaced, not every clashing pair, and a binding already
+    replaced is not listed again. It is still empty exactly when no two bindings clash.
+  - The `conflicts` property's oracle copied the implementation, so it could not fail. It is now a
+    list model of the live bindings, with properties that each binding is in the keymap or in
+    `conflicts` once, and that `conflicts` is empty exactly when no two sequences clash.
+  - Many terminals send C-Backspace as C-h's byte, so there `C-<backspace>` deletes a cluster, and
+    `M-DEL` is the word's kill. DESIGN.md §5.4 and PLAN.md's M2.7 record it.
   - The Emacs keymap's test compares its bindings with the list, not just their count.
-  - Every `Key` constructor has Haddock, and `conflicts` converts each sequence to a list once.
+  - Every `Key` constructor has Haddock.
 
 ### M1: ghostty
 

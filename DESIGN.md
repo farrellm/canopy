@@ -1151,19 +1151,24 @@ holds that neither coercion nor binding a `'ViNormal` command into the Emacs key
   is `'<'` with alt; Ctrl-Shift-A is `'A'` with ctrl, apart from C-a only under the kitty protocol).
   Enter, Tab, Backspace and Escape are keys of their own, never C-m, C-i, C-? or C-[, and Alt is a
   modifier, never an Escape before the key: the decoder reads a legacy byte as the named key and
-  folds an ESC prefix into alt. The keys are logical (W3C `key` values), not ghostty's physical
+  folds an ESC prefix into alt, and `chord` takes any other control character to its letter with
+  ctrl, so no chord holds one. Many terminals send C-Backspace as C-h's byte, which reads as C-h:
+  only a terminal that tells them apart (the kitty protocol) delivers C-Backspace. `describe`
+  writes a chord as Emacs reads it, so Ctrl-Shift-A is `C-S-a`, since Emacs reads `C-A` as `C-a`. The keys are logical (W3C `key` values), not ghostty's physical
   `code`s, which tendril cannot see (§2.6).
 - **No bound sequence is a prefix of another**, as in Emacs, so a chord either completes a binding
   or waits for the next, with no timeout. Lookup is three-way (`Bound`, `Prefix`, `Unbound`).
-  Binding replaces what is in the way, and `conflicts` lists every clash as a value; a test holds
+  Binding replaces what is in the way, and `conflicts` lists, as values, each binding a later one
+  replaced, from the same fold that builds the trie, so it is empty exactly when no two clash; a test holds
   that the built-in keymaps have none, and the user-file decoder (M6.2) reports them with its other
   errors.
 - **No binding starts with a printable character.** With no prefix pending, a chord no binding
   takes types its character if it holds neither ctrl, alt nor super (`typed`), and the editor
   inserts it (§5.8). After a prefix one may be bound (`C-x u`).
 - **The Emacs keymap** is Emacs's bindings for the commands that exist, with readline's C-u (tendril
-  has no prefix argument), shift-select, Emacs 28's undo-redo on `C-M-_` (and on `M-_`, for its
-  `C-?`, which a legacy terminal sends as DEL), M-RET, S-RET and C-j for `ForceNewline`, `C-x C-e`
+  has no prefix argument), shift-select, Emacs 28's undo-redo on `C-?` and `C-M-_` (a legacy
+  terminal sends `C-?` as DEL, so there `C-M-_` is the one), `C-<backspace>` and `M-DEL` for a
+  word's kill (where `C-<backspace>` arrives as C-h, only `M-DEL`), M-RET, S-RET and C-j for `ForceNewline`, `C-x C-e`
   for `$EDITOR`, and Helix's `M-<up>`/`M-<down>` for structural selection. Up and C-p are `Move
   LineUp`, Down and C-n `Move LineDown`; on the first line, or the last, where they do not move, the
   editor recalls history instead (M2.11), as prompt_toolkit and reedline do, and M-p and M-n always

@@ -43,6 +43,7 @@ tests =
                 ([c '_'], Undo),
                 ([c 'x', key (Char 'u')], Undo),
                 ([withAlt (c '_')], Redo),
+                ([c '?'], Redo),
                 ([key Enter], AcceptOrNewline),
                 ([withAlt (key Enter)], ForceNewline),
                 ([c 'x', c 'e'], EditExternal)
@@ -53,7 +54,12 @@ tests =
           Prefix _ -> pass
           other -> assertFailure (show other),
       testCase "a printable character is not bound" $
-        walk [key (Char 'a')] (emacs @()) @?= Unbound
+        walk [key (Char 'a')] (emacs @()) @?= Unbound,
+      -- Regression 28 (DESIGN.md §5.4): M-_ was bound to Redo for Emacs's
+      -- C-?, but Emacs binds undo-redo to C-? and C-M-_ only.
+      testCase "regression 28: undo-redo is on C-? and C-M-_, not M-_" $ do
+        walk [c '?'] (emacs @()) @?= Bound Redo
+        walk [m '_'] (emacs @()) @?= Unbound
     ]
   where
     describeAll = map describe
