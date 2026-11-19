@@ -8,6 +8,7 @@ import Test.Tendril.Edit.Mode qualified
 import Test.Tendril.Edit.Undo qualified
 import Test.Tendril.Keymap qualified
 import Test.Tendril.Keymap.Emacs qualified
+import Test.Tendril.Render qualified
 import Test.Tendril.Term.Input qualified
 import Test.Tendril.Term.Roundtrip qualified
 import Test.Tendril.Text.Buffer qualified
@@ -36,5 +37,6 @@ main =
         Test.Tendril.Keymap.tests,
         Test.Tendril.Keymap.Emacs.tests,
         Test.Tendril.Term.Input.tests,
-        Test.Tendril.Term.Roundtrip.tests
+        Test.Tendril.Term.Roundtrip.tests,
+        Test.Tendril.Render.tests
       ]

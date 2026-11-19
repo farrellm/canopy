@@ -1326,6 +1326,39 @@ data Surface = Surface
 
 - `Doc` is a styled layout language (rows of styled spans, boxes for popups, a cursor position).
   `Layout` turns it into a `Grid` of cells at the current width.
+- **A grid is what the host shows** (D38, M2.9). A `Doc`'s lines are runs of text in a `Style`
+  (colours as the host's default, a palette entry or RGB, never resolved by tendril; the SGR
+  attributes; an OSC 8 link), with a cursor mark among them, and boxes anchored below the cursor
+  or at a cell, which do not wrap and move left to fit. `Layout` measures each line whole, across
+  its runs, by `Tendril.Text.Width.pieces`: what the host draws in one cell or two, in the width
+  mode it is in. A wide piece that does not fit the last column leaves it blank and wraps, as a
+  terminal does; the cursor is where the text after it starts, so a cursor after a full row is at
+  the start of a row of its own. A tab moves to the next multiple of eight; a newline in a run
+  breaks the line; other C0 controls and DEL are drawn as `^X`, C1 as `<U+0085>`, and the rest of
+  what the host would act on (zero-width space, separators, bidi controls) is removed, so no text
+  reaches the host as a control. `Grid` is abstract and `grid` is its only constructor, which
+  makes blank, keeping its style, whatever the host would draw otherwise than the cell says: a
+  control in a glyph, two pieces, a width not the cell's, a wide glyph without its tail, a join to
+  the cell before it. So a grid painted on the host is the grid, cell for cell, which a property
+  holds (§11.2).
+- **The host's `print` is not its segmenter** (§14.2). Reading libghostty-vt 1.0's
+  `Terminal.print`, and what the property found: in grapheme-cluster mode a code point below U+0100
+  never joins the cell before (a `Prepend` and the `x` after it are two cells, though one cluster);
+  a cluster's leading zero-width code points have no cell and are dropped; nothing joins at column
+  0, so one column wide a cluster keeps only its first code point; a cluster is placed by its width
+  as it arrives, so one that is wide until a VS15 makes it narrow wraps from the last column; a
+  stray VS15 or VS16 is kept in no cell. Without the mode, zero-width code points join the cell
+  before, but a variation selector only one whose first code point is `Extended_Pictographic` and
+  not `Emoji_Modifier_Base`. And a glyph joins to the cell before it, a space included (a spacing
+  mark after a blank), whenever the two segment as one: so `grid` checks each glyph against the
+  one before, which matters where cells meet that were not laid out together (a box's edge, a tab's
+  blanks). `pieces`, `peakWidth` and `grid` carry these rules; `textWidth` and `clusterWidth` stay
+  the segmenter's, which the width oracle checks (§11.2).
+- `Output`'s `paint` draws a grid whole from the host's cursor, at the first column of the region's
+  first row: each row's cells with an SGR only where the style changes, OSC 8 where the link does
+  (its URI's controls percent-encoded), trailing blank plain cells erased with `EL` rather than
+  written (never from the last column, which a pending wrap would erase), rows joined by CR LF, and
+  the cursor moved to the grid's and shown, or hidden. M2.10 adds the diff and 2026 around it.
 - `Diff` compares the new grid with the previous one and emits the minimal VT; `Output` emits it
   wrapped in synchronized-output mode (2026) when the host supports it, so the user never sees a half
   frame.
@@ -2539,7 +2572,14 @@ A complete terminal emulator available as a library is a test asset as much as a
 - **Rendering goldens are screens, not byte streams.** Tendril's emitted VT is fed into a headless
   libghostty terminal of the same size, and the golden is the formatter's plain-text screen plus a
   style dump. A golden of bytes would fail on every harmless reordering of escapes; a golden of the
-  resulting screen fails only when what the user sees changes.
+  resulting screen fails only when what the user sees changes. The dump also maps each row's cells
+  (narrow, wide and tail, blank), which plain text cannot show, and the cursor
+  (`Test.Tendril.Render.Host`, M2.9).
+- **A painted grid is what the host shows**, as a property: a generated document (styles, links,
+  controls, tabs, wide and hard clusters, boxes, cursors), laid out at a generated width in either
+  width mode and painted on a fresh terminal, reads back as the grid, cell for cell, and its cursor.
+  It found every rule of libghostty-vt's `print` in §5.6 (M2.9); a run of 600,000 cases then
+  passed, and each CI run checks 10,000.
 - **Diff correctness, as a property**: for random pairs of grids, rendering A, then the diff A→B,
   produces the same ghostty screen as rendering B from scratch.
 - **Input decoder roundtrip**: random key and mouse events under random keyboard-protocol modes are
@@ -2856,6 +2896,7 @@ reading the pinned sources. A ✗ changed the design, in the section named.
 | `text-rope` keeps UTF-16 metrics | ✓ `Data.Text.Mixed.Rope` | §5.3 |
 | `text-rope` splits a large text in time logarithmic in its length | ✗ 2026-11-15, 0.3: `fromText` makes one chunk of the whole text, and a split walks its chunk to the offset, so an edit near the end of a 1 MiB paste took up to 8 ms; tendril builds its ropes in chunks of 4,096 code points (D34, M2.4) | §5.3, §12.3 |
 | libghostty-vt segments grapheme clusters by UAX #29 | ✗ 2026-11-15, 1.0.0: two tailorings (an emoji modifier continues only a modifier base; a stray VS15 or VS16 is invisible to the rules), which tendril copies; a probe agreed on a million generated texts with controls left out, whose clusters the header leaves unspecified (M2.2) | §5.3, D33 |
+| libghostty-vt's `print` draws a text's grapheme clusters, as its segmenter finds them, in cells of their widths | ✗ 2026-11-19, 1.0.0, by its source and the painted-grid property: a code point below U+0100 never joins the cell before; a cluster's leading zero-width code points are dropped; one column wide nothing joins; a cluster wide until a VS15 wraps from the last column; a stray variation selector is kept in no cell, and without mode 2027 one after anything but a non-modifier-base pictograph; a glyph joins any cell before it it segments with, a blank's space included. tendril's layout and grid model each (M2.9) | §5.6, D38 |
 | `unicode-data` provides grapheme-break and width data | ✗ neither, in 0.9.0, and nothing else on Hackage does without ICU; tendril generates its own tables | §5.3 |
 | libghostty-vt's encoders can produce what tendril's decoder reads, so they can be its oracle | ✓ 2026-11-18, 1.0.0: every key encoding the decoder reads (legacy, SS3 and the keypad, modifyOtherKeys, kitty under all 32 flag sets), and SGR and SGR-pixel mouse reports, except media keys, the context-menu key under kitty and buttons 10 and 11, which it never sends (M2.8) | §5.7, §11.2 |
 | unicode.org's UCD files at libghostty-vt's Unicode version are the ones it builds from, and a width rule computed from them agrees with `codepointWidth` | ✓ 2026-11-14, libghostty-vt 1.0.0: its uucode's 18.0.0 copies have the sums the generator pins, and a probe of the generated `width` against `codepointWidth` agreed on all 1,114,112 code points (M2.1; `tendril-test` checks every code point, M2.3) | §5.3 |
@@ -2935,6 +2976,7 @@ input; a per-session toggle hides them.
 | D35 | Undo is a tree of snapshots: each step keeps the text and cursor before its first edit and after its last, sharing the persistent rope, so undo and redo restore exactly. A command changed the text when `EditState`'s `version` moved, which the editor's revision also follows. Typing and single-cluster deletions coalesce within a second, unless anything came between; time is an argument, since tendril has no clock (M2.5) | §5.4, §5.5 |
 | D36 | A key chord has one normal form (a character key's chord is the character with shift applied; shift is applied by `chord` only to a letter with a case and kept on any other character, whose shifted form depends on the layout; Enter, Tab, Backspace and Escape are never control characters; Alt is never an ESC prefix), and no bound sequence is a prefix of another, so lookup needs no timeout and clashes are values (`conflicts`). No binding starts with a printable character, which the editor inserts, and `printableStarts` reports one that does (M2.6) | §5.4 |
 | D37 | The host-input decoder is pure and has no clock: it holds bytes that may start a longer sequence and says so (`waiting`), and the driver calls `expire` after its escape timeout, which reads them as keys (ESC is Escape, ESC before a cut sequence is alt). What bytes cannot settle the caller does (`expectCursorPosition` for `CSI 1;m R`, `setPixelMouse`), and what it cannot read is `Unknown` with its bytes, never dropped (M2.7) | §5.7 |
+| D38 | A laid-out `Grid` is what the host shows, cell for cell: it is abstract, made only by `grid`, which blanks whatever the host would draw otherwise, and the layout measures text by what libghostty-vt's `print` draws (`pieces`), which is not its segmenter's clusters. A property paints generated documents on libghostty and reads them back (M2.9) | §5.6, §11.2 |
 
 ### 15.2 Deferred
 

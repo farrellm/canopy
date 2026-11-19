@@ -1,0 +1,8 @@
+screen
+> print(1)
+cells
+0 1.11111111
+styles
+0 0-1 bold fg=2
+cursor
+0 10

@@ -1,0 +1,12 @@
+screen
+earlier output
+more
+>>> x = 1
+cells
+0 1111111.111111
+1 1111
+2 111.1.1.1
+styles
+2 0-3 bold fg=2
+cursor
+2 8

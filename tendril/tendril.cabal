@@ -41,7 +41,12 @@ library
     Tendril.Edit.Undo
     Tendril.Keymap
     Tendril.Keymap.Emacs
+    Tendril.Render.Doc
+    Tendril.Render.Grid
+    Tendril.Render.Layout
+    Tendril.Render.Style
     Tendril.Term.Input
+    Tendril.Term.Output
     Tendril.Text.Buffer
     Tendril.Text.Grapheme
     Tendril.Text.Unicode.Tables
@@ -95,6 +100,8 @@ test-suite tendril-test
     Test.Tendril.Edit.Undo
     Test.Tendril.Keymap
     Test.Tendril.Keymap.Emacs
+    Test.Tendril.Render
+    Test.Tendril.Render.Host
     Test.Tendril.Term.Input
     Test.Tendril.Term.Roundtrip
     Test.Tendril.Text.Buffer
@@ -115,11 +122,13 @@ test-suite tendril-test
     , ghostty-effectful
     , QuickCheck ^>=2.19
     , tasty ^>=1.5
+    , tasty-golden ^>=2.3.5
     , tasty-hunit ^>=0.10.2
     , tasty-quickcheck ^>=0.11.1
     , tendril
     , text ^>=2.1
     , text-rope ^>=0.3
+    , vector ^>=0.13
 
   mixins:
     base hiding (Prelude),
