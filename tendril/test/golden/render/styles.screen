@@ -1,0 +1,40 @@
+screen
+bold faint italic
+blink inv hid strike over
+single double curly dotted das
+hed
+p1 p208/4 rgb
+red curl p3
+link after bold link
+cells
+0 1111.11111.111111
+1 11111.111.111.111111.1111
+2 111111.111111.11111.111111.111
+3 111
+4 11.111111.111
+5 111.1111.11
+6 1111.11111.1111.1111
+styles
+0 0-3 bold
+0 5-9 faint
+0 11-16 italic
+1 0-4 blink
+1 6-8 inverse
+1 10-12 invisible
+1 14-19 strike
+1 21-24 overline
+2 0-5 underline=single
+2 7-12 underline=double
+2 14-18 underline=curly
+2 20-25 underline=dotted
+2 27-29 underline=dashed
+3 0-2 underline=dashed
+4 0-1 fg=1
+4 3-8 fg=208 bg=4
+4 10-12 fg=1,2,3 bg=250,251,252
+5 0-7 underline=curly ul=255,0,0
+5 9-10 underline=single ul=3
+6 0-3 link=https://example.com/
+6 11-19 bold link=https://example.com/
+cursor
+hidden

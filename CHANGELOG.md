@@ -249,6 +249,25 @@ Written as changes land, not at release (DESIGN.md §2.9).
     quadratic time. It is now held as a string sequence after an Escape (regression 43).
 - Also changed in that review: the decoder builds alt and shift chords with `Tendril.Keymap`'s
   `withAlt` and `withShift`, and SS3 reads its modifier with the CSI parameters' `decimal`.
+- T4's layout and its screen goldens (M2.9, DESIGN.md §5.6, §11.2, D38): `Tendril.Render.Style`
+  (colours as the host's default, a palette entry or RGB; the SGR attributes; an OSC 8 link),
+  `.Doc` (lines of styled runs with a cursor mark, and boxes anchored below the cursor or at a
+  cell), `.Grid` (abstract rows of cells, made only by `grid`, which blanks whatever the host would
+  draw otherwise) and `.Layout` (wrapping as a terminal does, tabs, controls drawn as `^X` and
+  never sent, boxes moved left to fit). `Tendril.Term.Output`'s `paint` draws a grid whole; the
+  diff and synchronized output are M2.10's. `Tendril.Text.Width` gains `pieces` and `peakWidth`.
+- `tendril-test` paints documents on a headless libghostty-vt terminal: ten goldens of the screen,
+  each row's cells, the styled runs and the cursor (prompt, output above the region, every style,
+  wrapping, clusters with and without mode 2027, controls, a menu, no cursor, an empty document),
+  and a property that a generated document, laid out at any width in either mode and painted,
+  reads back as its grid cell for cell, with its cursor (10,000 cases a run; 600,000 passed).
+- The property found that libghostty-vt 1.0's `print` is not its segmenter (§14.2), confirmed in
+  its source; the layout and `grid` now model each rule: a code point below U+0100 never joins the
+  cell before; a cluster's leading zero-width code points are dropped; one column wide nothing
+  joins; a cluster wide until a VS15 makes it narrow wraps from the last column; a stray variation
+  selector is in no cell (without mode 2027, any not after a pictograph that is not a modifier
+  base); and a glyph joins the cell before it, a blank's space included, when the two segment as
+  one.
 
 ### M1: ghostty
 

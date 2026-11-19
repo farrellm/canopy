@@ -6,7 +6,7 @@ lists of them): it builds with
 commit if it changes a decision (§2.9). Section references (§) are to DESIGN.md.
 
 M0 is done (PR #1), and M1 (PRs #2–#13; the performance work of D18–D21 followed in PR #30). M2 has
-started: M2.1–M2.8 are done. Steps
+started: M2.1–M2.9 are done. Steps
 are numbered `M<n>.<k>`
 and are in dependency order within a milestone.
 
@@ -327,12 +327,23 @@ Exit: decoder roundtrip and render-diff properties pass; `tendril-demo` usable a
 - `Tendril.Render.Style`, `.Doc`, `.Layout`, `.Grid`.
 - Golden harness: emitted VT fed into a headless libghostty terminal; golden = plain screen + style
   dump (§11.2).
+- The goldens need tendril's own VT, so `Tendril.Term.Output` starts here with `paint`, a grid drawn
+  whole; M2.10 adds the diff and 2026. A `Grid` is abstract and is what the host shows (D38): `grid`
+  blanks whatever the host would draw otherwise, and the layout measures text by `pieces`, what
+  libghostty-vt's `print` draws. Beyond the ten goldens (which also map each row's cells, since
+  plain text cannot show widths), a property paints generated documents at any width in either
+  width mode and reads them back cell for cell. It found that `print` is not the segmenter: a code
+  point below U+0100 never joins, a cluster's leading zero-width code points are dropped, one column
+  wide nothing joins, a cluster wide until a VS15 wraps from the last column, a stray variation
+  selector is in no cell (with a different rule without 2027), and a glyph joins a blank's space
+  before it (DESIGN.md §5.6, §14.2). **Done.**
 
 ### M2.10 Diff and output
 
 - `Tendril.Render.Diff`, `Tendril.Term.Output` (synchronized output 2026 when supported).
 - Property: render A, then diff A→B, equals render B from scratch, as ghostty screens.
-  **The other half of M2's exit condition.**
+  **The other half of M2's exit condition.** M2.9's `paint` is the render from scratch, and its
+  property's generators and `Test.Tendril.Render.Host` serve this one.
 
 ### M2.11 Editor core
 
